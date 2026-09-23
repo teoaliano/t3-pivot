@@ -14,6 +14,12 @@ serves a page, so a slow first build never shows a connection error.
 Each checkout, whether a worktree or the project's main folder, gets its own block of ten ports
 starting at 11000, and keeps it. A tab you left open still points at the same checkout tomorrow.
 
+## From the mobile app
+
+In a thread, open the terminal menu and choose **Dev servers**. On Android, tap the server
+button in the thread header. You can start, stop and pin the checkout's dev servers there. The
+phone cannot open the preview of a server running on your computer.
+
 ## Use the assigned port
 
 The script receives its ports as environment variables:
