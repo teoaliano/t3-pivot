@@ -9,8 +9,12 @@ import { resolveManagedScriptTarget } from "../../../managedProcess/resolveScrip
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import { ManagedProcessToolkit, type StartServerResult } from "./tools.ts";
 
-/** Long enough for most first compiles, short enough not to stall the agent's turn. */
-const READY_WAIT = Duration.minutes(1);
+/**
+ * Shorter than the 60 seconds after which agent harnesses such as Claude Code
+ * abandon a tool call. At 60 the agent got "operation timed out" instead of
+ * the starting answer.
+ */
+const READY_WAIT = Duration.seconds(30);
 
 export const ManagedProcessToolkitHandlersLive = ManagedProcessToolkit.toLayer(
   Effect.succeed(

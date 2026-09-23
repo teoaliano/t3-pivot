@@ -205,11 +205,11 @@ describe("managed process toolkit handlers", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("answers starting when the server is still compiling after a minute", () =>
+  it.effect("answers starting when the server is still compiling after 30 seconds", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({ outcome: "compiling" });
       const pending = yield* harness.call({}).pipe(Effect.forkChild);
-      yield* TestClock.adjust("1 minute");
+      yield* TestClock.adjust("30 seconds");
       const result = yield* Fiber.join(pending);
 
       expect(result.status).toBe("starting");

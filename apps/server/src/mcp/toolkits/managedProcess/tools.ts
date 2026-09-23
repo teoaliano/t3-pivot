@@ -34,7 +34,7 @@ export const StartServerResult = Schema.Struct({
   url: Schema.String,
   status: ManagedProcessStatus.annotate({
     description:
-      "running once the port serves a page. starting when it is still compiling after a minute: call this tool again to wait longer.",
+      "running once the port serves a page. starting when it is still compiling after 30 seconds: call this tool again to wait longer.",
   }),
   reallocated: Schema.Boolean.annotate({
     description:
@@ -54,7 +54,7 @@ export const StartServerError = Schema.Union([
 
 const StartServerTool = Tool.make("preview_start_server", {
   description:
-    "Start this checkout's dev server from a project script, in a terminal, on the port reserved for this checkout. Prefer this to running the dev command in your own shell: the server gets a port no other checkout can take, and it is stopped once nobody has used it for a while. Calling it again while the server runs returns the same server. It waits up to a minute for the server to serve a page, and fails if the server exits first. Only tell the user the server is up when the status is running.",
+    "Start this checkout's dev server from a project script, in a terminal, on the port reserved for this checkout. Prefer this to running the dev command in your own shell: the server gets a port no other checkout can take, and it is stopped once nobody has used it for a while. Calling it again while the server runs returns the same server. It waits up to 30 seconds for the server to serve a page, and fails if the server exits first. Only tell the user the server is up when the status is running.",
   parameters: StartServerInput,
   success: StartServerResult,
   failure: StartServerError,
