@@ -16,6 +16,7 @@
 import * as NodeCrypto from "node:crypto";
 
 import {
+  ManagedProcessDependenciesMissingError,
   ManagedProcessPortOccupiedError,
   ManagedProcessPortsExhaustedError,
   ManagedProcessStartError,
@@ -60,7 +61,7 @@ import {
   type PortRange,
   type PortReservations,
 } from "./PortReservations.ts";
-import { readDetectedDevScript } from "./detectDevScript.ts";
+import { readDetectedDevScript, readMissingInstallCommand } from "./detectDevScript.ts";
 import { ProcessInspector } from "./ProcessInspector.ts";
 
 /** What to run: a project script resolved against the checkout that owns it. */
@@ -76,6 +77,7 @@ export interface ManagedScriptTarget {
 }
 
 export type ManagedProcessServiceStartFailure =
+  | ManagedProcessDependenciesMissingError
   | ManagedProcessPortOccupiedError
   | ManagedProcessPortsExhaustedError
   | ManagedProcessStartError;
@@ -87,7 +89,8 @@ export class ManagedProcesses extends Context.Service<
      * Idempotent: returns the process already starting or running for this
      * checkout and script. Refuses, naming the occupant, when the reserved
      * port is held by anything else; `reallocate` moves the checkout to a
-     * new block first. Starting grants no protection from the idle sweep.
+     * new block first. Refuses a checkout whose npm dependencies are not
+     * installed. Starting grants no protection from the idle sweep.
      */
     readonly start: (
       target: ManagedScriptTarget,
@@ -453,6 +456,19 @@ export const make = Effect.fn("ManagedProcesses.make")(function* (
           if (startOptions?.reallocate !== true) return toContract(existing, current.pins);
           // Moving blocks restarts the process on the new port, never beside it.
           yield* stopUnlocked(existing);
+        }
+
+        // A fresh worktree has no node_modules. Refuse with the fix rather
+        // than open a terminal whose command dies a moment later.
+        const installCommand = yield* readMissingInstallCommand(target.checkoutPath).pipe(
+          Effect.provideService(FileSystem.FileSystem, fs),
+          Effect.provideService(Path.Path, path),
+        );
+        if (installCommand !== null) {
+          return yield* new ManagedProcessDependenciesMissingError({
+            checkoutPath: target.checkoutPath,
+            installCommand,
+          });
         }
 
         const base = yield* reserveBlock(target.checkoutPath, startOptions?.reallocate === true);

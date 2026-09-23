@@ -61,3 +61,10 @@ came up.
 For an action with a preview URL, turn on **Open preview automatically when this action runs**,
 or set `autoOpenPreview` in `t3.json`. The preview then opens by itself once that script's dev
 server is ready.
+
+## Missing dependencies
+
+A new worktree starts without `node_modules`. If the checkout's `package.json` declares
+dependencies that are not installed, the start is refused and T3 Code names the install command
+to run, such as `npm install`. To install them in every new worktree, add a project action that
+runs the install command and turn on **Run automatically on worktree creation**.
