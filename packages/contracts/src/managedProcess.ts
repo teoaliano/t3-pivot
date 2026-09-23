@@ -157,11 +157,25 @@ export class ManagedProcessExitedError extends Schema.TaggedError<ManagedProcess
   }
 }
 
+/**
+ * The checkout declares npm dependencies that are not installed, which is
+ * how a fresh worktree starts out. Starting would only fail a moment later.
+ */
+export class ManagedProcessDependenciesMissingError extends Schema.TaggedError<ManagedProcessDependenciesMissingError>()(
+  "ManagedProcessDependenciesMissingError",
+  { checkoutPath: Schema.String, installCommand: Schema.String },
+) {
+  override get message() {
+    return `Dependencies are not installed in ${this.checkoutPath}. Run \`${this.installCommand}\` there first, or add a project action that runs it on worktree creation.`;
+  }
+}
+
 export const ManagedProcessStartFailure = Schema.Union([
   ManagedProcessPortOccupiedError,
   ManagedProcessPortsExhaustedError,
   ManagedProcessScriptNotFoundError,
   ManagedProcessThreadNotFoundError,
   ManagedProcessStartError,
+  ManagedProcessDependenciesMissingError,
 ]);
 export type ManagedProcessStartFailure = typeof ManagedProcessStartFailure.Type;
