@@ -98,26 +98,26 @@ const EXEC_PREFIXES = new Set(["npx", "bunx", "pnpx", "exec", "dotenv", "--"]);
 /** A tool name, the words that must follow it, and words after it that mean it is not serving. */
 const DEV_TOOLS: ReadonlyArray<{
   readonly tool: string;
-  readonly then?: ReadonlyArray<string>;
-  readonly notThen?: ReadonlyArray<string>;
+  readonly args?: ReadonlyArray<string>;
+  readonly notArgs?: ReadonlyArray<string>;
 }> = [
-  { tool: "vite", notThen: ["build", "optimize"] },
-  { tool: "next", then: ["dev"] },
-  { tool: "next", then: ["start"] },
-  { tool: "astro", then: ["dev"] },
-  { tool: "nuxt", then: ["dev"] },
-  { tool: "nuxi", then: ["dev"] },
-  { tool: "remix", then: ["dev"] },
-  { tool: "ng", then: ["serve"] },
-  { tool: "storybook", then: ["dev"] },
+  { tool: "vite", notArgs: ["build", "optimize"] },
+  { tool: "next", args: ["dev"] },
+  { tool: "next", args: ["start"] },
+  { tool: "astro", args: ["dev"] },
+  { tool: "nuxt", args: ["dev"] },
+  { tool: "nuxi", args: ["dev"] },
+  { tool: "remix", args: ["dev"] },
+  { tool: "ng", args: ["serve"] },
+  { tool: "storybook", args: ["dev"] },
   { tool: "start-storybook" },
-  { tool: "webpack", then: ["serve"] },
+  { tool: "webpack", args: ["serve"] },
   { tool: "webpack-dev-server" },
-  { tool: "expo", then: ["start"] },
-  { tool: "rails", then: ["server"] },
-  { tool: "rails", then: ["s"] },
-  { tool: "manage.py", then: ["runserver"] },
-  { tool: "flask", then: ["run"] },
+  { tool: "expo", args: ["start"] },
+  { tool: "rails", args: ["server"] },
+  { tool: "rails", args: ["s"] },
+  { tool: "manage.py", args: ["runserver"] },
+  { tool: "flask", args: ["run"] },
   { tool: "uvicorn" },
   { tool: "http-server" },
   { tool: "http.server" },
@@ -151,10 +151,10 @@ function segmentLooksLikeDevServer(words: ReadonlyArray<string>): boolean {
     DEV_TOOLS.some((entry) => {
       if (word !== entry.tool) return false;
       const following = words.slice(index + 1);
-      if (entry.then && entry.then.some((expected, offset) => following[offset] !== expected)) {
+      if (entry.args && entry.args.some((expected, offset) => following[offset] !== expected)) {
         return false;
       }
-      return !(following[0] !== undefined && entry.notThen?.includes(following[0]));
+      return !(following[0] !== undefined && entry.notArgs?.includes(following[0]));
     }),
   );
 }
