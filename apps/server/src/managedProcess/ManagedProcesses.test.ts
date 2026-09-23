@@ -309,6 +309,20 @@ describe("ManagedProcesses", () => {
     ),
   );
 
+  it.effect("keeps a block claimed at creation for its checkout's first start", () =>
+    withRegistry((registryPath) =>
+      Effect.gen(function* () {
+        const world = new World();
+        const { service } = yield* boot(world, registryPath);
+        yield* service.reserve("/work/feature");
+        const app = yield* service.start(target("/work/app"));
+        const feature = yield* service.start(target("/work/feature"));
+
+        expect([feature.port, app.port]).toEqual([11000, 11010]);
+      }),
+    ),
+  );
+
   it.effect("starts a script in a terminal with its checkout's reserved port", () =>
     withRegistry((registryPath) =>
       Effect.gen(function* () {

@@ -540,6 +540,7 @@ const buildAppUnderTest = (options?: {
       ProviderSessionDirectory.ProviderSessionDirectory["Service"]
     >;
     terminalManager?: Partial<TerminalManager.TerminalManager["Service"]>;
+    managedProcesses?: Partial<ManagedProcesses.ManagedProcesses["Service"]>;
     orchestrationEngine?: Partial<OrchestrationEngine.OrchestrationEngineService["Service"]>;
     threadDeletionReactor?: Partial<ThreadDeletionReactor["Service"]>;
     analyticsService?: Partial<AnalyticsService.AnalyticsService["Service"]>;
@@ -943,6 +944,8 @@ const buildAppUnderTest = (options?: {
           Layer.mock(ManagedProcesses.ManagedProcesses)({
             stopAllForCheckout: () => Effect.void,
             stream: () => Stream.empty,
+            reserve: () => Effect.void,
+            ...options?.layers?.managedProcesses,
           }),
           WorktreeSetupTracker.layer,
           ProjectCloneTracker.layer.pipe(
@@ -7655,11 +7658,18 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
   it.effect("routes websocket rpc git methods", () =>
     Effect.gen(function* () {
+      const reservedCheckouts: string[] = [];
       yield* buildAppUnderTest({
         config: {
           cwd: "/tmp/repo",
         },
         layers: {
+          managedProcesses: {
+            reserve: (checkoutPath) =>
+              Effect.sync(() => {
+                reservedCheckouts.push(checkoutPath);
+              }),
+          },
           vcsDriver: {
             isInsideWorkTree: () => Effect.succeed(true),
           },
@@ -7920,6 +7930,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
       assert.equal(worktree.worktree.refName, "feature/demo");
+      // A new worktree claims its port block right away.
+      assert.deepEqual(reservedCheckouts, ["/tmp/wt"]);
 
       yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>
