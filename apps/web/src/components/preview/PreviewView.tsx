@@ -9,6 +9,7 @@ import {
   DEFAULT_BROWSER_PROFILE_ID,
   FILL_PREVIEW_VIEWPORT,
   type PreviewAnnotationPayload,
+  type ProjectScript,
   type PreviewViewportSetting,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
@@ -61,6 +62,7 @@ import { Badge } from "~/components/ui/badge";
 import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
 import { useBrowserSurfaceStore } from "~/browser/browserSurfaceStore";
 import { usePreviewSession } from "./usePreviewSession";
+import { retainBackgroundScope } from "~/lib/backgroundActivityReporter";
 import { ZoomIndicator } from "./ZoomIndicator";
 import { AgentBrowserCursor } from "./AgentBrowserCursor";
 import {
@@ -77,6 +79,9 @@ interface Props {
   threadRef: ScopedThreadRef;
   tabId?: string | null;
   configuredUrls?: ReadonlyArray<string> | undefined;
+  /** The thread's checkout, whose managed processes the empty state offers. */
+  checkoutPath?: string | null | undefined;
+  scripts?: ReadonlyArray<ProjectScript> | undefined;
   visible: boolean;
   onSendAnnotation?: (
     annotation: PreviewAnnotationPayload,
@@ -101,6 +106,8 @@ export function PreviewView({
   threadRef,
   tabId: requestedTabId,
   configuredUrls,
+  checkoutPath = null,
+  scripts,
   visible,
   onSendAnnotation,
 }: Props) {
@@ -131,6 +138,16 @@ export function PreviewView({
   const resize = useAtomCommand(previewEnvironment.resize, "preview viewport resize");
 
   usePreviewSession(threadRef);
+
+  // A visible preview is a person looking at this checkout, which keeps its
+  // managed processes from being stopped as idle. Two tabs claim independently.
+  useEffect(() => {
+    if (!visible || checkoutPath === null) return;
+    return retainBackgroundScope(threadRef.environmentId, {
+      type: "managed-process",
+      checkoutPath,
+    });
+  }, [checkoutPath, threadRef.environmentId, visible]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -790,6 +807,8 @@ export function PreviewView({
             threadRef={threadRef}
             environmentId={threadRef.environmentId}
             configuredUrls={configuredUrls}
+            checkoutPath={checkoutPath}
+            scripts={scripts}
             recentEntries={recentHistoryEntries}
             onRemoveRecent={(url) => removeUrlForThread(threadRef, url)}
             onOpenUrl={(next) => void handleOpenServerUrl(next)}

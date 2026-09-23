@@ -337,6 +337,7 @@ import { useEnvironmentDisconnectDelay } from "../hooks/useEnvironmentDisconnect
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useEnvironmentQuery } from "../state/query";
+import { useManagedProcessAutoOpen } from "./preview/useManagedProcessAutoOpen";
 import {
   environmentServerConfigsAtom,
   primaryServerAvailableEditorsAtom,
@@ -3643,6 +3644,11 @@ export default function ChatView(props: ChatViewProps) {
       })
     : null;
   const gitStatusCwd = activeThread?.worktreePath ?? gitCwd;
+  useManagedProcessAutoOpen({
+    threadRef: activeThreadRef ?? null,
+    checkoutPath: gitCwd,
+    scripts: activeProjectScripts,
+  });
   const gitStatusQuery = useEnvironmentQuery(
     gitStatusCwd === null
       ? null
@@ -9594,6 +9600,8 @@ export default function ChatView(props: ChatViewProps) {
           threadRef={activeThreadRef}
           tabId={renderedRightPanelSurface.resourceId}
           configuredUrls={configuredPreviewUrls}
+          checkoutPath={gitCwd}
+          scripts={activeProjectScripts}
           visible={rightPanelOpen}
           onSendAnnotation={(annotation, image) => {
             void onSend(undefined, "foreground", { annotation, image });

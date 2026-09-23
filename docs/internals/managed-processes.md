@@ -5,10 +5,9 @@ by the server: a dev server, a watch task, anything started from a project scrip
 does not exit on its own. See [CONTEXT.md](../../CONTEXT.md) for the surrounding
 vocabulary, including why this is not called a session.
 
-> **Status: in progress.** This document records decisions as they are settled, not a
-> finished design. The live decision map is `.scratch/dev-server-lifecycle/map.md`, and
-> `docs/findings/dev-server-concurrency.md` holds the findings behind the effort,
-> including what was deliberately parked.
+The implementation lives in `apps/server/src/managedProcess/`.
+`docs/findings/dev-server-concurrency.md` holds the findings behind the effort, including
+what was deliberately parked.
 
 ## Managed process state is not event-sourced
 
@@ -49,8 +48,8 @@ process that dies.
 
 Provider sessions are the counter-example that prices this. They are projected into
 SQLite, and they pay for it with a startup orphan sweep and a user-facing error that
-exists only because of the choice: *"Provider session did not survive a server restart.
-Send a new message to continue."*
+exists only because of the choice: _"Provider session did not survive a server restart.
+Send a new message to continue."_
 
 For this fork there is a third reason. Those three files are among the ones upstream
 changes most, so durable state would put our largest diff exactly where rebases hurt.
@@ -191,7 +190,7 @@ allocate the same ports.
 
 ### Known limitation
 
-Worktree paths are built from the repository *basename*, so two different repositories
+Worktree paths are built from the repository _basename_, so two different repositories
 with the same basename resolve into one directory and can collide on path. This is
 inherited from existing worktree behaviour, where such repositories already collide before
 reservations are involved. It is not addressed here.
@@ -285,10 +284,17 @@ courtesy performed by whoever remembers. One code path already does it correctly
 thread is deleted; every other remover calls the same helper.
 
 **A process can outlive the server that started it**, when that server is killed without
-running its shutdown work. The record written at spawn time is re-read at the next start,
-and a process is only stopped when its process id is still alive, its command line still
-matches, and it still holds the port recorded for it. All three, because process ids are
-reused and stopping a stranger is the failure to avoid.
+running its shutdown work. The record is re-read at the next start, and a process is only
+stopped when its process id is still alive, its command line still matches, and it still
+holds the port recorded for it. All three, because process ids are reused and stopping a
+stranger is the failure to avoid.
+
+The record is written when the port first answers, not at spawn, and it names the process
+holding the port. The pid known at spawn is the shell's, which dies with the killed server;
+the survivor worth finding is the listener. Each record also carries the pid of the server
+that wrote it. The file is shared by every server on the base directory, dev and userdata
+alike, and only a record whose server is dead is an orphan. Without that check, starting
+one server would stop the other's running processes.
 
 ## When a managed process is stopped for you
 
@@ -366,9 +372,7 @@ person. That rule is about the preview. Here the person started the process, and
 preview follows once the server can answer.
 
 **The fork publishes no schema of its own.** Project files keep pointing at the original.
-Support for a port placeholder is a convention inside a string, invisible to validation
-either way, and every field this fork adds is optional, so a file written for either side
-validates on the other. Publishing a rival schema would make people edit a file in their
+Ports reach a script as environment variables, which the schema never sees, and every field
+this fork adds is optional, so a file written for either side validates on the other. Publishing a rival schema would make people edit a file in their
 own repository and would advertise a split that does not exist. Reconsider only if the
 shape genuinely diverges, never for a difference in behaviour alone.
-

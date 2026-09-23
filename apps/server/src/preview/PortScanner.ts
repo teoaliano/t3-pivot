@@ -15,6 +15,9 @@
  *
  * Polling is reference-counted via scoped `retain`. A single layer-scoped fiber
  * polls forever, but each tick is a no-op when the retain count is zero.
+ *
+ * Managed-process ports sit outside the curated list, so the managed process
+ * service registers them and the fallback probes them too.
  */
 import {
   CONFIGURED_LOCAL_SERVER_URLS_MAX_ITEMS,
@@ -63,8 +66,26 @@ export class PortDiscovery extends Context.Service<
       readonly threadId: string;
       readonly terminalId: string;
     }) => Effect.Effect<void>;
+    /** Descendant pids the terminal layer last registered for a terminal. */
+    readonly terminalProcessIds: (input: {
+      readonly threadId: string;
+      readonly terminalId: string;
+    }) => Effect.Effect<ReadonlyArray<number>>;
+    /**
+     * The process listening on a loopback port, whether or not it serves a web
+     * page. None when the port is free. Pid and name are null when the
+     * platform could only tell that the port is held.
+     */
+    readonly listenerOn: (port: number) => Effect.Effect<Option.Option<PortListener>>;
+    /** Replaces the managed-process ports probed alongside the curated list. */
+    readonly setManagedPorts: (ports: ReadonlyArray<number>) => Effect.Effect<void>;
   }
 >()("t3/preview/PortScanner/PortDiscovery") {}
+
+export interface PortListener {
+  readonly pid: number | null;
+  readonly processName: string | null;
+}
 
 export const COMMON_DEV_PORTS: ReadonlyArray<number> = Object.freeze([
   3000, 3001, 3333, 4173, 4200, 4321, 5000, 5173, 5174, 5175, 5500, 8000, 8080, 8081, 8888, 9000,
@@ -95,6 +116,7 @@ interface ScannerState {
     }
   >;
   readonly retainCount: number;
+  readonly managedPorts: ReadonlyArray<number>;
 }
 
 interface TerminalProcessOwner {
@@ -299,13 +321,15 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
     listeners: new Map(),
     terminalProcesses: new Map(),
     retainCount: 0,
+    managedPorts: [],
   });
   const webProbeCacheRef = yield* Ref.make<ReadonlyMap<string, WebProbeCacheEntry>>(new Map());
   const scanSemaphore = yield* Semaphore.make(1);
 
   const probeCommonPorts = Effect.fn("PortDiscovery.probeCommonPorts")(function* () {
+    const { managedPorts } = yield* Ref.get(stateRef);
     const results = yield* Effect.forEach(
-      COMMON_DEV_PORTS,
+      [...new Set([...COMMON_DEV_PORTS, ...managedPorts])],
       (port) =>
         net.isPortAvailableOnLoopback(port).pipe(
           Effect.map((available) => ({
@@ -478,9 +502,8 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
         platform: hostPlatform,
       }).pipe(Effect.as(null));
 
-  const scanUnlocked = Effect.fn("PortDiscovery.scanUnlocked")(function* (
-    configuredUrls: ReadonlyArray<string>,
-  ) {
+  /** Every loopback listener with its owner, or null when the platform probe failed. */
+  const listProcessListeners = Effect.fn("PortDiscovery.listProcessListeners")(function* () {
     const state = yield* Ref.get(stateRef);
     const terminalByProcessId = new Map<number, TerminalProcessOwner>();
     for (const registration of state.terminalProcesses.values()) {
@@ -492,7 +515,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
       const recoverWindowsProbeFailure = recoverProcessProbeFailure("windows-listeners");
       const command =
         'Get-NetTCPConnection -State Listen -ErrorAction Stop | ForEach-Object { $processName = (Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName; Write-Output "$($_.LocalAddress)|$($_.LocalPort)|$($_.OwningProcess)|$processName" }';
-      const listeners = yield* processRunner
+      return yield* processRunner
         .run({
           command: "powershell.exe",
           args: ["-NoProfile", "-NonInteractive", "-Command", command],
@@ -510,11 +533,9 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
             ProcessTimeoutError: recoverWindowsProbeFailure,
           }),
         );
-      if (listeners !== null) return yield* probeWebServers(listeners, configuredUrls);
-      return yield* probeWebServers(yield* probeCommonPorts(), configuredUrls);
     }
     const recoverLsofProbeFailure = recoverProcessProbeFailure("lsof");
-    const lsofResult = yield* processRunner
+    return yield* processRunner
       .run({
         command: "lsof",
         args: ["-iTCP", "-sTCP:LISTEN", "-P", "-n", "-F", "pcn"],
@@ -532,9 +553,29 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
           ProcessTimeoutError: recoverLsofProbeFailure,
         }),
       );
-    if (lsofResult !== null) return yield* probeWebServers(lsofResult, configuredUrls);
+  });
+
+  const scanUnlocked = Effect.fn("PortDiscovery.scanUnlocked")(function* (
+    configuredUrls: ReadonlyArray<string>,
+  ) {
+    const listeners = yield* listProcessListeners();
+    if (listeners !== null) return yield* probeWebServers(listeners, configuredUrls);
     return yield* probeWebServers(yield* probeCommonPorts(), configuredUrls);
   });
+
+  const listenerOn: PortDiscovery["Service"]["listenerOn"] = Effect.fn("PortDiscovery.listenerOn")(
+    function* (port) {
+      const listeners = yield* listProcessListeners();
+      if (listeners !== null) {
+        const listener = listeners.find((server) => server.port === port);
+        return listener
+          ? Option.some({ pid: listener.pid, processName: listener.processName })
+          : Option.none();
+      }
+      const available = yield* net.isPortAvailableOnLoopback(port);
+      return available ? Option.none() : Option.some({ pid: null, processName: null });
+    },
+  );
 
   const scanSnapshot = Effect.fn("PortDiscovery.scanSnapshot")(
     (configuredUrls: ReadonlyArray<string>) =>
@@ -653,12 +694,25 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
     });
   });
 
+  const terminalProcessIds: PortDiscovery["Service"]["terminalProcessIds"] = (input) =>
+    Ref.get(stateRef).pipe(
+      Effect.map((state) => [
+        ...(state.terminalProcesses.get(terminalOwnerKey(input))?.processIds ?? []),
+      ]),
+    );
+
+  const setManagedPorts: PortDiscovery["Service"]["setManagedPorts"] = (ports) =>
+    Ref.update(stateRef, (state) => ({ ...state, managedPorts: [...ports] }));
+
   return PortDiscovery.of({
     scan: scanOnce,
     subscribe,
     retain,
     registerTerminalProcesses,
     unregisterTerminal,
+    terminalProcessIds,
+    listenerOn,
+    setManagedPorts,
   });
 }).pipe(Effect.withSpan("PortDiscovery.make"));
 

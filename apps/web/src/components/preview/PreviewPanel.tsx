@@ -1,6 +1,6 @@
 "use client";
 
-import type { PreviewAnnotationPayload, ScopedThreadRef } from "@t3tools/contracts";
+import type { PreviewAnnotationPayload, ProjectScript, ScopedThreadRef } from "@t3tools/contracts";
 
 import type { ComposerImageAttachment } from "~/composerDraftStore";
 import { isPreviewSupportedInRuntime } from "~/previewStateStore";
@@ -13,6 +13,8 @@ interface Props {
   threadRef: ScopedThreadRef;
   tabId?: string | null;
   configuredUrls?: ReadonlyArray<string> | undefined;
+  checkoutPath?: string | null | undefined;
+  scripts?: ReadonlyArray<ProjectScript> | undefined;
   visible: boolean;
   onSendAnnotation?: (
     annotation: PreviewAnnotationPayload,
@@ -25,6 +27,8 @@ export function PreviewPanel({
   threadRef,
   tabId,
   configuredUrls,
+  checkoutPath,
+  scripts,
   visible,
   onSendAnnotation,
 }: Props) {
@@ -46,6 +50,8 @@ export function PreviewPanel({
         threadRef={threadRef}
         {...(tabId !== undefined ? { tabId } : {})}
         configuredUrls={configuredUrls}
+        checkoutPath={checkoutPath}
+        scripts={scripts}
         visible={visible}
         {...(onSendAnnotation ? { onSendAnnotation } : {})}
       />

@@ -141,6 +141,8 @@ import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
+import * as ManagedProcesses from "./managedProcess/ManagedProcesses.ts";
+import { resolveManagedScriptTarget } from "./managedProcess/resolveScriptTarget.ts";
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import { importRecentAgentThreads } from "./project/AgentSessionImporter.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
@@ -612,6 +614,7 @@ const makeWsRpcLayer = (
       });
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
       const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
+      const managedProcesses = yield* ManagedProcesses.ManagedProcesses;
       const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
       const repositoryIdentityResolver =
         yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
@@ -1692,6 +1695,11 @@ const makeWsRpcLayer = (
                   tracked && targetWorktreePath && bootstrap?.prepareWorktree
                     ? closeSetupTerminal.pipe(
                         Effect.ignoreCause({ log: true }),
+                        Effect.andThen(
+                          managedProcesses.stopAllForCheckout(targetWorktreePath, {
+                            releaseReservation: true,
+                          }),
+                        ),
                         Effect.andThen(
                           gitWorkflow
                             .removeWorktree({
@@ -3250,6 +3258,38 @@ const makeWsRpcLayer = (
             worktreeSetupTracker.stream(input.threadId),
             { "rpc.aggregate": "vcs" },
           ),
+        [WS_METHODS.subscribeManagedProcesses]: (input) =>
+          observeRpcStream(
+            WS_METHODS.subscribeManagedProcesses,
+            managedProcesses.stream(input.checkoutPath),
+            { "rpc.aggregate": "managed-process" },
+          ),
+        [WS_METHODS.managedProcessStart]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.managedProcessStart,
+            resolveManagedScriptTarget(input.threadId, input.scriptId).pipe(
+              Effect.provideService(
+                ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+                projectionSnapshotQuery,
+              ),
+              Effect.provideService(ServerSettings.ServerSettingsService, serverSettings),
+              Effect.flatMap((target) =>
+                managedProcesses.start(
+                  target,
+                  input.reallocate === undefined ? undefined : { reallocate: input.reallocate },
+                ),
+              ),
+            ),
+            { "rpc.aggregate": "managed-process" },
+          ),
+        [WS_METHODS.managedProcessStop]: (input) =>
+          observeRpcEffect(WS_METHODS.managedProcessStop, managedProcesses.stop(input), {
+            "rpc.aggregate": "managed-process",
+          }),
+        [WS_METHODS.managedProcessSetPinned]: (input) =>
+          observeRpcEffect(WS_METHODS.managedProcessSetPinned, managedProcesses.setPinned(input), {
+            "rpc.aggregate": "managed-process",
+          }),
         [WS_METHODS.worktreeSetupCancel]: (input) =>
           observeRpcEffect(
             WS_METHODS.worktreeSetupCancel,
@@ -3347,7 +3387,11 @@ const makeWsRpcLayer = (
         [WS_METHODS.vcsRemoveWorktree]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsRemoveWorktree,
-            gitWorkflow.removeWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            // Nothing may keep serving a checkout that is about to be deleted.
+            managedProcesses.stopAllForCheckout(input.path, { releaseReservation: true }).pipe(
+              Effect.andThen(gitWorkflow.removeWorktree(input)),
+              Effect.tap(() => refreshGitStatus(input.cwd)),
+            ),
             { "rpc.aggregate": "vcs" },
           ),
         [WS_METHODS.vcsCreateRef]: (input) =>

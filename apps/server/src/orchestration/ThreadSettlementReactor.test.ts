@@ -51,6 +51,7 @@ import { ServerConfig } from "../config.ts";
 import * as StorageCleanup from "../storageCleanup.ts";
 import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import { TerminalManager } from "../terminal/Manager.ts";
+import { ManagedProcesses } from "../managedProcess/ManagedProcesses.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 import { ThreadDeletionReactor } from "./Services/ThreadDeletionReactor.ts";
 import { ProviderService } from "../provider/Services/ProviderService.ts";
@@ -1785,6 +1786,7 @@ describe("storage cleanup", () => {
                     return fs.remove(input.path, { recursive: true }).pipe(Effect.orDie);
                   },
                 }),
+                Layer.mock(ManagedProcesses)({ stopAllForCheckout: () => Effect.void }),
                 Layer.mock(TerminalManager)({
                   subscribeMetadata: (listener) =>
                     listener({

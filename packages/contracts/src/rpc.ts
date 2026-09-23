@@ -53,6 +53,15 @@ import {
   WorktreeSetupSubscribeInput,
 } from "./worktreeSetup.ts";
 import {
+  ManagedProcess,
+  ManagedProcessCheckoutSnapshot,
+  ManagedProcessSetPinnedInput,
+  ManagedProcessStartFailure,
+  ManagedProcessStartInput,
+  ManagedProcessSubscribeInput,
+  ManagedProcessTarget,
+} from "./managedProcess.ts";
+import {
   GitActionProgressEvent,
   VcsSwitchRefInput,
   VcsSwitchRefResult,
@@ -430,6 +439,10 @@ export const WS_METHODS = {
   subscribeVcsStatus: "subscribeVcsStatus",
   subscribeWorktreeSetup: "subscribeWorktreeSetup",
   worktreeSetupCancel: "worktreeSetup.cancel",
+  subscribeManagedProcesses: "subscribeManagedProcesses",
+  managedProcessStart: "managedProcess.start",
+  managedProcessStop: "managedProcess.stop",
+  managedProcessSetPinned: "managedProcess.setPinned",
   subscribeTerminalEvents: "subscribeTerminalEvents",
   subscribeTerminalMetadata: "subscribeTerminalMetadata",
   subscribePreviewEvents: "subscribePreviewEvents",
@@ -1028,6 +1041,29 @@ const WsWorktreeSetupCancelRpc = Rpc.make(WS_METHODS.worktreeSetupCancel, {
   error: EnvironmentAuthorizationError,
 });
 
+const WsSubscribeManagedProcessesRpc = Rpc.make(WS_METHODS.subscribeManagedProcesses, {
+  payload: ManagedProcessSubscribeInput,
+  success: ManagedProcessCheckoutSnapshot,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+const WsManagedProcessStartRpc = Rpc.make(WS_METHODS.managedProcessStart, {
+  payload: ManagedProcessStartInput,
+  success: ManagedProcess,
+  error: Schema.Union([ManagedProcessStartFailure, EnvironmentAuthorizationError]),
+});
+
+const WsManagedProcessStopRpc = Rpc.make(WS_METHODS.managedProcessStop, {
+  payload: ManagedProcessTarget,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsManagedProcessSetPinnedRpc = Rpc.make(WS_METHODS.managedProcessSetPinned, {
+  payload: ManagedProcessSetPinnedInput,
+  error: EnvironmentAuthorizationError,
+});
+
 const WsGitRunStackedActionRpc = Rpc.make(WS_METHODS.gitRunStackedAction, {
   payload: GitRunStackedActionInput,
   success: GitActionProgressEvent,
@@ -1503,6 +1539,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsPreviewAutomationFocusHostRpc,
   WsSubscribePreviewEventsRpc,
   WsSubscribeDiscoveredLocalServersRpc,
+  WsSubscribeManagedProcessesRpc,
+  WsManagedProcessStartRpc,
+  WsManagedProcessStopRpc,
+  WsManagedProcessSetPinnedRpc,
   WsDeviceConfigureRpc,
   WsDeviceListRpc,
   WsDeviceTestHostRpc,

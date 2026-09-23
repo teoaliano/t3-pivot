@@ -58,6 +58,8 @@ function stableScopeKey(environmentId: EnvironmentId, scope: BackgroundScope): s
       return JSON.stringify([environmentId, scope.type, scope.cwd]);
     case "thread":
       return JSON.stringify([environmentId, scope.type, scope.threadId]);
+    case "managed-process":
+      return JSON.stringify([environmentId, scope.type, scope.checkoutPath]);
   }
 }
 
@@ -122,7 +124,11 @@ function scopeForSubscription(
   return typeof input.cwd === "string" ? { type: "vcs-status", cwd: input.cwd } : null;
 }
 
-function retainBackgroundScope(environmentId: EnvironmentId, scope: BackgroundScope): () => void {
+/** Holds a claim on a scope until the returned release runs. */
+export function retainBackgroundScope(
+  environmentId: EnvironmentId,
+  scope: BackgroundScope,
+): () => void {
   const key = stableScopeKey(environmentId, scope);
   const existing = retainedScopes.get(key);
   if (existing) {

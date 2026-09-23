@@ -149,6 +149,7 @@ import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
+import * as ManagedProcesses from "./managedProcess/ManagedProcesses.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
@@ -938,6 +939,10 @@ const buildAppUnderTest = (options?: {
         Layer.mergeAll(
           Layer.mock(TerminalManager.TerminalManager)({
             ...options?.layers?.terminalManager,
+          }),
+          Layer.mock(ManagedProcesses.ManagedProcesses)({
+            stopAllForCheckout: () => Effect.void,
+            stream: () => Stream.empty,
           }),
           WorktreeSetupTracker.layer,
           ProjectCloneTracker.layer.pipe(
