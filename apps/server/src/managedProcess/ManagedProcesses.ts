@@ -665,15 +665,22 @@ export const make = Effect.fn("ManagedProcesses.make")(function* (
         const checkoutPath = thread.worktreePath ?? rootByProject.get(thread.projectId);
         if (checkoutPath === undefined) continue;
         const previous = activity.get(checkoutPath) ?? { live: false, lastActivityMs: 0 };
-        const updatedAtMs = thread.session ? Date.parse(thread.session.updatedAt) : Number.NaN;
+        // Turn times, not the session record: the session changes when T3
+        // closes an idle session too, which is not the agent working.
+        const turn = thread.latestTurn;
+        const turnAtMs = turn
+          ? Math.max(
+              ...[turn.requestedAt, turn.startedAt, turn.completedAt].map((at) =>
+                at === null ? 0 : Date.parse(at) || 0,
+              ),
+            )
+          : 0;
         activity.set(checkoutPath, {
           live:
             previous.live ||
             thread.session?.activeTurnId != null ||
             thread.backgroundLiveness != null,
-          lastActivityMs: Number.isNaN(updatedAtMs)
-            ? previous.lastActivityMs
-            : Math.max(previous.lastActivityMs, updatedAtMs),
+          lastActivityMs: Math.max(previous.lastActivityMs, turnAtMs),
         });
       }
       return activity;

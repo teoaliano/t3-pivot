@@ -251,6 +251,16 @@ const runningSession = (updatedAt: string, activeTurnId: string | null) => ({
   updatedAt,
 });
 
+/** A settled turn that finished at `HH:MM` after the test clock's epoch. */
+const turnCompletedAt = (time: string): OrchestrationThreadShell["latestTurn"] => ({
+  turnId: TurnId.make("turn-1"),
+  state: "completed",
+  requestedAt: "1970-01-01T00:00:00.000Z",
+  startedAt: "1970-01-01T00:00:00.000Z",
+  completedAt: `1970-01-01T${time}:00.000Z`,
+  assistantMessageId: null,
+});
+
 const statusOf = (
   service: ManagedProcesses.ManagedProcesses["Service"],
   checkoutPath: string,
@@ -621,11 +631,7 @@ describe("ManagedProcesses", () => {
           const { service } = yield* boot(world, registryPath);
           yield* service.start(target("/work/feature"));
           // The turn settled 25 minutes in, and nothing has looked since.
-          world.threads = [
-            threadIn("/work/feature", {
-              session: runningSession("1970-01-01T00:25:00.000Z", null),
-            }),
-          ];
+          world.threads = [threadIn("/work/feature", { latestTurn: turnCompletedAt("00:25") })];
 
           yield* idleFor(40);
           yield* service.sweep;
@@ -634,6 +640,29 @@ describe("ManagedProcesses", () => {
           yield* service.sweep;
 
           expect(beforeWindow).toBe("starting");
+          expect(yield* statusOf(service, "/work/feature")).toBe("stopped");
+        }),
+      ),
+    );
+
+    it.effect("does not count the agent's session being closed for idleness as activity", () =>
+      withRegistry((registryPath) =>
+        Effect.gen(function* () {
+          const world = new World();
+          const { service } = yield* boot(world, registryPath);
+          yield* service.start(target("/work/feature"));
+          // The last turn ended a minute in. The session reaper closed the idle
+          // session 30 minutes later, which touches the session record.
+          world.threads = [
+            threadIn("/work/feature", {
+              latestTurn: turnCompletedAt("00:01"),
+              session: runningSession("1970-01-01T00:31:00.000Z", null),
+            }),
+          ];
+
+          yield* idleFor(35);
+          yield* service.sweep;
+
           expect(yield* statusOf(service, "/work/feature")).toBe("stopped");
         }),
       ),
