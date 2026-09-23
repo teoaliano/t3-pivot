@@ -11,10 +11,12 @@ import {
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import type { Tool } from "effect/unstable/ai";
 
 import * as ManagedProcesses from "../../../managedProcess/ManagedProcesses.ts";
@@ -73,6 +75,8 @@ const makeHarness = (
     readonly occupied?: boolean;
     readonly scripts?: OrchestrationProjectShell["scripts"];
     readonly worktreePath?: string;
+    /** What the started process does next: serves a page, exits, or keeps compiling. */
+    readonly outcome?: "running" | { readonly exited: string } | "compiling";
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -83,6 +87,8 @@ const makeHarness = (
     } as Pick<OrchestrationThreadShell, "id" | "projectId" | "worktreePath">;
     const starts: Array<{ checkoutPath: string; scriptId: string; reallocate: boolean }> = [];
     const commands: Array<string> = [];
+    let lastStarted: ManagedProcess | null = null;
+    const outcome = options.outcome ?? "running";
     const dependencies = Layer.mergeAll(
       Layer.mock(ProjectionSnapshotQuery)({
         getThreadShellById: (threadId) =>
@@ -113,8 +119,21 @@ const makeHarness = (
                 occupantCommand: "/usr/bin/postgres -D /other/checkout",
               });
             }
-            return processOn(reallocate ? 11010 : 11000, target.checkoutPath);
+            lastStarted = processOn(reallocate ? 11010 : 11000, target.checkoutPath);
+            return lastStarted;
           }),
+        stream: (checkoutPath) => {
+          const snapshot = (process: ManagedProcess) => ({ checkoutPath, processes: [process] });
+          const started = lastStarted!;
+          if (outcome === "compiling") {
+            return Stream.concat(Stream.make(snapshot(started)), Stream.never);
+          }
+          const next: ManagedProcess =
+            outcome === "running"
+              ? { ...started, status: "running" }
+              : { ...started, status: "stopped", lastError: outcome.exited };
+          return Stream.make(snapshot(started), snapshot(next));
+        },
       }),
       ServerSettings.layerTest(),
     );
@@ -149,7 +168,7 @@ describe("managed process toolkit handlers", () => {
       expect(result).toEqual({
         port: 11000,
         url: "http://localhost:11000",
-        status: "starting",
+        status: "running",
         reallocated: false,
       });
       expect(harness.starts).toEqual([
@@ -167,9 +186,33 @@ describe("managed process toolkit handlers", () => {
       expect(result).toEqual({
         port: 11010,
         url: "http://localhost:11010",
-        status: "starting",
+        status: "running",
         reallocated: true,
       });
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("fails with the exit reason when the server dies before serving a page", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({ outcome: { exited: "Exited with code 127" } });
+      const error = yield* harness.call({}).pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "ManagedProcessExitedError",
+        scriptId: "dev",
+        reason: "Exited with code 127",
+      });
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("answers starting when the server is still compiling after 30 seconds", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({ outcome: "compiling" });
+      const pending = yield* harness.call({}).pipe(Effect.forkChild);
+      yield* TestClock.adjust("30 seconds");
+      const result = yield* Fiber.join(pending);
+
+      expect(result.status).toBe("starting");
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
