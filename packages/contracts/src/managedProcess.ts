@@ -142,6 +142,21 @@ export class ManagedProcessStartError extends Schema.TaggedError<ManagedProcessS
   }
 }
 
+/** The process exited before its port served a page, so there is no server to open. */
+export class ManagedProcessExitedError extends Schema.TaggedError<ManagedProcessExitedError>()(
+  "ManagedProcessExitedError",
+  {
+    checkoutPath: Schema.String,
+    scriptId: Schema.String,
+    reason: Schema.NullOr(Schema.String),
+  },
+) {
+  override get message() {
+    const reason = this.reason === null ? "" : ` (${this.reason})`;
+    return `"${this.scriptId}" in ${this.checkoutPath} exited before it served a page${reason}. Run its command in your own shell to see the error, fix it, then start it again.`;
+  }
+}
+
 export const ManagedProcessStartFailure = Schema.Union([
   ManagedProcessPortOccupiedError,
   ManagedProcessPortsExhaustedError,

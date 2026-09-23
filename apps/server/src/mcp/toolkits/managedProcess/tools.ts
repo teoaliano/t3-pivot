@@ -1,4 +1,5 @@
 import {
+  ManagedProcessExitedError,
   ManagedProcessPortsExhaustedError,
   ManagedProcessScriptNotFoundError,
   ManagedProcessStartError,
@@ -33,7 +34,7 @@ export const StartServerResult = Schema.Struct({
   url: Schema.String,
   status: ManagedProcessStatus.annotate({
     description:
-      "starting until the port serves a page. Read the server's ready line in its terminal, then open the URL.",
+      "running once the port serves a page. starting when it is still compiling after a minute: call this tool again to wait longer.",
   }),
   reallocated: Schema.Boolean.annotate({
     description:
@@ -48,11 +49,12 @@ export const StartServerError = Schema.Union([
   ManagedProcessScriptNotFoundError,
   ManagedProcessThreadNotFoundError,
   ManagedProcessStartError,
+  ManagedProcessExitedError,
 ]);
 
 const StartServerTool = Tool.make("preview_start_server", {
   description:
-    "Start this checkout's dev server from a project script, in a terminal, on the port reserved for this checkout. Prefer this to running the dev command in your own shell: the server gets a port no other checkout can take, and it is stopped once nobody has used it for a while. Calling it again while the server runs returns the same server. The first start can take minutes to compile; open the returned URL once the server reports it is ready.",
+    "Start this checkout's dev server from a project script, in a terminal, on the port reserved for this checkout. Prefer this to running the dev command in your own shell: the server gets a port no other checkout can take, and it is stopped once nobody has used it for a while. Calling it again while the server runs returns the same server. It waits up to a minute for the server to serve a page, and fails if the server exits first. Only tell the user the server is up when the status is running.",
   parameters: StartServerInput,
   success: StartServerResult,
   failure: StartServerError,

@@ -3,7 +3,7 @@ When the t3-code MCP server exposes link_pull_request, you must use it to regist
 </pull_request_linking>`;
 
 const DEV_SERVER_INSTRUCTIONS = `<dev_servers>
-When the t3-code MCP server exposes preview_start_server, use it to start this checkout's dev server instead of running the dev command in your own shell. It runs the server on a port reserved for this checkout, so parallel checkouts never collide, and stops it once nobody uses it. Calling it while the server runs returns the same server. Use the port it returns, and wait for the server's ready line in its terminal before opening the URL. Run a dev server in your own shell only when the tool is unavailable or fails.
+When the t3-code MCP server exposes preview_start_server, use it to start this checkout's dev server instead of running the dev command in your own shell. It runs the server on a port reserved for this checkout, so parallel checkouts never collide, and stops it once nobody uses it. Calling it while the server runs returns the same server. Use the port it returns. Tell the user the server is up only when the tool reports it running. If it reports starting, the server is still compiling, so call the tool again. If it fails because the server exited, run the command in your own shell to read the error. Run a dev server in your own shell only when the tool is unavailable or fails.
 </dev_servers>`;
 
 /** Shared runtime context; omit model and effort when the harness manages them dynamically. */
