@@ -113,6 +113,10 @@ counts. An agent working in the checkout counts. Pinning a process exempts it.
     reload never shows stale state.
 36. As a developer, I want nothing about this written to the durable event history, so that
     a feature about running processes does not permanently widen the data model.
+37. As a developer, I want to start, stop and pin a checkout's dev servers from my phone, so
+    that I can manage what runs on my machine while away from it.
+38. As a developer, I want my project's own actions offered as dev servers by a rule I can
+    predict, so that a dev action I wrote never silently fails to appear.
 
 ## Implementation decisions
 
@@ -419,7 +423,32 @@ Refusals surface as a tagged error carrying structured fields, so the client com
 own wording rather than parsing a message, and as a warning notice with an action,
 following the existing pattern for a refusal that offers an escape hatch.
 
-## Testing decisions
+### Follow-ups after the first release
+
+Tasks 1 to 32 shipped in https://github.com/teoaliano/t3-pivot/pull/1. Tasks 33 to 36 are
+the work that release left open. Two come from this spec: the creation hook and the
+overview of running servers (story 5). Two came from testing: mobile controls, and the rule
+for which project actions count as dev servers.
+
+**Creation hook.** The reservation is claimed on first start today. Claim it again when a
+worktree is created, only so it usually exists earlier. Ensure-on-use stays the rule that
+guarantees correctness. The hook must not make the git layer depend on the managed
+processes service, which already depends on terminals, the port scanner and projections.
+
+**Overview.** An environment-wide view is its own subscription, not a widening of the
+per-checkout one. It lists every checkout with a live or pinned process, and offers stop.
+It holds no claim, like every other read of this state.
+
+**Mobile.** Mobile previews of a laptop's loopback stay out of scope. This is control only:
+list a checkout's processes, start, stop and pin, over the existing wire and the existing
+client-runtime atoms. Mobile has its own navigation, so where the controls live is a
+mobile decision.
+
+**Which actions count.** Today an action counts as a dev server when it declares a preview
+URL or uses the play icon, and is not a setup action. An icon is a weak signal and a
+missing preview URL hides a real dev action. The rule is decided before it is built, and it
+stays an optional field or an inference, never a required one, so upstream project files
+keep validating.
 
 A good test here states a behaviour a user or an agent would notice, and says nothing about
 how the code is arranged. Assert on what a caller gets back and what the world looks like
@@ -517,6 +546,20 @@ host-constrained one, because that is the decision that matters.
     and the reserved port, when the project declares no dev action. Seams: dev script
     detection (pure), managed processes service stream, agent toolkit handlers, preview
     resolution logic.
+
+Tasks 1 to 32 shipped in https://github.com/teoaliano/t3-pivot/pull/1.
+
+33. Claim a checkout's port block when its worktree is created, without the git layer
+    depending on the managed processes service. Seam: port reservations through the
+    service, plus a thin check at the creation call site.
+34. Stream every checkout that has a live or pinned managed process, and show them in one
+    place with a stop control. Seams: managed processes service stream, a pure client
+    module for the overview rows.
+35. List, start, stop and pin a checkout's managed processes from the mobile app. Seam: a
+    pure mobile module over the checkout snapshot, mirroring the web preview resolution
+    logic.
+36. Decide and implement the rule for which project actions count as dev servers. Seam:
+    the shared dev-action predicate, used by the server resolver and the preview rows.
 
 ## Out of scope
 
