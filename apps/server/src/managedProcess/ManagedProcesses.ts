@@ -103,6 +103,11 @@ export class ManagedProcesses extends Context.Service<
       checkoutPath: string,
       options?: { readonly releaseReservation?: boolean },
     ) => Effect.Effect<void>;
+    /**
+     * Claims the checkout's port block now, for a checkout that was just
+     * created. Start claims it anyway, so a missed call costs nothing.
+     */
+    readonly reserve: (checkoutPath: string) => Effect.Effect<void>;
     /** A pinned process is never stopped for being idle. Persisted. */
     readonly setPinned: (
       target: ManagedProcessTarget & { readonly pinned: boolean },
@@ -836,6 +841,7 @@ export const make = Effect.fn("ManagedProcesses.make")(function* (
       start,
       stop,
       stopAllForCheckout,
+      reserve: (checkoutPath) => reserveBlock(checkoutPath, false).pipe(Effect.asVoid),
       setPinned,
       borrow,
       stream,

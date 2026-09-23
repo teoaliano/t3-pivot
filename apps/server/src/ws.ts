@@ -1563,6 +1563,7 @@ const makeWsRpcLayer = (
                   },
                 },
               );
+              yield* managedProcesses.reserve(worktree.worktree.path);
               const checkoutEndedAt = yield* nowIso;
               yield* worktreeSetupTracker.update(threadId, (snapshot) => ({
                 ...snapshot,
@@ -3369,9 +3370,14 @@ const makeWsRpcLayer = (
         [WS_METHODS.gitPreparePullRequestThread]: (input) =>
           observeRpcEffect(
             WS_METHODS.gitPreparePullRequestThread,
-            gitWorkflow
-              .preparePullRequestThread(input)
-              .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            gitWorkflow.preparePullRequestThread(input).pipe(
+              Effect.tap((result) =>
+                result.worktreePath === null
+                  ? Effect.void
+                  : managedProcesses.reserve(result.worktreePath),
+              ),
+              Effect.tap(() => refreshGitStatus(input.cwd)),
+            ),
             { "rpc.aggregate": "git" },
           ),
         [WS_METHODS.vcsListRefs]: (input) =>
@@ -3381,7 +3387,10 @@ const makeWsRpcLayer = (
         [WS_METHODS.vcsCreateWorktree]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsCreateWorktree,
-            gitWorkflow.createWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            gitWorkflow.createWorktree(input).pipe(
+              Effect.tap((result) => managedProcesses.reserve(result.worktree.path)),
+              Effect.tap(() => refreshGitStatus(input.cwd)),
+            ),
             { "rpc.aggregate": "vcs" },
           ),
         [WS_METHODS.vcsRemoveWorktree]: (input) =>
