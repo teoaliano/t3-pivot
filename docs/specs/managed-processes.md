@@ -448,7 +448,9 @@ mobile decision.
 URL or uses the play icon, and is not a setup action. An icon is a weak signal and a
 missing preview URL hides a real dev action. The rule is decided before it is built, and it
 stays an optional field or an inference, never a required one, so upstream project files
-keep validating.
+keep validating. Decided: an optional `devServer` field on the action and in `t3.json`
+wins when set. Without it, an action counts when it has a preview URL or its command looks like
+a dev server, and is not a setup action. The icon no longer counts.
 
 A good test here states a behaviour a user or an agent would notice, and says nothing about
 how the code is arranged. Assert on what a caller gets back and what the world looks like

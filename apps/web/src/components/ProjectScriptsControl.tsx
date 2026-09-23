@@ -130,6 +130,7 @@ export default function ProjectScriptsControl({
       keybinding: null,
       previewUrl: fileScript.previewUrl ?? null,
       autoOpenPreview: fileScript.previewUrl ? (fileScript.autoOpenPreview ?? false) : false,
+      devServer: fileScript.devServer ?? null,
     };
     const result = await onAddScript(payload);
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {

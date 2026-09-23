@@ -82,9 +82,108 @@ export function projectScriptRuntimeEnv(
   return env;
 }
 
-/** A dev action: one that declares a preview URL or runs something, and is not a setup step. */
+const PACKAGE_MANAGERS = new Set(["npm", "pnpm", "yarn", "bun", "vp", "vpr"]);
+const PACKAGE_MANAGER_NON_RUN = new Set([
+  "add",
+  "install",
+  "i",
+  "remove",
+  "uninstall",
+  "exec",
+  "x",
+]);
+const DEV_SCRIPT_NAME = /^(?:dev|start|serve|preview|storybook)(?:[:-].*)?$/;
+const EXEC_PREFIXES = new Set(["npx", "bunx", "pnpx", "exec", "dotenv", "--"]);
+
+/** A tool name, the words that must follow it, and words after it that mean it is not serving. */
+const DEV_TOOLS: ReadonlyArray<{
+  readonly tool: string;
+  readonly args?: ReadonlyArray<string>;
+  readonly notArgs?: ReadonlyArray<string>;
+}> = [
+  { tool: "vite", notArgs: ["build", "optimize"] },
+  { tool: "next", args: ["dev"] },
+  { tool: "next", args: ["start"] },
+  { tool: "astro", args: ["dev"] },
+  { tool: "nuxt", args: ["dev"] },
+  { tool: "nuxi", args: ["dev"] },
+  { tool: "remix", args: ["dev"] },
+  { tool: "ng", args: ["serve"] },
+  { tool: "storybook", args: ["dev"] },
+  { tool: "start-storybook" },
+  { tool: "webpack", args: ["serve"] },
+  { tool: "webpack-dev-server" },
+  { tool: "expo", args: ["start"] },
+  { tool: "rails", args: ["server"] },
+  { tool: "rails", args: ["s"] },
+  { tool: "manage.py", args: ["runserver"] },
+  { tool: "flask", args: ["run"] },
+  { tool: "uvicorn" },
+  { tool: "http-server" },
+  { tool: "http.server" },
+];
+
+function commandWords(segment: string): ReadonlyArray<string> {
+  const words = segment
+    .trim()
+    .split(/\s+/)
+    .filter((word) => word.length > 0);
+  let start = 0;
+  // Leading `FOO=bar` assignments and runners like `npx` do not name the program.
+  while (
+    start < words.length &&
+    (/^\w+=/.test(words[start]!) || EXEC_PREFIXES.has(words[start]!))
+  ) {
+    start += 1;
+  }
+  return words.slice(start).map((word) => word.split("/").at(-1) ?? word);
+}
+
+function segmentLooksLikeDevServer(words: ReadonlyArray<string>): boolean {
+  const [program, ...rest] = words;
+  if (program === undefined) return false;
+  if (PACKAGE_MANAGERS.has(program)) {
+    const args = rest.filter((word) => !word.startsWith("-"));
+    if (args[0] !== undefined && PACKAGE_MANAGER_NON_RUN.has(args[0])) return false;
+    return args.some((word) => word !== "run" && DEV_SCRIPT_NAME.test(word));
+  }
+  return words.some((word, index) =>
+    DEV_TOOLS.some((entry) => {
+      if (word !== entry.tool) return false;
+      const following = words.slice(index + 1);
+      if (entry.args && entry.args.some((expected, offset) => following[offset] !== expected)) {
+        return false;
+      }
+      return !(following[0] !== undefined && entry.notArgs?.includes(following[0]));
+    }),
+  );
+}
+
+/**
+ * Guesses whether a command runs a dev server: a package manager running a
+ * `dev`, `start`, `serve`, `preview` or `storybook` script, or a known dev
+ * server started directly. `pnpm start` on a CLI tool guesses wrong, which is
+ * what the action's `devServer` field is for.
+ */
+export function looksLikeDevServerCommand(command: string): boolean {
+  return command
+    .split(/&&|\|\||;|\|/)
+    .some((segment) => segmentLooksLikeDevServer(commandWords(segment)));
+}
+
+/** The guess for an action that does not say whether it is a dev server. */
+export function inferDevProjectScript(
+  script: Pick<ProjectScript, "command" | "previewUrl" | "runOnWorktreeCreate">,
+): boolean {
+  return (
+    !script.runOnWorktreeCreate &&
+    (script.previewUrl !== undefined || looksLikeDevServerCommand(script.command))
+  );
+}
+
+/** A dev action: the action's own `devServer` answer, or the guess when it has none. */
 export function isDevProjectScript(script: ProjectScript): boolean {
-  return !script.runOnWorktreeCreate && (script.previewUrl !== undefined || script.icon === "play");
+  return script.devServer ?? inferDevProjectScript(script);
 }
 
 export function setupProjectScript(scripts: readonly ProjectScript[]): ProjectScript | null {

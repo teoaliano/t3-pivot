@@ -15,6 +15,8 @@ export interface ProjectScriptInput {
   readonly waitForSetup: boolean;
   readonly previewUrl: Exclude<ProjectScript["previewUrl"], undefined> | null;
   readonly autoOpenPreview: boolean;
+  /** Null leaves it to the guess from the command and preview URL. */
+  readonly devServer?: boolean | null;
 }
 
 export function buildProjectScript(id: string, input: ProjectScriptInput): ProjectScript {
@@ -31,6 +33,9 @@ export function buildProjectScript(id: string, input: ProjectScriptInput): Proje
           previewUrl: input.previewUrl,
           autoOpenPreview: input.autoOpenPreview,
         }),
+    ...(input.devServer === null || input.devServer === undefined
+      ? {}
+      : { devServer: input.devServer }),
   };
 }
 

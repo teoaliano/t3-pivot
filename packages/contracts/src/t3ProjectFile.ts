@@ -61,6 +61,12 @@ export const T3ProjectFileScript = Schema.Struct({
         "When true, automatically open the preview panel at `previewUrl` the moment the script starts.",
     }),
   ),
+  devServer: Schema.optionalKey(
+    Schema.Boolean.annotate({
+      description:
+        "Whether the script is a dev server T3 Code can start and stop for the preview. Omit it to let T3 Code guess from the command and `previewUrl`.",
+    }),
+  ),
 }).annotate({
   description: "A project script that team members can import into T3 Code.",
 });

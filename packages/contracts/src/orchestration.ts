@@ -443,6 +443,12 @@ export const ProjectScript = Schema.Struct({
    * it alongside `previewUrl`.
    */
   autoOpenPreview: Schema.optional(Schema.Boolean),
+  /**
+   * Whether this action is a dev server the preview and agents can start as
+   * a managed process. Absent means T3 guesses from the command and
+   * `previewUrl`.
+   */
+  devServer: Schema.optional(Schema.Boolean),
 });
 export type ProjectScript = typeof ProjectScript.Type;
 

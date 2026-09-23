@@ -5,11 +5,13 @@ you are working in.
 
 ## Start a dev server
 
-Open the browser preview in a thread. The project's actions that declare a preview URL or use the
-run icon are listed under **Dev servers**. A project with no such action gets its `package.json`
-`dev` script instead, run with the package manager its lockfile names, so a fresh clone needs no
-setup. Start one there. The preview opens it once the server
-serves a page, so a slow first build never shows a connection error.
+Open the browser preview in a thread. The project's dev server actions are listed under **Dev
+servers**. T3 Code counts an action as a dev server when it has a preview URL, or when its
+command looks like one, such as `pnpm dev`, `npm start` or `vite`. If it guesses wrong, edit the
+action and flip **Dev server the preview can start**, or set `devServer` in `t3.json`. A project
+with no dev server action gets its `package.json` `dev` script instead, run with the package
+manager its lockfile names, so a fresh clone needs no setup. Start one there. The preview opens it
+once the server serves a page, so a slow first build never shows a connection error.
 
 Each checkout, whether a worktree or the project's main folder, gets its own block of ten ports
 starting at 11000, and keeps it. A tab you left open still points at the same checkout tomorrow.
