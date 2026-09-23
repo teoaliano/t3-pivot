@@ -36,6 +36,13 @@ own.
 
 Removing a worktree stops its dev servers first.
 
+## Missing dependencies
+
+A new worktree starts without `node_modules`. If the checkout's `package.json` declares
+dependencies that are not installed, the start is refused and T3 Code names the install command
+to run, such as `npm install`. To install them in every new worktree, add a project action that
+runs the install command and turn on **Run automatically on worktree creation**.
+
 ## Port conflicts
 
 If something else already holds the checkout's port, the start is refused and T3 Code names the

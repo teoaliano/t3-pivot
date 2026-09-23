@@ -64,6 +64,69 @@ export function detectDevScript(input: {
   return { id: DETECTED_DEV_SCRIPT_ID, name: "Dev server", command: `${manager} run dev${args}` };
 }
 
+const decodeDependencies = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.Struct({
+      dependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+      devDependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+    }),
+  ),
+);
+
+/**
+ * The install command a checkout needs before any script can run, or null.
+ * Yarn Plug'n'Play installs without node_modules, so its loader counts too.
+ */
+export function missingInstallCommand(input: {
+  readonly packageJson: string | null;
+  readonly lockfiles: ReadonlyArray<string>;
+  readonly installed: boolean;
+}): string | null {
+  if (input.packageJson === null || input.installed) return null;
+  const declared = Option.getOrUndefined(decodeDependencies(input.packageJson));
+  const count =
+    Object.keys(declared?.dependencies ?? {}).length +
+    Object.keys(declared?.devDependencies ?? {}).length;
+  if (count === 0) return null;
+  const manager =
+    LOCKFILE_MANAGERS.find(([lockfile]) => input.lockfiles.includes(lockfile))?.[1] ?? "npm";
+  return `${manager} install`;
+}
+
+const readLockfiles = Effect.fn("readLockfiles")(function* (checkoutPath: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const lockfiles: Array<string> = [];
+  for (const [lockfile] of LOCKFILE_MANAGERS) {
+    if (
+      yield* fs.exists(path.join(checkoutPath, lockfile)).pipe(Effect.orElseSucceed(() => false))
+    ) {
+      lockfiles.push(lockfile);
+    }
+  }
+  return lockfiles;
+});
+
+/** Reads what `missingInstallCommand` needs from the checkout. */
+export const readMissingInstallCommand = Effect.fn("readMissingInstallCommand")(function* (
+  checkoutPath: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const packageJson = yield* fs
+    .readFileString(path.join(checkoutPath, "package.json"))
+    .pipe(Effect.orElseSucceed(() => null));
+  if (packageJson === null) return null;
+  const exists = (name: string) =>
+    fs.exists(path.join(checkoutPath, name)).pipe(Effect.orElseSucceed(() => false));
+  const installed = (yield* exists("node_modules")) || (yield* exists(".pnp.cjs"));
+  return missingInstallCommand({
+    packageJson,
+    lockfiles: yield* readLockfiles(checkoutPath),
+    installed,
+  });
+});
+
 /** Reads the checkout's package.json and lockfiles. Missing files mean nothing detected. */
 export const readDetectedDevScript = Effect.fn("readDetectedDevScript")(function* (
   checkoutPath: string,
@@ -75,13 +138,6 @@ export const readDetectedDevScript = Effect.fn("readDetectedDevScript")(function
     .readFileString(path.join(checkoutPath, "package.json"))
     .pipe(Effect.orElseSucceed(() => null));
   if (packageJson === null) return null;
-  const lockfiles: Array<string> = [];
-  for (const [lockfile] of LOCKFILE_MANAGERS) {
-    if (
-      yield* fs.exists(path.join(checkoutPath, lockfile)).pipe(Effect.orElseSucceed(() => false))
-    ) {
-      lockfiles.push(lockfile);
-    }
-  }
+  const lockfiles = yield* readLockfiles(checkoutPath);
   return detectDevScript({ packageJson, lockfiles, platform });
 });

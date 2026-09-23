@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import { detectDevScript } from "./detectDevScript.ts";
+import { detectDevScript, missingInstallCommand } from "./detectDevScript.ts";
 
 const packageJson = (scripts: Record<string, string>) => JSON.stringify({ name: "app", scripts });
 
@@ -64,5 +64,35 @@ describe("detectDevScript", () => {
       detectDevScript({ packageJson: "{ not json", lockfiles: [], platform: "darwin" }),
     ).toBeNull();
     expect(detectDevScript({ packageJson: null, lockfiles: [], platform: "darwin" })).toBeNull();
+  });
+});
+
+describe("missingInstallCommand", () => {
+  const withDeps = '{"dependencies":{"react":"^19.0.0"},"scripts":{"dev":"vite"}}';
+
+  it("asks for an install in a checkout with dependencies and no node_modules", () => {
+    expect(
+      missingInstallCommand({
+        packageJson: withDeps,
+        lockfiles: ["pnpm-lock.yaml"],
+        installed: false,
+      }),
+    ).toBe("pnpm install");
+  });
+
+  it("needs nothing once dependencies are installed", () => {
+    expect(missingInstallCommand({ packageJson: withDeps, lockfiles: [], installed: true })).toBe(
+      null,
+    );
+  });
+
+  it("needs nothing for a package.json that declares no dependencies", () => {
+    expect(
+      missingInstallCommand({
+        packageJson: '{"scripts":{"dev":"python3 -m http.server"}}',
+        lockfiles: [],
+        installed: false,
+      }),
+    ).toBe(null);
   });
 });

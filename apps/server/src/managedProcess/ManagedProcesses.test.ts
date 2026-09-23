@@ -335,6 +335,29 @@ describe("ManagedProcesses", () => {
     ),
   );
 
+  it.effect("refuses a checkout whose dependencies are not installed, naming the fix", () =>
+    withRegistry((registryPath, fs) =>
+      Effect.gen(function* () {
+        const world = new World();
+        const { service } = yield* boot(world, registryPath);
+        const checkout = yield* fs.makeTempDirectoryScoped({ prefix: "t3-checkout-" });
+        yield* fs.writeFileString(`${checkout}/package.json`, '{"devDependencies":{"vite":"^7"}}');
+        yield* fs.writeFileString(`${checkout}/package-lock.json`, "{}");
+
+        const error = yield* service.start(target(checkout)).pipe(Effect.flip);
+        yield* fs.makeDirectory(`${checkout}/node_modules`);
+        const started = yield* service.start(target(checkout));
+
+        expect(error).toMatchObject({
+          _tag: "ManagedProcessDependenciesMissingError",
+          installCommand: "npm install",
+        });
+        expect(started.status).toBe("starting");
+        expect(world.opened).toHaveLength(1);
+      }),
+    ),
+  );
+
   it.effect("returns the running process instead of starting a second one", () =>
     withRegistry((registryPath) =>
       Effect.gen(function* () {

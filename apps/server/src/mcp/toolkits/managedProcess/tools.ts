@@ -1,5 +1,6 @@
 import {
   ManagedProcessExitedError,
+  ManagedProcessDependenciesMissingError,
   ManagedProcessPortsExhaustedError,
   ManagedProcessScriptNotFoundError,
   ManagedProcessStartError,
@@ -50,6 +51,7 @@ export const StartServerError = Schema.Union([
   ManagedProcessThreadNotFoundError,
   ManagedProcessStartError,
   ManagedProcessExitedError,
+  ManagedProcessDependenciesMissingError,
 ]);
 
 const StartServerTool = Tool.make("preview_start_server", {
