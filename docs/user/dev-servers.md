@@ -36,6 +36,11 @@ own.
 
 Removing a worktree stops its dev servers first.
 
+## See every running dev server
+
+**Settings > Diagnostics** lists every checkout with a dev server running or pinned, with a
+button to stop each one. Looking at the list does not keep a server running.
+
 ## Port conflicts
 
 If something else already holds the checkout's port, the start is refused and T3 Code names the

@@ -3264,6 +3264,12 @@ const makeWsRpcLayer = (
             managedProcesses.stream(input.checkoutPath),
             { "rpc.aggregate": "managed-process" },
           ),
+        [WS_METHODS.subscribeManagedProcessOverview]: () =>
+          observeRpcStream(
+            WS_METHODS.subscribeManagedProcessOverview,
+            managedProcesses.streamOverview,
+            { "rpc.aggregate": "managed-process" },
+          ),
         [WS_METHODS.managedProcessStart]: (input) =>
           observeRpcEffect(
             WS_METHODS.managedProcessStart,

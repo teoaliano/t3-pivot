@@ -458,7 +458,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "diagnostics",
     title: "Diagnostics",
     to: "/settings/general",
-    searchTerms: ["logs traces processes resource history failures spans cpu memory"],
+    searchTerms: [
+      "logs traces processes resource history failures spans cpu memory dev servers running ports stop",
+    ],
   },
   {
     id: "open-source-licenses",

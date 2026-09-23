@@ -122,6 +122,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.subscribeWorktreeSetup]: AuthOrchestrationReadScope,
   [WS_METHODS.worktreeSetupCancel]: AuthOrchestrationOperateScope,
   [WS_METHODS.subscribeManagedProcesses]: AuthOrchestrationReadScope,
+  [WS_METHODS.subscribeManagedProcessOverview]: AuthOrchestrationReadScope,
   // Starting runs a project script in a terminal.
   [WS_METHODS.managedProcessStart]: AuthTerminalOperateScope,
   [WS_METHODS.managedProcessStop]: AuthOrchestrationOperateScope,

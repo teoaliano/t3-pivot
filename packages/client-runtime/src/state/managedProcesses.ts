@@ -20,6 +20,11 @@ export function createManagedProcessEnvironmentAtoms<R, E>(
       tag: WS_METHODS.subscribeManagedProcesses,
       idleTtlMs: MANAGED_PROCESSES_IDLE_TTL_MS,
     }),
+    /** Every live or pinned process across the environment's checkouts. Holds no claim. */
+    overview: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:managed-processes:overview",
+      tag: WS_METHODS.subscribeManagedProcessOverview,
+    }),
     start: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:managed-processes:start",
       tag: WS_METHODS.managedProcessStart,

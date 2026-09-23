@@ -862,6 +862,44 @@ describe("ManagedProcesses", () => {
       ),
     );
 
+    it.effect("lists every checkout's live and pinned processes in one overview", () =>
+      withRegistry((registryPath) =>
+        Effect.gen(function* () {
+          const world = new World();
+          const { service } = yield* boot(world, registryPath);
+          yield* service.start(target("/work/feature"));
+          yield* service.start(target("/work/app"));
+          yield* service.start(target("/work/app", "storybook"));
+          yield* service.start(target("/work/old"));
+          yield* service.setPinned({
+            checkoutPath: "/work/app",
+            scriptId: "storybook",
+            pinned: true,
+          });
+          yield* service.stop({ checkoutPath: "/work/app", scriptId: "storybook" });
+          yield* service.stop({ checkoutPath: "/work/old", scriptId: "dev" });
+
+          const overview = yield* service.streamOverview.pipe(
+            Stream.runHead,
+            Effect.map(Option.getOrThrow),
+          );
+
+          expect(
+            overview.processes.map(({ checkoutPath, scriptId, status, pinned }) => ({
+              checkoutPath,
+              scriptId,
+              status,
+              pinned,
+            })),
+          ).toEqual([
+            { checkoutPath: "/work/app", scriptId: "dev", status: "starting", pinned: false },
+            { checkoutPath: "/work/app", scriptId: "storybook", status: "stopped", pinned: true },
+            { checkoutPath: "/work/feature", scriptId: "dev", status: "starting", pinned: false },
+          ]);
+        }),
+      ),
+    );
+
     it.effect("offers the checkout's package.json dev script to start", () =>
       withRegistry((registryPath, fs) =>
         Effect.gen(function* () {

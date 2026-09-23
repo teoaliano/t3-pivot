@@ -50,6 +50,12 @@ export const ManagedProcessCheckoutSnapshot = Schema.Struct({
 });
 export type ManagedProcessCheckoutSnapshot = typeof ManagedProcessCheckoutSnapshot.Type;
 
+/** Every process across the environment's checkouts that is live or pinned. */
+export const ManagedProcessOverview = Schema.Struct({
+  processes: Schema.Array(ManagedProcess),
+});
+export type ManagedProcessOverview = typeof ManagedProcessOverview.Type;
+
 export const ManagedProcessSubscribeInput = Schema.Struct({
   checkoutPath: TrimmedNonEmptyString,
 });

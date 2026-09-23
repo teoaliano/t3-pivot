@@ -55,6 +55,7 @@ import {
 import {
   ManagedProcess,
   ManagedProcessCheckoutSnapshot,
+  ManagedProcessOverview,
   ManagedProcessSetPinnedInput,
   ManagedProcessStartFailure,
   ManagedProcessStartInput,
@@ -440,6 +441,7 @@ export const WS_METHODS = {
   subscribeWorktreeSetup: "subscribeWorktreeSetup",
   worktreeSetupCancel: "worktreeSetup.cancel",
   subscribeManagedProcesses: "subscribeManagedProcesses",
+  subscribeManagedProcessOverview: "subscribeManagedProcessOverview",
   managedProcessStart: "managedProcess.start",
   managedProcessStop: "managedProcess.stop",
   managedProcessSetPinned: "managedProcess.setPinned",
@@ -1048,6 +1050,13 @@ const WsSubscribeManagedProcessesRpc = Rpc.make(WS_METHODS.subscribeManagedProce
   stream: true,
 });
 
+const WsSubscribeManagedProcessOverviewRpc = Rpc.make(WS_METHODS.subscribeManagedProcessOverview, {
+  payload: Schema.Struct({}),
+  success: ManagedProcessOverview,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
 const WsManagedProcessStartRpc = Rpc.make(WS_METHODS.managedProcessStart, {
   payload: ManagedProcessStartInput,
   success: ManagedProcess,
@@ -1540,6 +1549,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribePreviewEventsRpc,
   WsSubscribeDiscoveredLocalServersRpc,
   WsSubscribeManagedProcessesRpc,
+  WsSubscribeManagedProcessOverviewRpc,
   WsManagedProcessStartRpc,
   WsManagedProcessStopRpc,
   WsManagedProcessSetPinnedRpc,

@@ -35,6 +35,7 @@ import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { ExpandableText } from "./ExpandableText";
+import { ManagedProcessOverviewSection } from "./ManagedProcessOverviewSection";
 import { ResourceTelemetryDiagnostics } from "./ResourceTelemetryDiagnostics";
 import { SettingsPageContainer, SettingsSection, useRelativeTimeTick } from "./settingsLayout";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -924,6 +925,8 @@ export function DiagnosticsSettingsPanel() {
   return (
     <SettingsPageContainer width="expanded" className="gap-10">
       <ResourceTelemetryDiagnostics environmentId={environmentId} />
+
+      <ManagedProcessOverviewSection environmentId={environmentId} />
 
       <SettingsSection
         title="Live Processes"
