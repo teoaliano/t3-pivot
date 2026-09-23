@@ -10,6 +10,13 @@ describe("buildRuntimeInstructions", () => {
     expect(instructions).toContain("call list_thread_pull_requests and link any PR");
   });
 
+  it("steers dev servers through the managed start tool instead of the agent's shell", () => {
+    const instructions = buildRuntimeInstructions({ harness: "Claude Code" });
+    expect(instructions).toContain("When the t3-code MCP server exposes preview_start_server");
+    expect(instructions).toContain("instead of running the dev command in your own shell");
+    expect(instructions).toContain("Use the port it returns");
+  });
+
   it("keeps known model and effort metadata on one line", () => {
     expect(
       buildRuntimeInstructions({

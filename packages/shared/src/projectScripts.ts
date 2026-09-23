@@ -43,6 +43,8 @@ interface ProjectScriptRuntimeEnvInput {
     cwd: string;
   };
   worktreePath?: string | null;
+  /** The checkout's reserved port block, for a managed process. */
+  ports?: ReadonlyArray<number>;
   extraEnv?: Record<string, string>;
 }
 
@@ -64,10 +66,25 @@ export function projectScriptRuntimeEnv(
   if (input.worktreePath) {
     env.T3CODE_WORKTREE_PATH = input.worktreePath;
   }
+  // `T3CODE_PORT` is the T3 server's own port, hence the MANAGED infix. Bare
+  // `PORT` is set too because most frameworks read it with no configuration;
+  // a project's own .env still overrides it.
+  input.ports?.forEach((port, index) => {
+    env[index === 0 ? "T3CODE_MANAGED_PORT" : `T3CODE_MANAGED_PORT_${index}`] = String(port);
+  });
+  const [firstPort] = input.ports ?? [];
+  if (firstPort !== undefined) {
+    env.PORT = String(firstPort);
+  }
   if (input.extraEnv) {
     return { ...env, ...input.extraEnv };
   }
   return env;
+}
+
+/** A dev action: one that declares a preview URL or runs something, and is not a setup step. */
+export function isDevProjectScript(script: ProjectScript): boolean {
+  return !script.runOnWorktreeCreate && (script.previewUrl !== undefined || script.icon === "play");
 }
 
 export function setupProjectScript(scripts: readonly ProjectScript[]): ProjectScript | null {

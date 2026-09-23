@@ -438,8 +438,9 @@ export const ProjectScript = Schema.Struct({
    */
   previewUrl: Schema.optional(TrimmedNonEmptyString),
   /**
-   * When true, automatically open the preview panel pointed at `previewUrl`
-   * the moment this script starts. Ignored without `previewUrl` or on web.
+   * When true, open the preview on this script's dev server once it serves a
+   * page, after it was started as a managed process. The editor only offers
+   * it alongside `previewUrl`.
    */
   autoOpenPreview: Schema.optional(Schema.Boolean),
 });
