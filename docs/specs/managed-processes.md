@@ -390,9 +390,12 @@ discovered-server list already report it. No readiness tool, because the agent r
 server's own ready line.
 
 An agent can still bypass the tool by running a dev server through its own shell, which
-already runs in the correct checkout. That is accepted. No instructions are injected into
-agents, so the tool description is the only thing steering it, which is the same weakness
-every tool here has.
+already runs in the correct checkout. The tool description alone did not stop that: in the
+first real test, a Claude agent asked to start a dev server ran `npm run dev` in its shell
+and landed on 5173. So the runtime instructions T3 already appends to every provider's
+session, which already carry the pull request linking rule, gain one more: use the start
+tool rather than the shell, and use the port it returns. The shell stays the fallback when
+the tool is unavailable or fails.
 
 ### The client wire
 

@@ -349,10 +349,12 @@ port is discovered, and unmanageable, because nothing owns it. In a product wher
 agents work at once, leaving that as the normal agent path would bring back the port
 conflicts this design exists to prevent.
 
-An agent can still take that path. Nothing forces the tool on it, and nothing injects
-instructions telling it to prefer one over the other. That is accepted. The design does
-not depend on the tool being the only way in, and project-level instructions can steer
-agents later if it turns out to matter.
+An agent can still take that path, and without being told otherwise it does. The first real
+test had a Claude agent run `npm run dev` in its shell even with the tool listed. So the
+runtime instructions every provider session receives (`apps/server/src/provider/RuntimeInstructions.ts`,
+beside the pull request linking rule) tell agents to prefer the tool and fall back to the
+shell only when the tool is unavailable or fails. Nothing enforces it, and the design does
+not depend on the tool being the only way in.
 
 ## A fresh checkout still has a dev server to start
 
