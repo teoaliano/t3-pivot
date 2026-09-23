@@ -8,8 +8,10 @@ import {
   type OrchestrationProjectShell,
   type OrchestrationThreadShell,
 } from "@t3tools/contracts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
@@ -44,12 +46,6 @@ const project: OrchestrationProjectShell = {
   updatedAt: "2026-08-01T00:00:00.000Z",
 };
 
-const thread = {
-  id: THREAD_ID,
-  projectId: project.id,
-  worktreePath: "/worktrees/project/feature",
-} as Pick<OrchestrationThreadShell, "id" | "projectId" | "worktreePath">;
-
 const processOn = (port: number, checkoutPath: string): ManagedProcess => ({
   checkoutPath,
   scriptId: "dev",
@@ -72,9 +68,21 @@ const invocation = (
   issuedAt: 1,
 });
 
-const makeHarness = (options: { readonly occupied?: boolean } = {}) =>
+const makeHarness = (
+  options: {
+    readonly occupied?: boolean;
+    readonly scripts?: OrchestrationProjectShell["scripts"];
+    readonly worktreePath?: string;
+  } = {},
+) =>
   Effect.gen(function* () {
+    const thread = {
+      id: THREAD_ID,
+      projectId: project.id,
+      worktreePath: options.worktreePath ?? "/worktrees/project/feature",
+    } as Pick<OrchestrationThreadShell, "id" | "projectId" | "worktreePath">;
     const starts: Array<{ checkoutPath: string; scriptId: string; reallocate: boolean }> = [];
+    const commands: Array<string> = [];
     const dependencies = Layer.mergeAll(
       Layer.mock(ProjectionSnapshotQuery)({
         getThreadShellById: (threadId) =>
@@ -83,7 +91,8 @@ const makeHarness = (options: { readonly occupied?: boolean } = {}) =>
               ? Option.some(thread as OrchestrationThreadShell)
               : Option.none(),
           ),
-        getProjectShellById: () => Effect.succeed(Option.some(project)),
+        getProjectShellById: () =>
+          Effect.succeed(Option.some({ ...project, scripts: options.scripts ?? project.scripts })),
       }),
       Layer.mock(ManagedProcesses.ManagedProcesses)({
         start: (target, startOptions) =>
@@ -94,6 +103,7 @@ const makeHarness = (options: { readonly occupied?: boolean } = {}) =>
               scriptId: target.script.id,
               reallocate,
             });
+            commands.push(target.script.command);
             if (options.occupied && !reallocate) {
               return yield* new ManagedProcessPortOccupiedError({
                 checkoutPath: target.checkoutPath,
@@ -127,7 +137,7 @@ const makeHarness = (options: { readonly occupied?: boolean } = {}) =>
         Effect.provideService(McpInvocationContext.McpInvocationContext, invocation(capabilities)),
         Effect.provide(dependencies),
       );
-    return { starts, call };
+    return { starts, commands, call };
   });
 
 describe("managed process toolkit handlers", () => {
@@ -145,7 +155,7 @@ describe("managed process toolkit handlers", () => {
       expect(harness.starts).toEqual([
         { checkoutPath: "/worktrees/project/feature", scriptId: "dev", reallocate: false },
       ]);
-    }),
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.effect("moves to a new port after a conflict and reports only that port", () =>
@@ -160,7 +170,7 @@ describe("managed process toolkit handlers", () => {
         status: "starting",
         reallocated: true,
       });
-    }),
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.effect("names the available scripts when the requested one does not exist", () =>
@@ -173,7 +183,7 @@ describe("managed process toolkit handlers", () => {
         availableScripts: ["Lint", "Dev"],
       });
       expect(harness.starts).toEqual([]);
-    }),
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.effect("refuses a credential without the preview capability", () =>
@@ -183,6 +193,19 @@ describe("managed process toolkit handlers", () => {
 
       expect(error).toMatchObject({ _tag: "PreviewAutomationUnavailableError" });
       expect(harness.starts).toEqual([]);
-    }),
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+  it.effect("runs the checkout's package.json dev script when the project has no dev action", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const checkout = yield* fs.makeTempDirectoryScoped({ prefix: "t3-detected-dev-" });
+      yield* fs.writeFileString(`${checkout}/package.json`, '{"scripts":{"dev":"vite --host"}}');
+      yield* fs.writeFileString(`${checkout}/package-lock.json`, "{}");
+      const harness = yield* makeHarness({ scripts: [], worktreePath: checkout });
+      const result = yield* harness.call({});
+
+      expect(result.port).toBe(11000);
+      expect(harness.commands).toEqual(["npm run dev -- --port $PORT --strictPort"]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

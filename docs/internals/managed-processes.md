@@ -354,6 +354,20 @@ instructions telling it to prefer one over the other. That is accepted. The desi
 not depend on the tool being the only way in, and project-level instructions can steer
 agents later if it turns out to matter.
 
+## A fresh checkout still has a dev server to start
+
+Without a project action, the start button had nothing to run and the agent tool fell back
+to the agent's own shell, which is the unmanaged path this design exists to replace. So a
+project with no dev action is offered the checkout's `package.json` `dev` script, run with
+the package manager its lockfile names. A project action always wins. The detected script
+is read per checkout on each subscription and never written anywhere, so it follows the
+file as the file changes.
+
+This is the one command T3 builds. Because the preview looks at the reserved port, the
+command passes `--port` to the few dev tools that ignore `PORT`, matched on the first word
+of the script, with `--strictPort` for Vite. A command the user wrote is never edited: an
+action that ignores `PORT` needs the flag written into it.
+
 ## The project file
 
 A project file can name a preview address for a script. That address is a hint for

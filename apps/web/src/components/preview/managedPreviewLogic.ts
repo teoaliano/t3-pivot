@@ -1,5 +1,7 @@
 import type { DiscoveredLocalServer, ManagedProcess, ProjectScript } from "@t3tools/contracts";
 
+import { isDevProjectScript } from "@t3tools/shared/projectScripts";
+
 import type { PreviewableServer } from "./useDiscoveredLocalServers";
 
 /**
@@ -19,14 +21,14 @@ export interface ManagedPreviewRow<S extends DiscoveredLocalServer = DiscoveredL
   readonly server: S | null;
 }
 
-/** A script the preview offers to start: one that declares a preview URL or runs something. */
-function isPreviewScript(script: ProjectScript): boolean {
-  return !script.runOnWorktreeCreate && (script.previewUrl !== undefined || script.icon === "play");
-}
-
+/**
+ * Every process the checkout has run, then dev actions never started. A
+ * project with no dev action is offered the checkout's detected dev script.
+ */
 export function managedPreviewRows<S extends DiscoveredLocalServer>(input: {
   readonly processes: ReadonlyArray<ManagedProcess>;
   readonly scripts: ReadonlyArray<ProjectScript>;
+  readonly detectedScript?: { readonly id: string; readonly name: string } | null | undefined;
   readonly discovered: ReadonlyArray<S>;
 }): ReadonlyArray<ManagedPreviewRow<S>> {
   const rows = input.processes.map((process): ManagedPreviewRow<S> => {
@@ -45,8 +47,11 @@ export function managedPreviewRows<S extends DiscoveredLocalServer>(input: {
     };
   });
   const known = new Set(rows.map((row) => row.scriptId));
-  const neverStarted = input.scripts
-    .filter((script) => isPreviewScript(script) && !known.has(script.id))
+  const devScripts = input.scripts.filter(isDevProjectScript);
+  const offered =
+    devScripts.length === 0 && input.detectedScript ? [input.detectedScript] : devScripts;
+  const neverStarted = offered
+    .filter((script) => !known.has(script.id))
     .map((script): ManagedPreviewRow<S> => ({
       scriptId: script.id,
       scriptName: script.name,

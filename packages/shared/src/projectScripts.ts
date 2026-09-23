@@ -82,6 +82,11 @@ export function projectScriptRuntimeEnv(
   return env;
 }
 
+/** A dev action: one that declares a preview URL or runs something, and is not a setup step. */
+export function isDevProjectScript(script: ProjectScript): boolean {
+  return !script.runOnWorktreeCreate && (script.previewUrl !== undefined || script.icon === "play");
+}
+
 export function setupProjectScript(scripts: readonly ProjectScript[]): ProjectScript | null {
   return scripts.find((script) => script.runOnWorktreeCreate) ?? null;
 }

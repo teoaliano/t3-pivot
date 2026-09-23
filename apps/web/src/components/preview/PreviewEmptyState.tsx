@@ -59,10 +59,10 @@ export function PreviewEmptyState({
     environmentId,
     configuredUrls,
   });
-  const processes = useManagedProcesses(environmentId, checkoutPath);
+  const { processes, detectedScript } = useManagedProcesses(environmentId, checkoutPath);
   const rows = useMemo(
-    () => managedPreviewRows({ processes, scripts, discovered: servers }),
-    [processes, scripts, servers],
+    () => managedPreviewRows({ processes, scripts, detectedScript, discovered: servers }),
+    [detectedScript, processes, scripts, servers],
   );
   const recents = recentEntries.filter((entry) => URL.canParse(entry.url)).slice(0, 8);
   const sections = previewEmptyStateSections({ rows, servers, recents });

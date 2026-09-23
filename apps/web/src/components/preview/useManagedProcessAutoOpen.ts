@@ -25,7 +25,7 @@ export function useManagedProcessAutoOpen(input: {
   readonly scripts: ReadonlyArray<ProjectScript>;
 }) {
   const environmentId = input.threadRef?.environmentId ?? null;
-  const processes = useManagedProcesses(environmentId, input.checkoutPath);
+  const { processes } = useManagedProcesses(environmentId, input.checkoutPath);
   const watching = processes.some(
     (process) =>
       process.status !== "stopped" &&

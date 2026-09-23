@@ -5,8 +5,10 @@ you are working in.
 
 ## Start a dev server
 
-Open the browser preview in a thread. Scripts that declare a preview URL, and scripts with the
-run icon, are listed under **Dev servers**. Start one there. The preview opens it once the server
+Open the browser preview in a thread. The project's actions that declare a preview URL or use the
+run icon are listed under **Dev servers**. A project with no such action gets its `package.json`
+`dev` script instead, run with the package manager its lockfile names, so a fresh clone needs no
+setup. Start one there. The preview opens it once the server
 serves a page, so a slow first build never shows a connection error.
 
 Each checkout, whether a worktree or the project's main folder, gets its own block of ten ports
@@ -19,8 +21,10 @@ The script receives its ports as environment variables:
 - `PORT` and `T3CODE_MANAGED_PORT`: the first port of the block
 - `T3CODE_MANAGED_PORT_1` to `T3CODE_MANAGED_PORT_9`: the rest
 
-Most frameworks read `PORT` on their own. For one that does not, pass it in the script, for
-example `vite --port $T3CODE_MANAGED_PORT --strictPort`. A `PORT` set in the project's own
+Most frameworks read `PORT` on their own. When T3 Code runs your `package.json` `dev` script, it
+also passes `--port` to Vite, Next.js, Astro, Nuxt and Angular, which ignore `PORT`. In an action
+you write yourself, pass it in the command, for example `vite --port $T3CODE_MANAGED_PORT
+--strictPort`. A `PORT` set in the project's own
 `.env` file still wins.
 
 ## When a dev server stops

@@ -819,6 +819,7 @@ describe("ManagedProcesses", () => {
 
           expect(snapshot).toEqual({
             checkoutPath: "/work/app",
+            detectedScript: null,
             processes: [
               expect.objectContaining({
                 scriptId: "dev",
@@ -827,6 +828,26 @@ describe("ManagedProcesses", () => {
                 port: 11000,
               }),
             ],
+          });
+        }),
+      ),
+    );
+
+    it.effect("offers the checkout's package.json dev script to start", () =>
+      withRegistry((registryPath, fs) =>
+        Effect.gen(function* () {
+          const world = new World();
+          const { service } = yield* boot(world, registryPath);
+          const checkout = yield* fs.makeTempDirectoryScoped({ prefix: "t3-checkout-" });
+          yield* fs.writeFileString(`${checkout}/package.json`, '{"scripts":{"dev":"next dev"}}');
+          yield* fs.writeFileString(`${checkout}/pnpm-lock.yaml`, "");
+
+          const snapshot = yield* snapshotOf(service, checkout);
+
+          expect(snapshot.detectedScript).toEqual({
+            id: "package-json:dev",
+            name: "Dev server",
+            command: "pnpm run dev --port $PORT",
           });
         }),
       ),

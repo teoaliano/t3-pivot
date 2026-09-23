@@ -25,6 +25,7 @@ import {
   type ManagedProcessTarget,
   type TerminalEvent,
 } from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -58,6 +59,7 @@ import {
   type PortRange,
   type PortReservations,
 } from "./PortReservations.ts";
+import { readDetectedDevScript } from "./detectDevScript.ts";
 import { ProcessInspector } from "./ProcessInspector.ts";
 
 /** What to run: a project script resolved against the checkout that owns it. */
@@ -107,7 +109,10 @@ export class ManagedProcesses extends Context.Service<
     ) => Effect.Effect<void>;
     /** Keeps the process from being reaped until the scope closes. */
     readonly borrow: (target: ManagedProcessTarget) => Effect.Effect<void, never, Scope.Scope>;
-    /** The checkout's processes now, then after every change. Watching holds no claim. */
+    /**
+     * The checkout's processes now, then after every change, with the
+     * `package.json` dev script it offers. Watching holds no claim.
+     */
     readonly stream: (checkoutPath: string) => Stream.Stream<ManagedProcessCheckoutSnapshot>;
     /** Stops every process idle past the threshold that nothing exempts. */
     readonly sweep: Effect.Effect<void>;
@@ -209,6 +214,7 @@ export const make = Effect.fn("ManagedProcesses.make")(function* (
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const serviceScope = yield* Effect.scope;
+  const platform = yield* HostProcessPlatform;
 
   const idleThresholdMs = Math.max(1, options.idleThresholdMs ?? DEFAULT_IDLE_THRESHOLD_MS);
   const registryLock = yield* Semaphore.make(1);
@@ -632,8 +638,17 @@ export const make = Effect.fn("ManagedProcesses.make")(function* (
   };
 
   const stream: ManagedProcesses["Service"]["stream"] = (checkoutPath) =>
-    SubscriptionRef.changes(state).pipe(
-      Stream.map((current) => snapshotFor(current, checkoutPath)),
+    Stream.unwrap(
+      readDetectedDevScript(checkoutPath, platform).pipe(
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Path.Path, path),
+        Effect.map((detectedScript) =>
+          SubscriptionRef.changes(state).pipe(
+            Stream.map((current) => ({ ...snapshotFor(current, checkoutPath), detectedScript })),
+          ),
+        ),
+      ),
+    ).pipe(
       Stream.changesWith((left, right) => Equal.equals(left, right)),
       // A slow client only ever holds the newest snapshot.
       Stream.buffer({ capacity: 1, strategy: "sliding" }),

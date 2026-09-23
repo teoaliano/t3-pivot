@@ -75,8 +75,8 @@ counts. An agent working in the checkout counts. Pinning a process exempts it.
     a conflict names the culprit instead of saying the port is in use.
 17. As a developer, I want a conflict to offer me a new block rather than offering to kill
     the other process, so that the safe option is the default one.
-18. As a developer, I want my project to work without editing its config, so that pressing
-    start on a fresh clone just works.
+18. As a developer, I want my project to work without editing its config or adding an action,
+    so that pressing start on a fresh clone just works.
 19. As a developer, I want the assigned port available to my dev command, so that I can
     pass it explicitly when my project needs that.
 20. As a developer, I want my project's own port setting to keep winning, so that adopting
@@ -357,6 +357,27 @@ last.
 
 The name used by the app's own server port is already taken and is not reused.
 
+### A checkout with no dev action still gets one
+
+A fresh repository has no project actions, and a person should not have to write one before
+pressing start. An agent should not either: without one, the start tool has nothing to run
+and the agent falls back to its own shell, which gets no reserved port and is never
+stopped.
+
+So when the project declares no dev action, the checkout's `package.json` supplies one.
+Its `dev` script becomes a detected dev script, run with the package manager its lockfile
+names. A project action always wins over it, and it is never written into the user's
+settings or project file.
+
+Because the preview must land on the reserved port, the detected command also passes the
+port as a flag to the few dev tools known to ignore `PORT` and accept `--port`, with
+`--strictPort` for Vite so a taken port fails rather than slides. This is the one place T3
+builds a command. It never edits a command the user wrote.
+
+This narrows the charting rule against framework detection rather than breaking it. T3
+looks up one script name in one file and matches the first word of that script against a
+short list. It never infers a framework from the project's contents.
+
 ### The agent surface
 
 Exactly one new tool: start a managed process for the caller's checkout. The invocation
@@ -489,6 +510,10 @@ host-constrained one, because that is the decision that matters.
 30. Do not navigate until the port appears in discovery, then navigate. Seam: same.
 31. Open the preview after readiness when the script declares the automatic switch, and not
     otherwise. Seam: same.
+32. Offer the checkout's `package.json` `dev` script, run with its lockfile's package manager
+    and the reserved port, when the project declares no dev action. Seams: dev script
+    detection (pure), managed processes service stream, agent toolkit handlers, preview
+    resolution logic.
 
 ## Out of scope
 

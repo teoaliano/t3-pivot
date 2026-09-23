@@ -1,19 +1,25 @@
-import type { EnvironmentId, ManagedProcess } from "@t3tools/contracts";
+import type { EnvironmentId, ManagedProcessCheckoutSnapshot } from "@t3tools/contracts";
 
 import { managedProcessEnvironment } from "~/state/managedProcesses";
 import { useEnvironmentQuery } from "~/state/query";
 
-const NO_PROCESSES: ReadonlyArray<ManagedProcess> = [];
+const EMPTY: Pick<ManagedProcessCheckoutSnapshot, "processes" | "detectedScript"> = {
+  processes: [],
+  detectedScript: null,
+};
 
-/** The checkout's managed processes. Reading them holds no claim on them. */
+/**
+ * The checkout's managed processes and the package.json dev script it offers.
+ * Reading them holds no claim on them.
+ */
 export function useManagedProcesses(
   environmentId: EnvironmentId | null,
   checkoutPath: string | null,
-): ReadonlyArray<ManagedProcess> {
+): Pick<ManagedProcessCheckoutSnapshot, "processes" | "detectedScript"> {
   const query = useEnvironmentQuery(
     environmentId === null || checkoutPath === null
       ? null
       : managedProcessEnvironment.checkout({ environmentId, input: { checkoutPath } }),
   );
-  return query.data?.processes ?? NO_PROCESSES;
+  return query.data ?? EMPTY;
 }

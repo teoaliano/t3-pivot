@@ -7,6 +7,8 @@ import {
   PreviewAutomationUnavailableError,
   TrimmedNonEmptyString,
 } from "@t3tools/contracts";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/unstable/ai";
 
@@ -19,7 +21,7 @@ export const StartServerInput = Schema.Struct({
   script: Schema.optional(
     TrimmedNonEmptyString.annotate({
       description:
-        "Id or name of the project script to run. Omit it to run the script that declares a preview URL.",
+        "Id or name of the project script to run. Omit it to run the project's dev action, or the dev script in package.json when the project has none.",
     }),
   ),
 });
@@ -59,6 +61,8 @@ const StartServerTool = Tool.make("preview_start_server", {
     ManagedProcesses.ManagedProcesses,
     ProjectionSnapshotQuery,
     ServerSettingsService,
+    FileSystem.FileSystem,
+    Path.Path,
   ],
 })
   .annotate(Tool.Title, "Start dev server")

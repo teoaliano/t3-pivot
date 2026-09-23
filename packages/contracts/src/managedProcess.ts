@@ -33,10 +33,20 @@ export const ManagedProcess = Schema.Struct({
 });
 export type ManagedProcess = typeof ManagedProcess.Type;
 
+/** A `package.json` dev script the checkout offers when its project declares no dev action. */
+export const DetectedDevScript = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  command: TrimmedNonEmptyString,
+});
+export type DetectedDevScript = typeof DetectedDevScript.Type;
+
 /** Every process this checkout has run since the server started, stopped ones included. */
 export const ManagedProcessCheckoutSnapshot = Schema.Struct({
   checkoutPath: TrimmedNonEmptyString,
   processes: Schema.Array(ManagedProcess),
+  /** Optional so older servers still decode. Read once per subscription. */
+  detectedScript: Schema.optional(Schema.NullOr(DetectedDevScript)),
 });
 export type ManagedProcessCheckoutSnapshot = typeof ManagedProcessCheckoutSnapshot.Type;
 

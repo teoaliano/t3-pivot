@@ -59,6 +59,22 @@ describe("managedPreviewRows", () => {
     ]);
   });
 
+  it("offers the checkout's detected dev script when the project has no dev action", () => {
+    const detectedScript = { id: "package-json:dev", name: "Dev server" };
+
+    expect(
+      managedPreviewRows({ processes: [], scripts: [], detectedScript, discovered: [] }),
+    ).toEqual([
+      expect.objectContaining({ scriptId: "package-json:dev", state: "startable", port: null }),
+    ]);
+    // A project's own dev action wins over it.
+    expect(
+      managedPreviewRows({ processes: [], scripts, detectedScript, discovered: [] }).map(
+        (row) => row.scriptId,
+      ),
+    ).toEqual(["dev"]);
+  });
+
   it("keeps a stopped process startable and shows why it stopped", () => {
     const rows = managedPreviewRows({
       processes: [processOf({ status: "stopped", lastError: "Exited with code 1" })],
