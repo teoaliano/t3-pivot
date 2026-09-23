@@ -21,6 +21,7 @@ import {
   ManagedProcessStartError,
   type ManagedProcess,
   type ManagedProcessCheckoutSnapshot,
+  type ManagedProcessOverview,
   type ManagedProcessStatus,
   type ManagedProcessTarget,
   type TerminalEvent,
@@ -119,6 +120,8 @@ export class ManagedProcesses extends Context.Service<
      * `package.json` dev script it offers. Watching holds no claim.
      */
     readonly stream: (checkoutPath: string) => Stream.Stream<ManagedProcessCheckoutSnapshot>;
+    /** Every live or pinned process in every checkout, then after every change. Holds no claim. */
+    readonly streamOverview: Stream.Stream<ManagedProcessOverview>;
     /** Stops every process idle past the threshold that nothing exempts. */
     readonly sweep: Effect.Effect<void>;
   }
@@ -659,6 +662,23 @@ export const make = Effect.fn("ManagedProcesses.make")(function* (
       Stream.buffer({ capacity: 1, strategy: "sliding" }),
     );
 
+  const streamOverview: ManagedProcesses["Service"]["streamOverview"] = SubscriptionRef.changes(
+    state,
+  ).pipe(
+    Stream.map((current) => ({
+      processes: [...current.processes.values()]
+        .filter((managed) => isLive(managed) || current.pins.has(processKey(managed)))
+        .map((managed) => toContract(managed, current.pins))
+        .toSorted(
+          (left, right) =>
+            left.checkoutPath.localeCompare(right.checkoutPath) ||
+            left.scriptId.localeCompare(right.scriptId),
+        ),
+    })),
+    Stream.changesWith((left, right) => Equal.equals(left, right)),
+    Stream.buffer({ capacity: 1, strategy: "sliding" }),
+  );
+
   /** Checkout path to the newest agent activity there, and whether work is live. */
   const readCheckoutActivity = projections.getShellSnapshot().pipe(
     Effect.map((snapshot) => {
@@ -845,6 +865,7 @@ export const make = Effect.fn("ManagedProcesses.make")(function* (
       setPinned,
       borrow,
       stream,
+      streamOverview,
       sweep,
     }),
     reconcileRegistry,
