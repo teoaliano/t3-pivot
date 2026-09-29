@@ -2,6 +2,7 @@
 
 // Maintainer commands for T3 Pivot, run by hand on the release Mac.
 //   sync     open a PR on the fork that merges upstream's newest stable tag
+//   release  build, sign, notarize and publish T3 Pivot from main
 // Both commands act as the fork owner's GitHub account, whatever gh's active
 // account is.
 
@@ -17,12 +18,20 @@ import * as Stream from "effect/Stream";
 import { Command } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import { newestStableTag, planUpstreamSync } from "./pivot-release-plan.ts";
+import {
+  FORK_TAG_PREFIX,
+  newestStableTag,
+  planForkVersion,
+  planUpstreamSync,
+} from "./pivot-release-plan.ts";
 
 const FORK_REPOSITORY = "teoaliano/t3-pivot";
 const FORK_ACCOUNT = "teoaliano";
 const UPSTREAM_REMOTE = "upstream";
 const FORK_REMOTE = "origin";
+const APPLE_TEAM_ID = "N2X3SV5FDD";
+// Created once with `xcrun notarytool store-credentials t3-pivot`.
+const NOTARY_KEYCHAIN_PROFILE = "t3-pivot";
 
 export class PivotCommandError extends Schema.TaggedError<PivotCommandError>()(
   "PivotCommandError",
@@ -35,6 +44,17 @@ export class PivotCommandError extends Schema.TaggedError<PivotCommandError>()(
   override get message(): string {
     const detail = this.stderr.trim();
     return `\`${this.command}\` exited with code ${this.exitCode}${detail ? `:\n${detail}` : "."}`;
+  }
+}
+
+export class PivotReleaseRefusedError extends Schema.TaggedError<PivotReleaseRefusedError>()(
+  "PivotReleaseRefusedError",
+  {
+    reason: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Refusing to release: ${this.reason}`;
   }
 }
 
@@ -68,6 +88,31 @@ const run = Effect.fn("pivot.run")(function* (
       return stdout.trim();
     }),
   );
+});
+
+/** Run a long command with its output streamed to the terminal. */
+const runVisible = Effect.fn("pivot.runVisible")(function* (
+  command: string,
+  args: ReadonlyArray<string>,
+  env: Record<string, string> = {},
+) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const exitCode = yield* spawner.exitCode(
+    ChildProcess.make(command, args, {
+      env,
+      extendEnv: true,
+      stdin: "ignore",
+      stdout: "inherit",
+      stderr: "inherit",
+    }),
+  );
+  if (exitCode !== 0) {
+    return yield* new PivotCommandError({
+      command: [command, ...args].join(" "),
+      exitCode,
+      stderr: "",
+    });
+  }
 });
 
 const lines = (output: string) => output.split("\n").filter((line) => line.length > 0);
@@ -130,12 +175,112 @@ const sync = Effect.gen(function* () {
   yield* Console.log(prUrl);
 });
 
+const release = Effect.gen(function* () {
+  const env = yield* forkAccountEnv;
+
+  const branch = yield* run("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+  if (branch !== "main") {
+    return yield* new PivotReleaseRefusedError({ reason: `on ${branch}, not main.` });
+  }
+  const changes = yield* run("git", ["status", "--porcelain", "--untracked-files=no"]);
+  if (changes.length > 0) {
+    return yield* new PivotReleaseRefusedError({ reason: "main has uncommitted changes." });
+  }
+  yield* run("git", ["fetch", "--quiet", FORK_REMOTE, "main"], env);
+  const head = yield* run("git", ["rev-parse", "HEAD"]);
+  if (head !== (yield* run("git", ["rev-parse", `${FORK_REMOTE}/main`]))) {
+    return yield* new PivotReleaseRefusedError({
+      reason: `main differs from ${FORK_REMOTE}/main.`,
+    });
+  }
+
+  yield* run("git", ["fetch", "--quiet", "--tags", UPSTREAM_REMOTE]);
+  const upstreamBaseTag = newestStableTag(
+    lines(yield* run("git", ["tag", "--merged", "HEAD", "--list", "v*"])),
+  );
+  if (Option.isNone(upstreamBaseTag)) {
+    return yield* new PivotReleaseRefusedError({
+      reason: "main contains no upstream stable tag.",
+    });
+  }
+  const forkTags = lines(
+    yield* run("git", ["ls-remote", "--tags", "--refs", FORK_REMOTE, `${FORK_TAG_PREFIX}*`], env),
+  ).map((line) => line.replace(/^.*\trefs\/tags\//u, ""));
+  const version = yield* planForkVersion({
+    upstreamBase: upstreamBaseTag.value.slice(1),
+    forkTags,
+  });
+  const tag = `${FORK_TAG_PREFIX}${version}`;
+
+  const identity = lines(yield* run("security", ["find-identity", "-v", "-p", "codesigning"]))
+    .map((line) => /"Developer ID Application: (.+)"/u.exec(line)?.[1])
+    .find((name) => name?.endsWith(`(${APPLE_TEAM_ID})`));
+  if (identity === undefined) {
+    return yield* new PivotReleaseRefusedError({
+      reason: `no Developer ID Application identity for team ${APPLE_TEAM_ID} in the keychain.`,
+    });
+  }
+  // Fail before a long build if the notary profile is missing.
+  yield* run("xcrun", ["notarytool", "history", "--keychain-profile", NOTARY_KEYCHAIN_PROFILE]);
+
+  yield* Console.log(`Building T3 Pivot ${version} on upstream ${upstreamBaseTag.value}...`);
+  const outputDir = `release/pivot-${version}`;
+  yield* runVisible(
+    "node",
+    [
+      "scripts/build-desktop-artifact.ts",
+      ...["--platform", "mac", "--target", "dmg", "--arch", "arm64", "--signed"],
+      ...["--build-version", version, "--output-dir", outputDir],
+    ],
+    {
+      T3CODE_DESKTOP_UPDATE_REPOSITORY: FORK_REPOSITORY,
+      T3CODE_MACOS_SIGNING_MODE: "developer-id",
+      CSC_NAME: identity,
+      APPLE_KEYCHAIN_PROFILE: NOTARY_KEYCHAIN_PROFILE,
+    },
+  );
+
+  const assets = [
+    `T3-Pivot-${version}-arm64.dmg`,
+    `T3-Pivot-${version}-arm64.dmg.blockmap`,
+    `T3-Pivot-${version}-arm64.zip`,
+    `T3-Pivot-${version}-arm64.zip.blockmap`,
+    "latest-mac.yml",
+  ].map((name) => `${outputDir}/${name}`);
+  yield* run("ls", assets);
+
+  // Verify the app exactly as the updater will install it, from the zip.
+  const verifyDir = `${outputDir}/verify`;
+  yield* run("rm", ["-rf", verifyDir]);
+  yield* run("ditto", ["-x", "-k", `${outputDir}/T3-Pivot-${version}-arm64.zip`, verifyDir]);
+  const app = `${verifyDir}/T3 Pivot.app`;
+  yield* run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", app]);
+  yield* run("xcrun", ["stapler", "validate", app]);
+  yield* run("spctl", ["--assess", "--type", "execute", "--verbose", app]);
+
+  const releaseUrl = yield* run(
+    "gh",
+    [
+      ...["release", "create", tag, "--repo", FORK_REPOSITORY, "--target", head],
+      ...["--title", `T3 Pivot ${version}`, "--latest", "--generate-notes"],
+      ...["--notes", `Built on upstream ${upstreamBaseTag.value}.`],
+      ...assets,
+    ],
+    env,
+  );
+  yield* Console.log(releaseUrl);
+});
+
 const pivotCli = Command.make("pivot").pipe(
   Command.withDescription("Keep T3 Pivot level with upstream and publish its releases."),
   Command.withSubcommands([
     Command.make("sync").pipe(
       Command.withDescription("Open a PR merging upstream's newest stable tag into main."),
       Command.withHandler(() => sync),
+    ),
+    Command.make("release").pipe(
+      Command.withDescription("Build, sign, notarize and publish T3 Pivot from main."),
+      Command.withHandler(() => release),
     ),
   ]),
 );
