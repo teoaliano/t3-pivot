@@ -105,7 +105,7 @@ function ThreadHeader(
 ) {
   const navigation = useNavigation();
   const { layout, panes, toggleAuxiliaryPane } = useAdaptiveWorkspaceLayout();
-  const { onOpenTerminal } = props.gitControls;
+  const { onOpenTerminal, onOpenDevServers } = props.gitControls;
   const native = useThreadHeaderOptions(props);
   const androidHeaderActions = useMemo<ReadonlyArray<ScreenHeaderAction>>(() => {
     const actions: ScreenHeaderAction[] = [];
@@ -131,6 +131,11 @@ function ThreadHeader(
         icon: "terminal",
         onPress: () => onOpenTerminal(null),
       });
+      actions.push({
+        accessibilityLabel: "Dev servers",
+        icon: "server.rack",
+        onPress: onOpenDevServers,
+      });
     }
     actions.push({
       accessibilityLabel: "Open git controls",
@@ -143,6 +148,7 @@ function ThreadHeader(
     panes.auxiliaryPaneVisible,
     props.onOpenFilesInspector,
     onOpenTerminal,
+    onOpenDevServers,
     props.onOpenGitInspector,
     toggleAuxiliaryPane,
     props.onReturnToThread,
@@ -499,6 +505,13 @@ function ThreadRouteContent(
     setInspectorSelection({ routeThreadIdentity, mode: "git" });
     showAuxiliaryPane("inspector");
   }, [fileInspector.supported, navigation, routeThreadIdentity, selectedThread, showAuxiliaryPane]);
+  const handleOpenDevServers = useCallback(() => {
+    if (selectedThread === null) return;
+    navigation.navigate("ThreadDevServers", {
+      environmentId: String(selectedThread.environmentId),
+      threadId: String(selectedThread.id),
+    });
+  }, [navigation, selectedThread]);
   const handleOpenFilesInspector = useCallback(() => {
     if (selectedThread === null || selectedThreadCwd === null) {
       return;
@@ -779,6 +792,7 @@ function ThreadRouteContent(
     onOpenTerminal: handleOpenTerminal,
     onOpenNewTerminal: handleOpenNewTerminal,
     onRunProjectScript: handleRunProjectScript,
+    onOpenDevServers: handleOpenDevServers,
     onPull: gitActions.onPullSelectedThreadBranch,
     onRunAction: gitActions.onRunSelectedThreadGitAction,
   };

@@ -42,6 +42,7 @@ import { GitBranchesSheet } from "./features/threads/git/GitBranchesSheet";
 import { GitCommitSheet } from "./features/threads/git/GitCommitSheet";
 import { GitConfirmSheet } from "./features/threads/git/GitConfirmSheet";
 import { GitOverviewSheet } from "./features/threads/git/GitOverviewSheet";
+import { DevServersSheet } from "./features/threads/DevServersSheet";
 import { ThreadRouteScreen } from "./features/threads/ThreadRouteScreen";
 import { ConnectionsRouteScreen } from "./features/connection/ConnectionsRouteScreen";
 import { ConnectionsNewRouteScreen } from "./features/connection/ConnectionsNewRouteScreen";
@@ -458,6 +459,7 @@ const WORKSPACE_OVERLAY_ROUTES = new Set([
   "SettingsSheet",
   "ThreadReviewComment",
   "ThreadDevicePreview",
+  "ThreadDevServers",
   "ThreadSettingsSheet",
 ]);
 
@@ -666,6 +668,15 @@ const RootStackConfig = createNativeStackNavigator({
     GitOverview: createNativeStackScreen({
       screen: GitOverviewSheet,
       linking: `${THREAD_LINKING_PREFIX}/git`,
+      options: {
+        ...FORM_SHEET_PRESENTATION_OPTIONS,
+        sheetAllowedDetents: [0.55, 0.92],
+        sheetGrabberVisible: true,
+      },
+    }),
+    ThreadDevServers: createNativeStackScreen({
+      screen: DevServersSheet,
+      linking: `${THREAD_LINKING_PREFIX}/dev-servers`,
       options: {
         ...FORM_SHEET_PRESENTATION_OPTIONS,
         sheetAllowedDetents: [0.55, 0.92],
