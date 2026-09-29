@@ -22,6 +22,7 @@ import {
   createStageWorkspaceConfig,
   createStagePatchedDependencies,
   createBuildConfig,
+  renderMacHardenedRuntimeEntitlements,
   DESKTOP_ELECTRON_LANGUAGES,
   DESKTOP_FILE_EXCLUSIONS,
   DESKTOP_EXTRA_RESOURCES,
@@ -1896,6 +1897,26 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         { name: "T3 Code", schemes: ["t3code", "t3code-dev"] },
       ]);
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+  );
+
+  it.effect(
+    "signs Developer ID builds without passkey entitlements or a provisioning profile",
+    () =>
+      Effect.gen(function* () {
+        const config = yield* createBuildConfig("mac", "dmg", "0.0.4200", true, false, undefined, {
+          entitlementsPath: "/tmp/entitlements.mac.plist",
+        });
+        const entitlements = renderMacHardenedRuntimeEntitlements();
+
+        const mac = config.mac as Record<string, unknown>;
+        assert.equal(mac.entitlements, "/tmp/entitlements.mac.plist");
+        assert.notProperty(mac, "provisioningProfile");
+        assert.match(String(mac.sign), /[\\/]scripts[\\/]sign-macos\.ts$/);
+        assert.include(entitlements, "<key>com.apple.security.cs.allow-jit</key>");
+        assert.include(entitlements, "<key>com.apple.security.cs.disable-library-validation</key>");
+        assert.notInclude(entitlements, "associated-domains");
+        assert.notInclude(entitlements, "application-identifier");
+      }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
   it.effect("uses the nightly DMG background for nightly macOS builds", () =>

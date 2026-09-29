@@ -1310,6 +1310,28 @@ ${associatedDomains}
 `;
 }
 
+/**
+ * Entitlements for T3 Pivot's Developer ID builds. T3 Connect's passkey domain
+ * names upstream's team, so the fork drops the associated-domain entitlements
+ * and the provisioning profile they need, keeping only the hardened-runtime
+ * exceptions Electron and the bundled server require.
+ */
+export function renderMacHardenedRuntimeEntitlements(): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+  </dict>
+</plist>
+`;
+}
+
 export function resolveFffNativeDependencies(
   platform: typeof BuildPlatform.Type,
   arch: typeof BuildArch.Type,
@@ -2632,7 +2654,8 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   macPasskeySigning:
     | {
         readonly entitlementsPath: string;
-        readonly provisioningProfilePath: string;
+        // Absent in Developer ID mode, which carries no passkey entitlements.
+        readonly provisioningProfilePath?: string;
       }
     | undefined,
   // Windows only, and false when no Linux CLI archive was handed to the build:
@@ -2704,11 +2727,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         },
       ],
       ...(signed ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") } : {}),
-      ...(macPasskeySigning
-        ? {
-            entitlements: macPasskeySigning.entitlementsPath,
-            provisioningProfile: macPasskeySigning.provisioningProfilePath,
-          }
+      ...(macPasskeySigning ? { entitlements: macPasskeySigning.entitlementsPath } : {}),
+      ...(macPasskeySigning?.provisioningProfilePath
+        ? { provisioningProfile: macPasskeySigning.provisioningProfilePath }
         : {}),
     };
   }
@@ -3588,8 +3609,14 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const stageProdResourcesDir = path.join(stageAppDir, "apps/desktop/prod-resources");
   yield* fs.copy(stageResourcesDir, stageProdResourcesDir);
 
+  // T3 Pivot signs with a plain Developer ID and no passkey entitlements; see
+  // renderMacHardenedRuntimeEntitlements.
+  const macDeveloperIdSigning =
+    options.platform === "mac" &&
+    options.signed &&
+    loadRepoEnv({ repoRoot }).T3CODE_MACOS_SIGNING_MODE?.trim() === "developer-id";
   const configuredMacPasskeySigning =
-    options.platform === "mac" && options.signed
+    options.platform === "mac" && options.signed && !macDeveloperIdSigning
       ? yield* Effect.try({
           try: () => resolveMacPasskeySigningConfiguration(loadRepoEnv({ repoRoot })),
           catch: MacPasskeySigningConfigurationResolutionError.fromCause,
@@ -3604,9 +3631,13 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         ),
       }
     : undefined;
-  const macEntitlementsPath = macPasskeySigning
-    ? path.join(stageAppDir, "entitlements.mac.plist")
-    : undefined;
+  const macEntitlementsPath =
+    macPasskeySigning || macDeveloperIdSigning
+      ? path.join(stageAppDir, "entitlements.mac.plist")
+      : undefined;
+  if (macDeveloperIdSigning && macEntitlementsPath) {
+    yield* fs.writeFileString(macEntitlementsPath, renderMacHardenedRuntimeEntitlements());
+  }
   if (macPasskeySigning && macEntitlementsPath) {
     if (!(yield* fs.exists(macPasskeySigning.provisioningProfilePath))) {
       return yield* new MacProvisioningProfileNotFoundError({
@@ -3660,7 +3691,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
             entitlementsPath: macEntitlementsPath,
             provisioningProfilePath: macPasskeySigning.provisioningProfilePath,
           }
-        : undefined,
+        : macDeveloperIdSigning && macEntitlementsPath
+          ? { entitlementsPath: macEntitlementsPath }
+          : undefined,
       bundlesWslRuntime({ platform: options.platform, runtimeArchivePath: options.wslRuntime }),
       options.arch,
     ),
