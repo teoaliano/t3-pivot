@@ -591,7 +591,21 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.equal(config.productName, "T3 Pivot");
       assert.equal(config.artifactName, "T3-Pivot-${version}-${arch}.${ext}");
       assert.equal((config.dmg as Record<string, unknown>).title, "T3 Pivot 0.0.4200 Installer");
-    }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+      assert.deepStrictEqual(config.publish, [
+        { provider: "github", owner: "teoaliano", repo: "t3-pivot", releaseType: "release" },
+      ]);
+    }).pipe(
+      Effect.provide(
+        ConfigProvider.layer(
+          ConfigProvider.fromEnv({
+            env: {
+              T3CODE_DESKTOP_UPDATE_REPOSITORY: "teoaliano/t3-pivot",
+              GITHUB_REPOSITORY: "pingdotgg/t3code",
+            },
+          }),
+        ),
+      ),
+    ),
   );
 
   it.effect("applies platform-specific packaging to the build config", () =>

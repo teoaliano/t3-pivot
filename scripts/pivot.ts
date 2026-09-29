@@ -117,6 +117,10 @@ const runVisible = Effect.fn("pivot.runVisible")(function* (
 
 const lines = (output: string) => output.split("\n").filter((line) => line.length > 0);
 
+/** Tag names from `git ls-remote --tags --refs` output. */
+const lsRemoteTagNames = (output: string) =>
+  lines(output).map((line) => line.replace(/^.*\trefs\/tags\//u, ""));
+
 // gh and gh's git credential helper both honor GH_TOKEN.
 const forkAccountEnv = run("gh", ["auth", "token", "--user", FORK_ACCOUNT]).pipe(
   Effect.map((token) => ({ GH_TOKEN: token })),
@@ -126,9 +130,9 @@ const sync = Effect.gen(function* () {
   const env = yield* forkAccountEnv;
   yield* run("git", ["fetch", "--quiet", FORK_REMOTE, "main"], env);
   yield* run("git", ["fetch", "--quiet", "--tags", UPSTREAM_REMOTE]);
-  const upstreamTags = lines(
+  const upstreamTags = lsRemoteTagNames(
     yield* run("git", ["ls-remote", "--tags", "--refs", UPSTREAM_REMOTE]),
-  ).map((line) => line.replace(/^.*\trefs\/tags\//u, ""));
+  );
   const mergedTags = lines(
     yield* run("git", ["tag", "--merged", `${FORK_REMOTE}/main`, "--list", "v*"]),
   );
@@ -203,9 +207,9 @@ const release = Effect.gen(function* () {
       reason: "main contains no upstream stable tag.",
     });
   }
-  const forkTags = lines(
+  const forkTags = lsRemoteTagNames(
     yield* run("git", ["ls-remote", "--tags", "--refs", FORK_REMOTE, `${FORK_TAG_PREFIX}*`], env),
-  ).map((line) => line.replace(/^.*\trefs\/tags\//u, ""));
+  );
   const version = yield* planForkVersion({
     upstreamBase: upstreamBaseTag.value.slice(1),
     forkTags,
