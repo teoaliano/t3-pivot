@@ -42,6 +42,7 @@ import { HttpClient } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
+  DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE,
   DesktopBackendBootstrap,
   type DesktopBackendBootstrap as DesktopBackendBootstrapValue,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
@@ -299,6 +300,9 @@ export interface BackendInstanceSpec {
   // retries. Returns true when the callback changed configuration and the
   // manager should resolve once more; false stops the failed instance.
   readonly onPreflightFailed?: (failure: PreflightFailure) => Effect.Effect<boolean>;
+  // Fired when the backend exits because another live server owns its T3
+  // home. The instance stops instead of restarting into the same refusal.
+  readonly onHomeInUse?: () => Effect.Effect<void>;
 }
 
 interface ActiveBackendRun {
@@ -971,7 +975,13 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
           Scope.provide(runScope),
           Effect.matchEffect({
             onFailure: (error) => finalizeRun(error.message),
-            onSuccess: (exit) => finalizeRun(exit.reason),
+            onSuccess: (exit) =>
+              Option.getOrUndefined(exit.code) === DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE
+                ? Ref.update(state, (latest) => ({ ...latest, desiredRunning: false })).pipe(
+                    Effect.andThen(finalizeRun(exit.reason)),
+                    Effect.andThen(spec.onHomeInUse?.() ?? Effect.void),
+                  )
+                : finalizeRun(exit.reason),
           }),
           Effect.ensuring(Scope.close(runScope, Exit.void).pipe(Effect.ignore)),
         );

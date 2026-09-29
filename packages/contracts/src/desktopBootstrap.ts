@@ -23,3 +23,7 @@ export const DesktopBackendBootstrap = Schema.Struct({
 });
 
 export type DesktopBackendBootstrap = typeof DesktopBackendBootstrap.Type;
+
+// The server exits with this code when another live server already owns its
+// T3 home. The desktop stops restarting the backend and tells the user.
+export const DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE = 75;

@@ -150,8 +150,11 @@ import * as UsageService from "./usage/UsageService.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
   clearPersistedServerRuntimeState,
+  ensureHomeNotInUse,
+  isProcessAlive,
   makePersistedServerRuntimeState,
   persistServerRuntimeState,
+  serverOriginAnswers,
 } from "./serverRuntimeState.ts";
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import * as NetService from "@t3tools/shared/Net";
@@ -618,6 +621,17 @@ const makeServerLayer = Layer.unwrap(
     const launcherLayer = ServiceLauncherClient.layer;
 
     yield* fixPath();
+
+    // Refuse to share a T3 home with another live server before anything
+    // opens its database. A launcher-managed standby would be refused too,
+    // but T3 Pivot never runs under the service launcher.
+    yield* ensureHomeNotInUse({
+      path: config.serverRuntimeStatePath,
+      currentPid: process.pid,
+      isAlive: isProcessAlive,
+      originAnswers: (origin) =>
+        serverOriginAnswers(origin).pipe(Effect.provide(FetchHttpClient.layer)),
+    }).pipe(Effect.provide(PlatformServicesLive));
 
     const httpListeningLayer = Layer.effectDiscard(
       Effect.gen(function* () {
