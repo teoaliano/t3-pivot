@@ -4,16 +4,16 @@ import * as Schema from "effect/Schema";
 import {
   IsoDateTime,
   NonNegativeInt,
+  RunId,
   ThreadId,
   TrimmedNonEmptyString,
-  TurnId,
 } from "./baseSchemas.ts";
 
 /** A ship delivers a change; a scout investigates and leaves a report. */
 export const TeammateKind = Schema.Literals(["ship", "scout"]);
 export type TeammateKind = typeof TeammateKind.Type;
 
-/** What a teammate can say about its latest turn through `report_status`. */
+/** What a teammate can say about its latest run through `report_status`. */
 export const TeammateReportedStatus = Schema.Literals([
   "working",
   "needs-decision",
@@ -24,7 +24,7 @@ export const TeammateReportedStatus = Schema.Literals([
 ]);
 export type TeammateReportedStatus = typeof TeammateReportedStatus.Type;
 
-/** Reports that end a turn's story. `working` and `paused` do not. */
+/** Reports that end a run's story. `working` and `paused` do not. */
 export const TEAMMATE_TERMINAL_REPORTED_STATUSES = [
   "needs-decision",
   "blocked",
@@ -48,10 +48,10 @@ export const TeammateStatus = Schema.Literals([
 ]);
 export type TeammateStatus = typeof TeammateStatus.Type;
 
-/** A report is scoped to the turn it was made in, so a later silent turn never reads stale. */
+/** A report is scoped to the run it was made in, so a later silent run never reads stale. */
 export const TeammateReport = Schema.Struct({
   status: TeammateReportedStatus,
-  turnId: Schema.NullOr(TurnId),
+  runId: Schema.NullOr(RunId),
   /** The phase line for `working`, otherwise a one-line summary. */
   summary: Schema.NullOr(TrimmedNonEmptyString),
   /** Only for `paused`: when the external wait should clear. */
@@ -61,8 +61,8 @@ export const TeammateReport = Schema.Struct({
 export type TeammateReport = typeof TeammateReport.Type;
 
 /**
- * Set by the server when a restart interrupted the teammate's session:
- * `pending` while T3 resumes it, `failed` if the resume failed. Null otherwise.
+ * Set by the server when a restart interrupted the teammate's run: `pending`
+ * while T3 resumes it, `failed` if the resume failed. Null otherwise.
  */
 export const TeammateResumeState = Schema.Literals(["pending", "failed"]);
 export type TeammateResumeState = typeof TeammateResumeState.Type;
@@ -81,7 +81,7 @@ export type ThreadPivot = typeof ThreadPivot.Type;
 export const ThreadTeammate = Schema.Struct({
   pivotThreadId: ThreadId,
   kind: TeammateKind,
-  /** Latest report with the turn it was made in. Null until the first report. */
+  /** Latest report with the run it was made in. Null until the first report. */
   report: Schema.NullOr(TeammateReport),
   resume: Schema.optional(Schema.NullOr(TeammateResumeState)),
   /** Whether an open decision linked to this teammate is held for the user. */
@@ -94,11 +94,3 @@ export type ThreadTeammate = typeof ThreadTeammate.Type;
 /** A project with a remote delivers PRs; one without delivers ready branches. */
 export const PivotDeliveryMode = Schema.Literals(["direct-pr", "local-only"]);
 export type PivotDeliveryMode = typeof PivotDeliveryMode.Type;
-
-/**
- * Marks a message as the Pivot's rather than the user's. `brief` is a
- * teammate's first message, `instruction` any later Pivot message to a
- * teammate, `wake` a supervisor notice in the Pivot's own thread.
- */
-export const PivotMessageKind = Schema.Literals(["brief", "instruction", "wake"]);
-export type PivotMessageKind = typeof PivotMessageKind.Type;
