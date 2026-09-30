@@ -1,7 +1,7 @@
 # T3 Pivot
 
-A fork of T3 Code that adds firstmate's crew-supervision model: one agent you talk to per
-project, which dispatches and supervises teammates working in isolated checkouts.
+A fork of T3 Code that adds firstmate's crew-supervision model: an agent you talk to,
+which dispatches and supervises teammates working in isolated checkouts.
 
 Terms are recorded here as they are resolved. Where the fork inherits a word from T3 Code
 or firstmate with a _different_ meaning, that collision is called out explicitly, because
@@ -39,28 +39,55 @@ _Avoid_: in use, occupied, taken — none of them say whose
 ### Pivot mode
 
 **Pivot mode**:
-The state of a project that has a Pivot. A project has at most one Pivot.
+The feature as a whole: Pivots, their teammates and the Pivot view. Not a state a project
+or a thread is switched into.
+_Avoid_: using it for the Pivot view (the layout) or for a Pivot (the thread)
 
 **Pivot**:
-The supervising agent's thread in a project. The user talks to it, and it dispatches and
-supervises the project's teammates.
-_Avoid_: first mate (firstmate's word for the same role), supervisor, orchestrator. Do not
-confuse it with T3 Pivot, the name of this fork.
+A thread whose agent supervises teammates. The user talks to it, and it dispatches and
+supervises its own teammates. A thread is a Pivot from creation and stays one. A project
+has at most one active Pivot. Creating a new one moves the active Pivot's live teammates
+and open decisions to it, and the old one is **retired**: read-only history.
+_Avoid_: first mate (firstmate's word for the same role), supervisor, orchestrator,
+settled (T3's thread lifecycle state, not a retired Pivot). Do not confuse it with T3
+Pivot, the name of this fork.
 
 **Teammate**:
-A thread the Pivot dispatched and supervises, working in its own worktree.
+A thread a Pivot dispatched and supervises, working in its own worktree. It belongs to one
+Pivot at a time and stays a teammate for good. A teammate is either a **ship** (delivers
+a change) or a **scout** (investigates and leaves a report), and a scout can be promoted
+to a ship in place.
 _Avoid_: session (see below), crewmate (firstmate's word), worker, subagent (a
 provider-native helper inside one thread, which is a different thing)
 
+**Teammate status**:
+What a teammate is doing, as the user and the Pivot see it. It combines the teammate's
+**reported status** (what it last said about its latest turn) with its runtime state
+(running, waiting on an approval, errored). Runtime evidence wins while the teammate is
+active. A teammate that stops without reporting is **unreported**.
+_Avoid_: using the latest report alone as the teammate's status
+
+**Decision**:
+A question that stops work until someone answers it. A teammate opens one when it needs a
+call or is blocked, and the Pivot can open one for itself. The Pivot answers it unless it
+needs the user's authority. Then it is **escalated** and held for the user.
+_Avoid_: question, prompt, user input (T3's user-input request is a provider-native
+question inside one turn, which is a different thing)
+
 **Pivot view**:
-The dedicated layout for a project in Pivot mode: the Pivot's chat next to a card for each
-teammate. It has no sidebar.
+The full-screen layout of one Pivot: its chat next to a card for each teammate, with no
+sidebar. The other way to show a Pivot is as an ordinary chat, with its teammates nested
+under it in the sidebar.
 
 ### Inherited collisions
 
 **Session**:
 In T3 Code, the provider runtime attached to a thread. It is **not** a managed process or
 a teammate, and this repo never uses the word for either.
+
+**Task and endpoint**:
+In firstmate, a task is the durable unit of work and an endpoint is the agent session
+running it. Here a teammate thread is the task and a provider session is the endpoint.
 
 **Captain**:
 firstmate's word for the person directing the fleet. Here that is the **user**, as in

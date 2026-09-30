@@ -28,8 +28,8 @@ For bin 3, list sections with word counts, so the contract ticket can budget.
 
 ## Findings
 
-Branch `research/firstmate-contract-triage` (commit `a0288a854`), file
-`docs/findings/firstmate-contract-triage.md`, one table per bin.
+`docs/findings/firstmate-contract-triage.md` (first committed on the
+`research/firstmate-contract-triage` branch as `a0288a854`), one table per bin.
 
 ## Resolution
 
