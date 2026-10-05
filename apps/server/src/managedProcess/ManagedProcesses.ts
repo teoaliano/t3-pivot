@@ -31,6 +31,7 @@ import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -48,7 +49,8 @@ import * as SubscriptionRef from "effect/SubscriptionRef";
 import { writeFileStringAtomically } from "../atomicWrite.ts";
 import { BackgroundPolicy } from "../background/BackgroundPolicy.ts";
 import * as ServerConfig from "../config.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ThreadManagementService } from "../orchestration-v2/ThreadManagementService.ts";
+import { ProjectStoreV2 } from "../orchestration-v2/ProjectStore.ts";
 import { PortDiscovery } from "../preview/PortScanner.ts";
 import { forkParked } from "../serverActivation.ts";
 import { TerminalManager } from "../terminal/Manager.ts";
@@ -221,7 +223,8 @@ export const make = Effect.fn("ManagedProcesses.make")(function* (
   const discovery = yield* PortDiscovery;
   const inspector = yield* ProcessInspector;
   const backgroundPolicy = yield* BackgroundPolicy;
-  const projections = yield* ProjectionSnapshotQuery;
+  const threads = yield* ThreadManagementService;
+  const projects = yield* ProjectStoreV2;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const serviceScope = yield* Effect.scope;
@@ -696,31 +699,29 @@ export const make = Effect.fn("ManagedProcesses.make")(function* (
   );
 
   /** Checkout path to the newest agent activity there, and whether work is live. */
-  const readCheckoutActivity = projections.getShellSnapshot().pipe(
-    Effect.map((snapshot) => {
+  const readCheckoutActivity = Effect.all([threads.getShellSnapshot(), projects.listShells()]).pipe(
+    Effect.map(([snapshot, projectShells]) => {
       const rootByProject = new Map(
-        snapshot.projects.map((project) => [project.id, project.workspaceRoot] as const),
+        projectShells.map((project) => [project.id, project.workspaceRoot] as const),
       );
       const activity = new Map<string, { live: boolean; lastActivityMs: number }>();
       for (const thread of snapshot.threads) {
         const checkoutPath = thread.worktreePath ?? rootByProject.get(thread.projectId);
         if (checkoutPath === undefined) continue;
         const previous = activity.get(checkoutPath) ?? { live: false, lastActivityMs: 0 };
-        // Turn times, not the session record: the session changes when T3
+        // Run times, not the session record: the session changes when T3
         // closes an idle session too, which is not the agent working.
-        const turn = thread.latestTurn;
-        const turnAtMs = turn
-          ? Math.max(
-              ...[turn.requestedAt, turn.startedAt, turn.completedAt].map((at) =>
-                at === null ? 0 : Date.parse(at) || 0,
-              ),
-            )
-          : 0;
+        const turnAtMs = Math.max(
+          0,
+          ...[thread.latestRunRequestedAt, thread.latestRunStartedAt, thread.latestRunCompletedAt]
+            .filter((at) => at != null)
+            .map(DateTime.toEpochMillis),
+        );
         activity.set(checkoutPath, {
           live:
             previous.live ||
-            thread.session?.activeTurnId != null ||
-            thread.backgroundLiveness != null,
+            thread.activeRunId !== null ||
+            (thread.pendingBackgroundTasks?.length ?? 0) > 0,
           lastActivityMs: Math.max(previous.lastActivityMs, turnAtMs),
         });
       }

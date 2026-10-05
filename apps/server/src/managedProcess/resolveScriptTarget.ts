@@ -8,7 +8,8 @@ import { isDevProjectScript, resolveProjectScripts } from "@t3tools/shared/proje
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ThreadManagementService } from "../orchestration-v2/ThreadManagementService.ts";
+import { ProjectStoreV2 } from "../orchestration-v2/ProjectStore.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { DETECTED_DEV_SCRIPT_ID, readDetectedDevScript } from "./detectDevScript.ts";
 import type { ManagedScriptTarget } from "./ManagedProcesses.ts";
@@ -28,20 +29,20 @@ export const resolveManagedScriptTarget = Effect.fn("resolveManagedScriptTarget"
   threadId: ThreadId,
   scriptId: string | undefined,
 ) {
-  const projections = yield* ProjectionSnapshotQuery;
+  const threads = yield* ThreadManagementService;
+  const projects = yield* ProjectStoreV2;
   const settings = yield* ServerSettingsService;
-  const thread = yield* projections.getThreadShellById(threadId).pipe(Effect.orDie);
-  const project = Option.isSome(thread)
-    ? yield* projections.getProjectShellById(thread.value.projectId).pipe(Effect.orDie)
-    : Option.none();
-  if (Option.isNone(thread) || Option.isNone(project)) {
+  const thread = yield* threads.getThreadShell(threadId).pipe(Effect.orDie);
+  const project =
+    thread === null ? Option.none() : yield* projects.getShell(thread.projectId).pipe(Effect.orDie);
+  if (thread === null || Option.isNone(project)) {
     return yield* new ManagedProcessThreadNotFoundError({ threadId });
   }
   const scripts = resolveProjectScripts(
     yield* settings.getSettings.pipe(Effect.orDie),
     project.value,
   );
-  const checkoutPath = thread.value.worktreePath ?? project.value.workspaceRoot;
+  const checkoutPath = thread.worktreePath ?? project.value.workspaceRoot;
   const named =
     scriptId === undefined
       ? scripts.find(isDevProjectScript)
@@ -62,7 +63,7 @@ export const resolveManagedScriptTarget = Effect.fn("resolveManagedScriptTarget"
   return {
     checkoutPath,
     projectRoot: project.value.workspaceRoot,
-    worktreePath: thread.value.worktreePath,
+    worktreePath: thread.worktreePath,
     script: { id: script.id, name: script.name, command: script.command },
   } satisfies ManagedScriptTarget;
 });

@@ -52,7 +52,7 @@ export class ServerHomeInUseError extends Schema.TaggedError<ServerHomeInUseErro
     origin: Schema.String,
   },
 ) {
-  readonly [Runtime.errorExitCode] = DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE;
+  override readonly [Runtime.errorExitCode] = DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE;
 
   override get message(): string {
     return `Another T3 Code server is already using this data (pid ${this.pid}, origin ${this.origin}).`;
@@ -198,7 +198,7 @@ export const readPersistedServerRuntimeState = (path: string) =>
                   cause,
                 }),
               ),
-        onSuccess: (contents) => Effect.succeed(Option.some(contents)),
+        onSuccess: (contents) => Effect.succeedSome(contents),
       }),
     );
     if (Option.isNone(raw)) {
@@ -211,7 +211,7 @@ export const readPersistedServerRuntimeState = (path: string) =>
     }
 
     return yield* decodePersistedServerRuntimeState(trimmed).pipe(
-      Effect.map(Option.some),
+      Effect.asSome,
       Effect.mapError(
         (cause) =>
           new ServerRuntimeStateError({

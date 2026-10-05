@@ -35,12 +35,12 @@ all on shutdown, and there is no reattach path.
 
 Two reasons, and the second is the one that binds.
 
-A new persisted entity touches roughly fifteen to twenty files, including the three
-largest in the server: `ProjectionSnapshotQuery.ts`, `ProjectionPipeline.ts`, and
-`decider.ts`. It also needs a migration registered by hand in two places.
+A new persisted entity means new event types in `orchestrationV2.ts`, a migration, and
+projection code in the two largest files in the server: `Orchestrator.ts` and
+`ProjectionStore.ts`.
 
-More importantly, **persisted events carry no schema version**. `EventBaseFields` has no
-version field, so compatibility means never breaking the struct, enforced by decode
+More importantly, **persisted events carry no schema version**. `OrchestrationV2EventBase`
+has no version field, so compatibility means never breaking the struct, enforced by decode
 failure at startup rather than by a migration path. The precedent for legacy event fields
 in this codebase is explicit that their removal is not scheduled. Adding an event type is
 effectively permanent. That is the wrong commitment for state whose entire subject is a

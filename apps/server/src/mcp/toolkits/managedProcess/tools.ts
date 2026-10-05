@@ -16,7 +16,8 @@ import { Tool, Toolkit } from "effect/unstable/ai";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as ManagedProcesses from "../../../managedProcess/ManagedProcesses.ts";
-import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
+import { ProjectStoreV2 } from "../../../orchestration-v2/ProjectStore.ts";
 import { ServerSettingsService } from "../../../serverSettings.ts";
 
 export const StartServerInput = Schema.Struct({
@@ -63,7 +64,8 @@ const StartServerTool = Tool.make("preview_start_server", {
   dependencies: [
     McpInvocationContext.McpInvocationContext,
     ManagedProcesses.ManagedProcesses,
-    ProjectionSnapshotQuery,
+    ThreadManagementService,
+    ProjectStoreV2,
     ServerSettingsService,
     FileSystem.FileSystem,
     Path.Path,

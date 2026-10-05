@@ -3,15 +3,15 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   ProjectId,
   ProviderInstanceId,
+  RunId,
   ThreadId,
-  TurnId,
   type BackgroundScope,
   type DiscoveredLocalServer,
-  type OrchestrationShellSnapshot,
-  type OrchestrationThreadShell,
+  type OrchestrationV2ThreadShell,
   type TerminalEvent,
   type TerminalSessionSnapshot,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
@@ -24,7 +24,8 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
 import { BackgroundPolicy } from "../background/BackgroundPolicy.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ProjectStoreV2 } from "../orchestration-v2/ProjectStore.ts";
+import { ThreadManagementService } from "../orchestration-v2/ThreadManagementService.ts";
 import { PortDiscovery, type PortListener } from "../preview/PortScanner.ts";
 import { TerminalManager } from "../terminal/Manager.ts";
 import * as ManagedProcesses from "./ManagedProcesses.ts";
@@ -46,7 +47,7 @@ class World {
     [];
   readonly written: Array<{ terminalId: string; data: string }> = [];
   readonly claimedCheckouts = new Set<string>();
-  threads: Array<OrchestrationThreadShell> = [];
+  threads: Array<OrchestrationV2ThreadShell> = [];
   projects: Array<{ id: ProjectId; workspaceRoot: string }> = [];
   terminalListeners = new Set<(event: TerminalEvent) => Effect.Effect<void>>();
   /** What a terminal close does to the ports it held. */
@@ -164,11 +165,19 @@ const fakeLayer = (world: World) =>
       // service must not consult it.
       shouldRunScopeWork: () => Effect.succeed(false),
     }),
-    Layer.mock(ProjectionSnapshotQuery)({
+    Layer.mock(ThreadManagementService)({
       getShellSnapshot: () =>
-        Effect.sync((): OrchestrationShellSnapshot => ({
+        Effect.sync(() => ({
+          schemaVersion: 1,
           snapshotSequence: 1,
-          projects: world.projects.map((project) => ({
+          threads: world.threads,
+          archivedThreads: [],
+        })),
+    }),
+    Layer.mock(ProjectStoreV2)({
+      listShells: () =>
+        Effect.sync(() =>
+          world.projects.map((project) => ({
             id: project.id,
             title: "App",
             workspaceRoot: project.workspaceRoot,
@@ -177,9 +186,7 @@ const fakeLayer = (world: World) =>
             createdAt: "2026-09-23T00:00:00.000Z",
             updatedAt: "2026-09-23T00:00:00.000Z",
           })),
-          threads: world.threads,
-          updatedAt: "2026-09-23T00:00:00.000Z",
-        })),
+        ),
     }),
   );
 
@@ -214,51 +221,57 @@ const target = (checkoutPath: string, scriptId = "dev") => ({
   script: { id: scriptId, name: "Dev server", command: "pnpm dev" },
 });
 
+/** A time `HH:MM` after the test clock's epoch. */
+const at = (time: string) => DateTime.makeUnsafe(`1970-01-01T${time}:00.000Z`);
+
 const threadIn = (
   worktreePath: string | null,
-  overrides: Partial<OrchestrationThreadShell> = {},
-): OrchestrationThreadShell => ({
-  id: ThreadId.make("thread-1"),
-  projectId: ProjectId.make("project-1"),
-  title: "Thread",
-  modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
-  runtimeMode: "full-access",
-  interactionMode: "default",
-  pullRequests: [],
-  branch: "feature",
-  worktreePath,
-  latestTurn: null,
-  createdAt: "1970-01-01T00:00:00.000Z",
-  updatedAt: "1970-01-01T00:00:00.000Z",
-  archivedAt: null,
-  settledOverride: null,
-  settledAt: null,
-  session: null,
-  latestUserMessageAt: null,
-  hasPendingApprovals: false,
-  hasPendingUserInput: false,
-  hasActionableProposedPlan: false,
-  ...overrides,
-});
+  overrides: Partial<OrchestrationV2ThreadShell> = {},
+): OrchestrationV2ThreadShell => {
+  const id = ThreadId.make("thread-1");
+  return {
+    id,
+    projectId: ProjectId.make("project-1"),
+    title: "Thread",
+    providerInstanceId: ProviderInstanceId.make("codex"),
+    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    branch: "feature",
+    worktreePath,
+    activeProviderThreadId: null,
+    lineage: { rootThreadId: id, parentThreadId: null, relationshipToParent: null },
+    forkedFrom: null,
+    createdBy: "user",
+    creationSource: "web",
+    activeRunId: null,
+    latestRunId: null,
+    status: "idle",
+    pendingRuntimeRequest: null,
+    latestVisibleMessage: null,
+    latestUserMessageAt: null,
+    hasActionableProposedPlan: false,
+    itemCount: 0,
+    visibleItemCount: 0,
+    createdAt: at("00:00"),
+    updatedAt: at("00:00"),
+    archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
+    deletedAt: null,
+    ...overrides,
+  };
+};
 
-const runningSession = (updatedAt: string, activeTurnId: string | null) => ({
-  threadId: ThreadId.make("thread-1"),
-  status: "running" as const,
-  providerName: "codex",
-  runtimeMode: "full-access" as const,
-  activeTurnId: activeTurnId === null ? null : TurnId.make(activeTurnId),
-  lastError: null,
-  updatedAt,
-});
+/** A thread mid-run. */
+const runningRun = { activeRunId: RunId.make("run-1"), status: "running" } as const;
 
-/** A settled turn that finished at `HH:MM` after the test clock's epoch. */
-const turnCompletedAt = (time: string): OrchestrationThreadShell["latestTurn"] => ({
-  turnId: TurnId.make("turn-1"),
-  state: "completed",
-  requestedAt: "1970-01-01T00:00:00.000Z",
-  startedAt: "1970-01-01T00:00:00.000Z",
-  completedAt: `1970-01-01T${time}:00.000Z`,
-  assistantMessageId: null,
+/** A settled run that finished at `HH:MM` after the test clock's epoch. */
+const runCompletedAt = (time: string) => ({
+  latestRunId: RunId.make("run-1"),
+  latestRunRequestedAt: at("00:00"),
+  latestRunStartedAt: at("00:00"),
+  latestRunCompletedAt: at(time),
 });
 
 const statusOf = (
@@ -645,11 +658,7 @@ describe("ManagedProcesses", () => {
       withRegistry((registryPath) =>
         Effect.gen(function* () {
           const world = new World();
-          world.threads = [
-            threadIn("/work/feature", {
-              session: runningSession("1970-01-01T00:00:00.000Z", "turn-1"),
-            }),
-          ];
+          world.threads = [threadIn("/work/feature", runningRun)];
           const { service } = yield* boot(world, registryPath);
           yield* service.start(target("/work/feature"));
 
@@ -668,7 +677,7 @@ describe("ManagedProcesses", () => {
           const { service } = yield* boot(world, registryPath);
           yield* service.start(target("/work/feature"));
           // The turn settled 25 minutes in, and nothing has looked since.
-          world.threads = [threadIn("/work/feature", { latestTurn: turnCompletedAt("00:25") })];
+          world.threads = [threadIn("/work/feature", runCompletedAt("00:25"))];
 
           yield* idleFor(40);
           yield* service.sweep;
@@ -688,13 +697,10 @@ describe("ManagedProcesses", () => {
           const world = new World();
           const { service } = yield* boot(world, registryPath);
           yield* service.start(target("/work/feature"));
-          // The last turn ended a minute in. The session reaper closed the idle
-          // session 30 minutes later, which touches the session record.
+          // The last run ended a minute in. The session reaper closed the idle
+          // session 30 minutes later, which touches the thread record.
           world.threads = [
-            threadIn("/work/feature", {
-              latestTurn: turnCompletedAt("00:01"),
-              session: runningSession("1970-01-01T00:31:00.000Z", null),
-            }),
+            threadIn("/work/feature", { ...runCompletedAt("00:01"), updatedAt: at("00:31") }),
           ];
 
           yield* idleFor(35);
@@ -710,9 +716,7 @@ describe("ManagedProcesses", () => {
         Effect.gen(function* () {
           const world = new World();
           world.projects = [{ id: ProjectId.make("project-1"), workspaceRoot: "/work/app" }];
-          world.threads = [
-            threadIn(null, { session: runningSession("1970-01-01T00:00:00.000Z", "turn-1") }),
-          ];
+          world.threads = [threadIn(null, runningRun)];
           const { service } = yield* boot(world, registryPath);
           yield* service.start(target("/work/app"));
 
@@ -728,7 +732,11 @@ describe("ManagedProcesses", () => {
       withRegistry((registryPath) =>
         Effect.gen(function* () {
           const world = new World();
-          world.threads = [threadIn("/work/feature", { backgroundLiveness: "monitoring" })];
+          world.threads = [
+            threadIn("/work/feature", {
+              pendingBackgroundTasks: [{ taskId: "watch-1", kind: "monitor" }],
+            }),
+          ];
           const { service } = yield* boot(world, registryPath);
           yield* service.start(target("/work/feature"));
 

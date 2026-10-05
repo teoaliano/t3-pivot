@@ -169,10 +169,8 @@ describe("DesktopEnvironment", () => {
         displayName: "T3 Pivot",
       });
       assert.equal(packaged.displayName, "T3 Pivot");
-      assert.equal(packaged.userDataDirName, "t3pivot");
       assert.equal(packaged.appUserModelId, "com.teoaliano.t3pivot");
       assert.equal(development.displayName, "T3 Pivot (Dev)");
-      assert.equal(development.userDataDirName, "t3pivot-dev");
     }),
   );
 

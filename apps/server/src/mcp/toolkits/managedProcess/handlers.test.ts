@@ -6,7 +6,7 @@ import {
   ThreadId,
   type ManagedProcess,
   type OrchestrationProjectShell,
-  type OrchestrationThreadShell,
+  type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
@@ -20,7 +20,8 @@ import * as TestClock from "effect/testing/TestClock";
 import type { Tool } from "effect/unstable/ai";
 
 import * as ManagedProcesses from "../../../managedProcess/ManagedProcesses.ts";
-import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ProjectStoreV2 } from "../../../orchestration-v2/ProjectStore.ts";
+import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import { ManagedProcessToolkitHandlersLive } from "./handlers.ts";
@@ -63,11 +64,15 @@ const invocation = (
   capabilities: ReadonlyArray<McpInvocationContext.McpCapability>,
 ): McpInvocationContext.McpInvocationScope => ({
   environmentId: EnvironmentId.make("environment-1"),
-  threadId: THREAD_ID,
-  providerSessionId: "provider-session-1",
-  providerInstanceId: ProviderInstanceId.make("codex"),
   capabilities: new Set(capabilities),
   issuedAt: 1,
+  requestNamespace: "provider-session-1",
+  thread: {
+    threadId: THREAD_ID,
+    providerSessionId: "provider-session-1",
+    providerInstanceId: ProviderInstanceId.make("codex"),
+  },
+  client: undefined,
 });
 
 const makeHarness = (
@@ -84,20 +89,18 @@ const makeHarness = (
       id: THREAD_ID,
       projectId: project.id,
       worktreePath: options.worktreePath ?? "/worktrees/project/feature",
-    } as Pick<OrchestrationThreadShell, "id" | "projectId" | "worktreePath">;
+    } as Pick<OrchestrationV2ThreadShell, "id" | "projectId" | "worktreePath">;
     const starts: Array<{ checkoutPath: string; scriptId: string; reallocate: boolean }> = [];
     const commands: Array<string> = [];
     let lastStarted: ManagedProcess | null = null;
     const outcome = options.outcome ?? "running";
     const dependencies = Layer.mergeAll(
-      Layer.mock(ProjectionSnapshotQuery)({
-        getThreadShellById: (threadId) =>
-          Effect.succeed(
-            threadId === THREAD_ID
-              ? Option.some(thread as OrchestrationThreadShell)
-              : Option.none(),
-          ),
-        getProjectShellById: () =>
+      Layer.mock(ThreadManagementService)({
+        getThreadShell: (threadId) =>
+          Effect.succeed(threadId === THREAD_ID ? (thread as OrchestrationV2ThreadShell) : null),
+      }),
+      Layer.mock(ProjectStoreV2)({
+        getShell: () =>
           Effect.succeed(Option.some({ ...project, scripts: options.scripts ?? project.scripts })),
       }),
       Layer.mock(ManagedProcesses.ManagedProcesses)({

@@ -21,9 +21,9 @@ export const ManagedProcessToolkitHandlersLive = ManagedProcessToolkit.toLayer(
     ManagedProcessToolkit.of({
       preview_start_server: (input) =>
         Effect.gen(function* () {
-          const scope = yield* McpInvocationContext.requireMcpCapability("preview");
+          const scope = yield* McpInvocationContext.requireThreadMcpCapability("preview");
           const processes = yield* ManagedProcesses.ManagedProcesses;
-          const target = yield* resolveManagedScriptTarget(scope.threadId, input.script);
+          const target = yield* resolveManagedScriptTarget(scope.thread.threadId, input.script);
           // An agent cannot act on another checkout's identity, so a taken port
           // is resolved for it: move to a new block and report only the new port.
           const { started, reallocated } = yield* processes.start(target).pipe(
