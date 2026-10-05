@@ -57,8 +57,8 @@ A thread a Pivot dispatched and supervises, working in its own worktree. It belo
 Pivot at a time and stays a teammate for good. A teammate is either a **ship** (delivers
 a change) or a **scout** (investigates and leaves a report), and a scout can be promoted
 to a ship in place.
-_Avoid_: session (see below), crewmate (firstmate's word), worker, subagent (a
-provider-native helper inside one thread, which is a different thing)
+_Avoid_: session (see below), crewmate (firstmate's word), worker, subagent (V2's word
+for a provider-native helper or a `delegate_task` child thread; a teammate is neither)
 
 **Teammate status**:
 What a teammate is doing, as the user and the Pivot see it. It combines the teammate's
