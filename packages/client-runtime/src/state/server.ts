@@ -34,6 +34,7 @@ import {
   scheduleAtomCommandEffect,
 } from "./runtime.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
+import { applyPivotStreamEvent, EMPTY_PIVOT_STATE } from "../pivotState.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import { safeErrorLogAttributes } from "../errors/safeLog.ts";
 import * as Persistence from "../platform/persistence.ts";
@@ -1084,6 +1085,18 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:scheduled-task:webhook-delivery",
       tag: WS_METHODS.scheduledTasksGetWebhookDelivery,
     }),
+    /** Pivot mode's records, folded from a snapshot and then the records that change. */
+    pivotLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:pivot:live",
+      tag: WS_METHODS.pivotSubscribe,
+      transform: (stream) =>
+        stream.pipe(Stream.scan(() => EMPTY_PIVOT_STATE, applyPivotStreamEvent)),
+    }),
+    /** A teammate's brief and scout report; detail only, never on the stream. */
+    pivotTeammateDetail: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:pivot:teammate-detail",
+      tag: WS_METHODS.pivotTeammateDetail,
+    }),
     /** Live scheduled-task list: snapshot on subscribe, fresh list after every server-side change. */
     scheduledTasksLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:scheduled-tasks:live",
@@ -1267,6 +1280,14 @@ export function createServerEnvironmentAtoms<R, E>(
     signalProcess: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:signal-process",
       tag: WS_METHODS.serverSignalProcess,
+    }),
+    createPivot: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:pivot:create",
+      tag: WS_METHODS.pivotCreate,
+    }),
+    answerPivotDecision: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:pivot:answer-decision",
+      tag: WS_METHODS.pivotAnswerDecision,
     }),
     upsertScheduledTask: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:scheduled-task:upsert",
