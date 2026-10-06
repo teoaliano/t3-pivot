@@ -81,13 +81,15 @@ export const PivotEvent = Schema.Union([
   event("teammate.stuck", { threadId: ThreadId, runId: RunId }),
   event("teammate.pause-rechecked", { threadId: ThreadId, nextRecheckAt: IsoDateTime }),
   event("teammate.user-message", { threadId: ThreadId, text: Schema.String }),
+  /** An approval or question its run was held on got answered; V2 does not say by whom. */
+  event("teammate.request-answered", { threadId: ThreadId, answer: Schema.String }),
   event("teammate.delivery-changed", {
     threadId: ThreadId,
     url: Schema.String,
     change: DeliveryChange,
   }),
   /** The Pivot merged the teammate's PR, so its sync reading merged is not news. */
-  event("teammate.merge-requested", { threadId: ThreadId, url: Schema.String }),
+  event("teammate.merge-requested", { threadId: ThreadId, url: Schema.NullOr(Schema.String) }),
   event("teammate.landed", { threadId: ThreadId, head: Schema.String }),
   event("teammate.torn-down", { threadId: ThreadId }),
   event("decision.opened", {

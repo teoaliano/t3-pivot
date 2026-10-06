@@ -231,7 +231,8 @@ export const historyLine = (event: PivotEvent): string => {
     case "teammate.reported":
       return clip(`Reported ${event.report.status}: ${event.report.summary ?? ""}`);
     case "teammate.scout-report-recorded":
-      return "Recorded its scout report.";
+      // The report is the deliverable, so it reads in full.
+      return `Recorded its scout report:\n${event.report}`;
     case "teammate.resume-changed":
       return event.resume === "pending"
         ? "Resuming after a server restart."
@@ -252,6 +253,8 @@ export const historyLine = (event: PivotEvent): string => {
       return "Its pause was due for a recheck.";
     case "teammate.user-message":
       return clip(`The user wrote to it directly: ${event.text}`);
+    case "teammate.request-answered":
+      return clip(`Its pending approval or question was answered: ${event.answer}`);
     case "teammate.delivery-changed":
       return event.change === "merged"
         ? `Its PR merged: ${event.url}`
@@ -259,7 +262,9 @@ export const historyLine = (event: PivotEvent): string => {
           ? `Its PR closed without merging: ${event.url}`
           : `Checks went red on its PR: ${event.url}`;
     case "teammate.merge-requested":
-      return `Its PR was merged by the Pivot: ${event.url}`;
+      return event.url === null
+        ? "The Pivot's merge was refused by the forge."
+        : `The Pivot merged its PR: ${event.url}`;
     case "teammate.landed":
       return `Landed by fast-forward at ${event.head.slice(0, 12)}.`;
     case "teammate.torn-down":
@@ -405,6 +410,20 @@ export const make = Effect.gen(function* () {
       return pivot;
     });
 
+  /**
+   * The teammate with the worktree its thread recorded. Dispatch derived the path the
+   * way V2 does; once V2 recorded one, that is the truth.
+   */
+  const withRecordedWorktree = (teammate: PivotStore.TeammateRow) =>
+    threads.shell(teammate.threadId).pipe(
+      Effect.map((shell) =>
+        shell?.worktreePath == null || shell.worktreePath === teammate.worktreePath
+          ? teammate
+          : { ...teammate, worktreePath: shell.worktreePath },
+      ),
+      Effect.orElseSucceed(() => teammate),
+    );
+
   /** A live teammate of the calling Pivot, refusing any other target. */
   const ownTeammate = (command: string, pivot: PivotStore.PivotRow, threadId: ThreadId) =>
     Effect.gen(function* () {
@@ -415,7 +434,7 @@ export const make = Effect.gen(function* () {
       if (teammate.tornDownAt !== null) {
         return yield* refuse(command, `Teammate ${threadId} was torn down.`);
       }
-      return teammate;
+      return yield* withRecordedWorktree(teammate);
     });
 
   const liveTeammate = (command: string, caller: ThreadId) =>
@@ -433,7 +452,7 @@ export const make = Effect.gen(function* () {
           reason: "This teammate was torn down.",
         });
       }
-      return teammate;
+      return yield* withRecordedWorktree(teammate);
     });
 
   const nonEmpty = (command: string, text: string, what: string) =>
@@ -830,12 +849,12 @@ export const make = Effect.gen(function* () {
   // --- Delivery ---
 
   /** A decision about this teammate that the user answered: their recorded word. */
-  const userApproval = (
+  /** The Pivot's decision about this teammate. */
+  const teammateDecision = (
     command: string,
     pivot: PivotStore.PivotRow,
     teammate: PivotStore.TeammateRow,
     decisionId: PivotDecisionId,
-    what: string,
   ) =>
     Effect.gen(function* () {
       const decision = yield* store.getDecision(decisionId);
@@ -846,12 +865,26 @@ export const make = Effect.gen(function* () {
       ) {
         return yield* refuse(command, `Decision ${decisionId} is not about this teammate.`);
       }
-      if (decision.userAnswer === null) {
-        return yield* refuse(
-          command,
-          `${what} needs the user's recorded word: escalate the decision and wait for their answer.`,
-        );
-      }
+      return decision;
+    });
+
+  const unanswered = (what: string) =>
+    `${what} needs the user's recorded word: escalate the decision and wait for their answer.`;
+
+  /**
+   * A decision about this teammate the user answered: their recorded word. What the
+   * answer says is the Pivot's to read; the tool holds it to there being one.
+   */
+  const userApproval = (
+    command: string,
+    pivot: PivotStore.PivotRow,
+    teammate: PivotStore.TeammateRow,
+    decisionId: PivotDecisionId,
+    what: string,
+  ) =>
+    Effect.gen(function* () {
+      const decision = yield* teammateDecision(command, pivot, teammate, decisionId);
+      if (decision.userAnswer === null) return yield* refuse(command, unanswered(what));
       return decision;
     });
 
@@ -876,7 +909,7 @@ export const make = Effect.gen(function* () {
           "This project has no remote; land the branch with land_teammate.",
         );
       }
-      yield* userApproval(command, pivot, teammate, input.decisionId, "Merging");
+      const decision = yield* teammateDecision(command, pivot, teammate, input.decisionId);
       const link = yield* linkedPullRequest(teammate);
       if (link === null) return yield* refuse(command, "The teammate has no linked PR.");
       const ref = {
@@ -892,19 +925,34 @@ export const make = Effect.gen(function* () {
           `The Pivot merges on GitHub and GitLab only. Ask the user to merge ${link.url} on ${detail.provider} by hand.`,
         );
       }
-      const reasons = mergeRefusals(detail, input.waivedChecks ?? []);
+      const waived = input.waivedChecks ?? [];
+      // Every failing condition at once: the approval, each waiver, and live state.
+      const reasons = [
+        ...(decision.userAnswer === null ? [unanswered("Merging")] : []),
+        ...waived.flatMap((name) =>
+          decision.userAnswer !== null && decision.userAnswer.includes(name)
+            ? []
+            : [`The user's answer does not waive check "${name}" by name.`],
+        ),
+        ...mergeRefusals(detail, waived),
+      ];
       if (reasons.length > 0) {
         return yield* refuse(command, `Not merging ${link.url}:\n- ${reasons.join("\n- ")}`);
       }
       const head = detail.headSha!;
-      // Recorded first: the merge V2's sync then reports is the Pivot's own, not news.
-      yield* store.dispatch({
-        type: "teammate.record-merge",
-        pivotThreadId: pivot.threadId,
-        threadId: teammate.threadId,
-        url: link.url,
-      });
-      yield* threads.mergePullRequest({ ...ref, expectedHeadSha: head });
+      // Recorded first, so the merge V2's sync then reports reads as the Pivot's own;
+      // cleared again if the forge refuses, so a later merge by hand still wakes it.
+      const recordMerge = (url: string | null) =>
+        store.dispatch({
+          type: "teammate.record-merge",
+          pivotThreadId: pivot.threadId,
+          threadId: teammate.threadId,
+          url,
+        });
+      yield* recordMerge(link.url);
+      yield* threads
+        .mergePullRequest({ ...ref, expectedHeadSha: head })
+        .pipe(Effect.tapError(() => recordMerge(null).pipe(Effect.ignore)));
       return { threadId: teammate.threadId, url: link.url, mergedHead: head };
     });
 

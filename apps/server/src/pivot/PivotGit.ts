@@ -15,14 +15,12 @@ import * as Schema from "effect/Schema";
 import * as ProcessRunner from "../processRunner.ts";
 
 export class PivotGitError extends Schema.TaggedError<PivotGitError>()("PivotGitError", {
-  cwd: Schema.String,
-  args: Schema.Array(Schema.String),
-  stderr: Schema.String,
+  subcommand: Schema.String,
+  exitCode: Schema.NullOr(Schema.Number),
   cause: Schema.optional(Schema.Defect()),
 }) {
   override get message(): string {
-    const detail = this.stderr.trim();
-    return `git ${this.args.join(" ")} failed${detail.length > 0 ? `: ${detail}` : "."}`;
+    return `git ${this.subcommand} failed${this.exitCode === null ? "" : ` with exit code ${this.exitCode}`}.`;
   }
 }
 
@@ -87,13 +85,17 @@ export const make = Effect.gen(function* () {
   const run = (cwd: string, args: ReadonlyArray<string>) =>
     runner
       .run({ command: "git", args, cwd })
-      .pipe(Effect.mapError((cause) => new PivotGitError({ cwd, args, stderr: "", cause })));
+      .pipe(
+        Effect.mapError(
+          (cause) => new PivotGitError({ subcommand: args[0] ?? "", exitCode: null, cause }),
+        ),
+      );
   const git = (cwd: string, args: ReadonlyArray<string>) =>
     run(cwd, args).pipe(
       Effect.flatMap((output) =>
         output.code === 0
           ? Effect.succeed(output.stdout.trim())
-          : Effect.fail(new PivotGitError({ cwd, args, stderr: output.stderr })),
+          : Effect.fail(new PivotGitError({ subcommand: args[0] ?? "", exitCode: output.code })),
       ),
     );
   /** True when git exits 0, false on any other exit. */

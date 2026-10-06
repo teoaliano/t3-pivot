@@ -2,10 +2,7 @@
 
 Pivot mode is T3 Pivot's supervision layer. A Pivot is a thread whose agent dispatches and
 supervises teammates, each a thread in its own worktree. Vocabulary is in
-[CONTEXT.md](../../CONTEXT.md). The spec is `docs/specs/pivot-mode.md`. The code is in
-`apps/server/src/pivot/`, the Pivot and teammate MCP tools in
-`apps/server/src/mcp/toolkits/pivot/`, and the client logic in
-`packages/client-runtime/src/pivotState.ts` and `apps/web/src/components/pivot/`.
+[CONTEXT.md](../../CONTEXT.md); the spec is `docs/specs/pivot-mode.md`.
 
 ## Its records live in their own database
 
@@ -37,6 +34,9 @@ Kept small, and each one inert for threads that are not Pivots or teammates:
   whether a thread resumes its interrupted run whatever the continue-after-update setting
   says. The default says no; `pivot/PivotCarryOn.ts` says yes for active Pivots and live
   teammates.
+- **Tool restrictions** (`orchestration-v2/ThreadToolRestrictions.ts`). A Pivot's MCP
+  session gets no browser or device tools whatever the agent-access settings say: it
+  supervises, and teammates verify.
 - **Relay awareness** (`relay/PivotAwareness.ts`). Teammates publish no agent activity,
   and a Pivot holding an escalated decision reads as waiting for input, so mobile pushes
   it without a new phase.

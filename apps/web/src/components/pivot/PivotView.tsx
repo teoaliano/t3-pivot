@@ -20,9 +20,11 @@ import {
 } from "../../providerInstances";
 import { useServerConfigs, useThreadShell } from "../../state/entities";
 import { usePivotState } from "../../state/pivot";
+import { useEnvironmentQuery } from "../../state/query";
 import {
   primaryServerAvailableEditorsAtom,
   primaryServerKeybindingsAtom,
+  serverEnvironment,
 } from "../../state/server";
 import ChatView from "../ChatView";
 import { Button } from "../ui/button";
@@ -170,7 +172,14 @@ export function PivotView(props: { pivot: ScopedThreadRef }) {
             Pick a teammate from its card's menu to show it here.
           </p>
         ) : (
-          <TeammatePaneBody kind={node.kind} teammateRef={teammateRef} />
+          <TeammatePaneBody
+            kind={node.kind}
+            teammateRef={teammateRef}
+            hasScoutReport={
+              teammates.find((teammate) => teammate.threadId === node.teammate)?.hasScoutReport ===
+              true
+            }
+          />
         );
     }
   };
@@ -314,6 +323,7 @@ export function PivotView(props: { pivot: ScopedThreadRef }) {
 function TeammatePaneBody(props: {
   kind: Exclude<PaneKind, "pivot-chat" | "teammates">;
   teammateRef: ScopedThreadRef;
+  hasScoutReport: boolean;
 }) {
   const shell = useThreadShell(props.teammateRef);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -325,13 +335,18 @@ function TeammatePaneBody(props: {
   switch (props.kind) {
     case "teammate":
       return (
-        <ChatView
-          key={teammateRef.threadId}
-          environmentId={teammateRef.environmentId}
-          threadId={teammateRef.threadId}
-          routeKind="server"
-          pivotReadOnly
-        />
+        <div className="flex size-full min-h-0 flex-col">
+          {props.hasScoutReport ? <ScoutReport teammateRef={teammateRef} /> : null}
+          <div className="relative min-h-0 flex-1">
+            <ChatView
+              key={teammateRef.threadId}
+              environmentId={teammateRef.environmentId}
+              threadId={teammateRef.threadId}
+              routeKind="server"
+              pivotReadOnly
+            />
+          </div>
+        </div>
       );
     case "preview":
       return (
@@ -382,6 +397,26 @@ function TeammatePaneBody(props: {
         </Suspense>
       );
   }
+}
+
+/** A scout's recorded findings, kept after its worktree is gone. */
+function ScoutReport(props: { teammateRef: ScopedThreadRef }) {
+  const detail = useEnvironmentQuery(
+    serverEnvironment.pivotTeammateDetail({
+      environmentId: props.teammateRef.environmentId,
+      input: { threadId: props.teammateRef.threadId },
+    }),
+  );
+  const report = detail.data?.scoutReport ?? null;
+  if (report === null) return null;
+  return (
+    <details className="shrink-0 border-b border-border px-3 py-2 text-sm">
+      <summary className="cursor-pointer font-medium">Scout report</summary>
+      <div className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap text-muted-foreground">
+        {report}
+      </div>
+    </details>
+  );
 }
 
 function PaneFrame(props: {

@@ -174,9 +174,9 @@ export const make = Effect.gen(function* () {
         }
         case "request-answered":
           yield* record({
-            type: "teammate.record-user-message",
+            type: "teammate.record-request-answer",
             threadId: event.threadId,
-            text: `(answered its pending approval or question) ${event.answer}`,
+            answer: event.answer,
           });
           return;
         case "pull-requests": {

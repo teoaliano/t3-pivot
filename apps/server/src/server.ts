@@ -120,6 +120,7 @@ import * as PivotService from "./pivot/PivotService.ts";
 import * as PivotStore from "./pivot/PivotStore.ts";
 import * as PivotSupervisor from "./pivot/PivotSupervisor.ts";
 import * as PivotThreads from "./pivot/PivotThreads.ts";
+import * as PivotToolRestrictions from "./pivot/PivotToolRestrictions.ts";
 import { ObservabilityLive } from "./observability/Layers/Observability.ts";
 import * as HeapSnapshot from "./observability/HeapSnapshot.ts";
 import * as EventLoopMonitor from "./observability/EventLoopMonitor.ts";
@@ -622,7 +623,9 @@ const RuntimeCoreDependenciesBaseLive = Layer.mergeAll(
   Layer.provideMerge(OrchestrationApplicationLayerLive),
   // Pivot mode: a Pivot and its teammates carry on after a restart, and the
   // relay publishes nothing for teammates and a Pivot's decisions as input needed.
-  Layer.provideMerge(Layer.merge(PivotCarryOn.layer, PivotRelayAwareness.layer)),
+  Layer.provideMerge(
+    Layer.mergeAll(PivotCarryOn.layer, PivotRelayAwareness.layer, PivotToolRestrictions.layer),
+  ),
   Layer.provideMerge(OrchestrationEventInfrastructureLayerLive),
   Layer.provideMerge(Layer.merge(ProjectStore.layer, ThreadSearch.layer)),
   Layer.provideMerge(ServerSettingsLayerLive),

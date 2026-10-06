@@ -1,5 +1,4 @@
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   CommandId,
   type OrchestrationV2DomainEvent,
@@ -22,7 +21,7 @@ import * as IdAllocator from "./IdAllocator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as RestartCarryOn from "./RestartCarryOn.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { restartContinuationRun } from "./RestartContinuation.ts";
+import { continuesAfterRestart, restartContinuationRun } from "./RestartContinuation.ts";
 import {
   cancelledRosterTaskWork,
   cancelledTurnItemWork,
@@ -751,11 +750,11 @@ export const make = Effect.gen(function* () {
           ),
         );
         const carriesOn = yield* carryOn.carriesOn(threadId);
-        const enabled =
-          carriesOn ||
-          (continueAfterRestart !== null &&
-            resolveProjectSettings(continueAfterRestart, projection.thread.projectId).settings
-              .continueThreadsAfterServerUpdate);
+        const enabled = continuesAfterRestart(
+          carriesOn,
+          continueAfterRestart,
+          projection.thread.projectId,
+        );
         const result = yield* reconcileProjection(projection, trigger, enabled);
         if (result.resuming && carriesOn) yield* carryOn.resuming(threadId);
         terminalizedRuns += result.terminalizedRuns;
@@ -787,15 +786,8 @@ export const make = Effect.gen(function* () {
     for (const threadId of threadIds) {
       yield* Effect.gen(function* () {
         const projection = yield* projections.getRuntimeRecoveryProjection(threadId);
-        if (
-          !(yield* carryOn.carriesOn(threadId)) &&
-          !(
-            enabled !== null &&
-            resolveProjectSettings(enabled, projection.thread.projectId).settings
-              .continueThreadsAfterServerUpdate
-          )
-        )
-          return;
+        const carriesOn = yield* carryOn.carriesOn(threadId);
+        if (!continuesAfterRestart(carriesOn, enabled, projection.thread.projectId)) return;
         const run = restartContinuationRun(projection);
         if (!run) return;
         const commandId = CommandId.make(`command:restart-prepare:${run.id}`);

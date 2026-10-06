@@ -3,7 +3,8 @@ import type { ScopedProjectRef } from "@t3tools/contracts";
 import { LayoutDashboardIcon } from "lucide-react";
 
 import { shortcutLabelForCommand } from "../../keybindings";
-import { useProject, useServerConfigs } from "../../state/entities";
+import { useProject } from "../../state/entities";
+import { usePivotModeSupported } from "../../state/pivot";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { SidebarHeaderIconButton } from "../sidebar/SidebarThreadHeader";
 import { openNewPivotDialog, usePivotProjectReadiness } from "./NewPivotDialog";
@@ -15,15 +16,13 @@ import { openNewPivotDialog, usePivotProjectReadiness } from "./NewPivotDialog";
  */
 export function SidebarNewPivotButton(props: { projectRef: ScopedProjectRef | null }) {
   const project = useProject(props.projectRef);
-  const configs = useServerConfigs();
+  const supported = usePivotModeSupported(props.projectRef?.environmentId ?? null);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const readiness = usePivotProjectReadiness(
     props.projectRef?.environmentId ?? null,
     project?.workspaceRoot ?? null,
   );
   if (props.projectRef === null || project === null) return null;
-  const supported =
-    configs.get(props.projectRef.environmentId)?.environment.capabilities.pivotMode === true;
   if (!supported) return null;
   const shortcut = shortcutLabelForCommand(keybindings, "pivot.new");
   const label = `New Pivot in ${project.title}${shortcut ? ` (${shortcut})` : ""}`;

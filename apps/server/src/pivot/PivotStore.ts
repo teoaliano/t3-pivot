@@ -41,7 +41,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import { randomUuidV4 } from "../orchestration-v2/RandomUuid.ts";
-import { PivotSql } from "./PivotDatabase.ts";
+import * as PivotDatabase from "./PivotDatabase.ts";
 import { type DeliveryChange, PivotEvent, type StoredPivotEvent } from "./PivotEvents.ts";
 
 export class PivotRefusedError extends Schema.TaggedError<PivotRefusedError>()(
@@ -170,6 +170,11 @@ export type PivotCommand =
       readonly text: string;
     }
   | {
+      readonly type: "teammate.record-request-answer";
+      readonly threadId: ThreadId;
+      readonly answer: string;
+    }
+  | {
       readonly type: "teammate.record-delivery";
       readonly threadId: ThreadId;
       readonly url: string;
@@ -179,7 +184,8 @@ export type PivotCommand =
       readonly type: "teammate.record-merge";
       readonly pivotThreadId: ThreadId;
       readonly threadId: ThreadId;
-      readonly url: string;
+      /** Null clears it: the merge the Pivot asked for did not happen. */
+      readonly url: string | null;
     }
   | {
       readonly type: "teammate.record-landing";
@@ -464,7 +470,7 @@ const byteLength = (text: string) => new TextEncoder().encode(text).length;
 // --- Service ----------------------------------------------------------------------------
 
 export const make = Effect.gen(function* () {
-  const sql = yield* PivotSql;
+  const sql = yield* PivotDatabase.PivotSql;
   // One writer at a time, and publishes leave in commit order.
   const writeLock = yield* Semaphore.make(1);
   const changes = yield* PubSub.unbounded<Extract<PivotStreamEvent, { _tag: "changed" }>>();
@@ -805,6 +811,14 @@ export const make = Effect.gen(function* () {
         );
         break;
       }
+      case "teammate.record-request-answer": {
+        yield* liveTeammate(command.threadId);
+        emit(
+          { type: "teammate.request-answered", threadId: command.threadId, answer: command.answer },
+          true,
+        );
+        break;
+      }
       case "teammate.record-delivery": {
         yield* anyTeammate(command.threadId);
         emit(
@@ -1046,6 +1060,7 @@ export const make = Effect.gen(function* () {
         `;
         return;
       case "teammate.user-message":
+      case "teammate.request-answered":
       case "teammate.delivery-changed":
         return;
       case "teammate.merge-requested":
@@ -1209,7 +1224,9 @@ export const make = Effect.gen(function* () {
           return { stored, changed };
         }).pipe(
           sql.withTransaction,
-          Effect.catchTag("SqlError", (cause) => Effect.fail(storeError(command.type)(cause))),
+          Effect.catchTags({
+            SqlError: (cause) => Effect.fail(storeError(command.type)(cause)),
+          }),
         );
         if (changed !== null) yield* PubSub.publish(changes, changed);
         return stored;

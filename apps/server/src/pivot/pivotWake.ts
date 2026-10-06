@@ -74,6 +74,8 @@ const eventNote = (stored: StoredPivotEvent): string | null => {
         : event.change === "closed"
           ? `Its PR was closed without merging: ${event.url}`
           : `Checks went red on its PR after it reported done: ${event.url}`;
+    case "teammate.request-answered":
+      return `Its pending approval or question was answered: ${quote(event.answer)}`;
     case "teammate.stuck":
       return "No activity for 30 minutes while running.";
     case "teammate.pause-rechecked":

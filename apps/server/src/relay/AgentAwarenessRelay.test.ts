@@ -38,6 +38,7 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import type * as Context from "effect/Context";
 import * as PivotAwareness from "./PivotAwareness.ts";
 import * as AgentAwarenessRelay from "./AgentAwarenessRelay.ts";
 
@@ -145,7 +146,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
     /** Serves shells from this source instead of `currentShell`. */
     readonly readShell?: (threadId: ThreadId) => Effect.Effect<OrchestrationV2ThreadShell | null>;
     readonly domainEvents?: Stream.Stream<OrchestrationV2DomainEvent>;
-    readonly pivotAwareness?: PivotAwareness.PivotAwarenessShape;
+    readonly pivotAwareness?: Context.Service.Shape<typeof PivotAwareness.PivotAwareness>;
   } = {},
 ) {
   const values = new Map<string, Uint8Array>(

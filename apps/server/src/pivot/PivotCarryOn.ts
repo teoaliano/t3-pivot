@@ -8,11 +8,11 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-import { RestartCarryOn } from "../orchestration-v2/RestartCarryOn.ts";
+import * as RestartCarryOn from "../orchestration-v2/RestartCarryOn.ts";
 import * as PivotStore from "./PivotStore.ts";
 
 export const layer = Layer.effect(
-  RestartCarryOn,
+  RestartCarryOn.RestartCarryOn,
   Effect.gen(function* () {
     const store = yield* PivotStore.PivotStore;
     return {

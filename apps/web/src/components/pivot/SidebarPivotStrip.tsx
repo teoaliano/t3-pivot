@@ -1,6 +1,7 @@
 import { ChevronDownIcon, ChevronRightIcon, LayoutDashboardIcon } from "lucide-react";
 
 import type { SidebarPivotBadge } from "../sidebar/pivotNesting.logic";
+import { Badge } from "../ui/badge";
 
 /**
  * Sits under a Pivot's sidebar row: the Pivot badge, how many decisions it holds
@@ -34,8 +35,10 @@ export function SidebarPivotStrip(props: {
           </span>
         ) : null}
         {badge.escalatedDecisions > 0 ? (
-          <span className="ml-auto rounded-full bg-warning px-1.5 font-medium text-warning-foreground">
-            {badge.escalatedDecisions} {badge.escalatedDecisions === 1 ? "needs you" : "need you"}
+          <span className="ml-auto">
+            <Badge size="sm" variant="warning">
+              {badge.escalatedDecisions} {badge.escalatedDecisions === 1 ? "needs you" : "need you"}
+            </Badge>
           </span>
         ) : null}
       </button>

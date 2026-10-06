@@ -1,7 +1,11 @@
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
 import { usePivotStatesStore } from "./pivot/pivotStatesStore";
 import { SidebarPivotStrip } from "./pivot/SidebarPivotStrip";
-import { nestPivotTeammates, sidebarPivotBadge } from "./sidebar/pivotNesting.logic";
+import {
+  nestPivotTeammates,
+  pivotNestingKey,
+  sidebarPivotBadge,
+} from "./sidebar/pivotNesting.logic";
 import { SidebarNewPivotButton } from "./pivot/SidebarNewPivotButton";
 import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
 import { setThreadChangeRequestSnapshot } from "./ThreadStatusIndicators";
@@ -5302,7 +5306,7 @@ export default function Sidebar() {
                           const thread = threadByKey.get(item.key)!;
                           items.push(renderThreadRow(thread, item.section));
                           // T3 Pivot: the Pivot strip, then its teammates when expanded.
-                          const pivotKey = `${thread.environmentId}:${thread.id}`;
+                          const pivotKey = pivotNestingKey(thread);
                           const teammates = pivotTeammatesByKey.get(pivotKey) ?? [];
                           const badge = sidebarPivotBadge(
                             thread,

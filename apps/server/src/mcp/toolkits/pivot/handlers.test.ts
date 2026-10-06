@@ -655,7 +655,7 @@ describe("delivery and teardown", () => {
       });
       return { pivot, ship, decisionId: decision.decisionId, fake };
     });
-  const approve = (pivot: ThreadId, decisionId: string) =>
+  const approve = (pivot: ThreadId, decisionId: string, answer = "Yes, merge.") =>
     Effect.gen(function* () {
       const pivots = yield* PivotService.PivotService;
       yield* pivots.escalateDecision(pivot, {
@@ -666,7 +666,7 @@ describe("delivery and teardown", () => {
         options: ["Merge", "Hold"],
         recommendation: "Merge",
       });
-      yield* pivots.recordUserAnswer({ decisionId: decisionId as never, answer: "Yes, merge." });
+      yield* pivots.recordUserAnswer({ decisionId: decisionId as never, answer });
     });
 
   it.effect("merges a GitHub PR on approval, pinned to the head it checked", () => {
@@ -720,7 +720,7 @@ describe("delivery and teardown", () => {
       const { fake, layer } = setup({ remote: true });
       return Effect.gen(function* () {
         const { pivot, ship, decisionId } = yield* approvedShip(fake);
-        yield* approve(pivot, decisionId);
+        yield* approve(pivot, decisionId, "Merge it. flaky-e2e is known flaky, ignore it.");
         linkPr(fake, ship.threadId);
         fake.pullRequests.set(prUrl, {
           ...greenPr,
@@ -764,15 +764,13 @@ describe("delivery and teardown", () => {
           "invalid_request",
           'Check "flaky-e2e" is failure.',
         );
-        expectRefused(
-          yield* call(pivot, "merge_teammate", {
-            threadId: ship.threadId,
-            decisionId,
-            waivedChecks: ["lint"],
-          }),
-          "invalid_request",
-          'No check named "lint" to waive.',
-        );
+        const unnamed = yield* call(pivot, "merge_teammate", {
+          threadId: ship.threadId,
+          decisionId,
+          waivedChecks: ["lint"],
+        });
+        expectRefused(unnamed, "invalid_request", 'No check named "lint" to waive.');
+        expectRefused(unnamed, "invalid_request", 'does not waive check "lint" by name');
         expectOk(
           yield* call(pivot, "merge_teammate", {
             threadId: ship.threadId,
@@ -805,7 +803,7 @@ describe("delivery and teardown", () => {
       expectRefused(
         yield* call(pivot, "merge_teammate", { threadId: ship.threadId, decisionId }),
         "orchestration_error",
-        "Head branch was modified",
+        "Could not merge the PR",
       );
       assert.deepStrictEqual(fake.merges, []);
     }).pipe(Effect.provide(layer));

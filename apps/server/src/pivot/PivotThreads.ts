@@ -41,14 +41,14 @@ import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.t
 export class PivotThreadsError extends Schema.TaggedError<PivotThreadsError>()(
   "PivotThreadsError",
   {
+    /** What the Pivot was doing, as "could not <operation>" reads. */
     operation: Schema.String,
     threadId: Schema.optional(Schema.String),
-    detail: Schema.String,
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
-    return this.detail;
+    return `Could not ${this.operation}${this.threadId === undefined ? "" : ` (thread ${this.threadId})`}.`;
   }
 }
 
@@ -192,7 +192,6 @@ export const make = Effect.gen(function* () {
     new PivotThreadsError({
       operation,
       ...(threadId === undefined ? {} : { threadId }),
-      detail: cause instanceof Error ? cause.message : `Pivot ${operation} failed.`,
       cause,
     });
   const commandId = (operation: string) =>
@@ -349,7 +348,8 @@ export const make = Effect.gen(function* () {
     send: ({ threadId, senderThreadId, text, mode }) =>
       Effect.gen(function* () {
         const shell = yield* threads.getThreadShell(threadId);
-        if (shell === null) return yield* fail("send", threadId)(new Error("Thread not found."));
+        if (shell === null)
+          return yield* new PivotThreadsError({ operation: "send: the thread is gone", threadId });
         yield* threads.sendToThread({
           projectId: shell.projectId,
           commandId: yield* commandId("send"),
@@ -379,7 +379,10 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const shell = yield* threads.getThreadShell(threadId);
         if (shell === null)
-          return yield* fail("relaunch", threadId)(new Error("Thread not found."));
+          return yield* new PivotThreadsError({
+            operation: "relaunch: the thread is gone",
+            threadId,
+          });
         yield* threads.dispatch({
           type: "thread.stop",
           commandId: yield* commandId("relaunch-stop"),

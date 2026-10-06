@@ -14,7 +14,9 @@ interface ThreadRef {
   readonly id: ThreadId;
 }
 
-const keyOf = (thread: ThreadRef) => `${thread.environmentId}:${thread.id}`;
+/** The key a Pivot's teammates are grouped under: its environment and thread id. */
+export const pivotNestingKey = (thread: ThreadRef) => `${thread.environmentId}:${thread.id}`;
+const keyOf = pivotNestingKey;
 
 export interface PivotNesting<T> {
   /** Every thread that is not nested under a Pivot in the list. */

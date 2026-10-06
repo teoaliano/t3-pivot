@@ -11,19 +11,14 @@ import type { ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
-export interface RestartCarryOnShape {
+export class RestartCarryOn extends Context.Reference<{
   /** Whether the thread resumes an interrupted run after a restart regardless of settings. */
   readonly carriesOn: (threadId: ThreadId) => Effect.Effect<boolean>;
   /** Startup recovery scheduled the thread's interrupted run to resume. */
   readonly resuming: (threadId: ThreadId) => Effect.Effect<void>;
-}
-
-export class RestartCarryOn extends Context.Reference<RestartCarryOnShape>(
-  "t3/orchestration-v2/RestartCarryOn",
-  {
-    defaultValue: () => ({
-      carriesOn: () => Effect.succeed(false),
-      resuming: () => Effect.void,
-    }),
-  },
-) {}
+}>("t3/orchestration-v2/RestartCarryOn", {
+  defaultValue: () => ({
+    carriesOn: () => Effect.succeed(false),
+    resuming: () => Effect.void,
+  }),
+}) {}

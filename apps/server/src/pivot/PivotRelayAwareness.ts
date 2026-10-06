@@ -10,11 +10,11 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
-import { PivotAwareness } from "../relay/PivotAwareness.ts";
+import * as PivotAwareness from "../relay/PivotAwareness.ts";
 import * as PivotStore from "./PivotStore.ts";
 
 export const layer = Layer.effect(
-  PivotAwareness,
+  PivotAwareness.PivotAwareness,
   Effect.gen(function* () {
     const store = yield* PivotStore.PivotStore;
     return {

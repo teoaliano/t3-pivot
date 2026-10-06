@@ -107,9 +107,7 @@ const thread = (fake: FakeV2, threadId: ThreadId, operation: string) =>
   Effect.suspend(() => {
     const found = fake.threads.get(threadId);
     return found === undefined
-      ? Effect.fail(
-          new PivotThreadsError({ operation, threadId, detail: `Thread ${threadId} not found.` }),
-        )
+      ? Effect.fail(new PivotThreadsError({ operation, threadId }))
       : Effect.succeed(found);
   });
 
@@ -143,7 +141,6 @@ export const layer = (fake: FakeV2) =>
             return Effect.fail(
               new PivotThreadsError({
                 operation: "create the Pivot thread",
-                detail: "V2 is down.",
               }),
             );
           }
@@ -169,7 +166,7 @@ export const layer = (fake: FakeV2) =>
         Effect.sync(() => {
           const threadId = allocate(fake, "teammate");
           const outcome = fake.nextLaunch ?? {
-            worktreePath: `/worktrees/${input.branch.replaceAll("/", "-")}`,
+            worktreePath: null,
             start: { type: "started", runId: RunId.make(`run-${threadId}`) } as RunStart,
           };
           fake.nextLaunch = null;
@@ -213,9 +210,7 @@ export const layer = (fake: FakeV2) =>
       send: ({ threadId, senderThreadId, text, mode }) =>
         Effect.flatMap(thread(fake, threadId, "send"), (found) =>
           fake.failSend
-            ? Effect.fail(
-                new PivotThreadsError({ operation: "send", threadId, detail: "Send failed." }),
-              )
+            ? Effect.fail(new PivotThreadsError({ operation: "send", threadId }))
             : Effect.sync(() => {
                 found.messages.push({ senderThreadId, text, mode });
               }),
@@ -259,9 +254,7 @@ export const layer = (fake: FakeV2) =>
           const url = `https://${ref.host ?? "github.com"}/${ref.repository}/pull/${ref.number}`;
           const detail = fake.pullRequests.get(url);
           return detail === undefined
-            ? Effect.fail(
-                new PivotThreadsError({ operation: "read the PR", detail: "No such PR." }),
-              )
+            ? Effect.fail(new PivotThreadsError({ operation: "read the PR" }))
             : Effect.succeed({ url, checks: [], ...detail } as PullRequestDetail);
         }),
       mergePullRequest: ({ expectedHeadSha, ...ref }) =>
@@ -272,7 +265,6 @@ export const layer = (fake: FakeV2) =>
             return Effect.fail(
               new PivotThreadsError({
                 operation: "merge the PR",
-                detail: "Head branch was modified.",
               }),
             );
           }

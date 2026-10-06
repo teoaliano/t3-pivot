@@ -5,7 +5,9 @@ import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
 
 import { RestartCarryOn } from "../orchestration-v2/RestartCarryOn.ts";
+import { ThreadToolRestrictions } from "../orchestration-v2/ThreadToolRestrictions.ts";
 import * as PivotCarryOn from "./PivotCarryOn.ts";
+import * as PivotToolRestrictions from "./PivotToolRestrictions.ts";
 import * as PivotService from "./PivotService.ts";
 import { harness, modelSelection, projectId, setup } from "./PivotService.testkit.ts";
 import * as PivotStore from "./PivotStore.ts";
@@ -485,20 +487,33 @@ describe("PivotSupervisor", () => {
   });
 
   describe("after a restart", () => {
-    it.effect("a Pivot and its live teammates carry on; other threads keep the setting", () => {
-      const { fake } = setup();
-      return Effect.gen(function* () {
-        const { pivot, teammate } = yield* running(fake);
-        const carryOn = yield* RestartCarryOn;
-        assert.isTrue(yield* carryOn.carriesOn(pivot));
-        assert.isTrue(yield* carryOn.carriesOn(teammate));
-        assert.isFalse(yield* carryOn.carriesOn("ordinary-thread" as ThreadId));
+    it.effect(
+      "a Pivot and its live teammates carry on, and the Pivot gets no browser tools",
+      () => {
+        const { fake } = setup();
+        return Effect.gen(function* () {
+          const { pivot, teammate } = yield* running(fake);
+          const carryOn = yield* RestartCarryOn;
+          assert.isTrue(yield* carryOn.carriesOn(pivot));
+          assert.isTrue(yield* carryOn.carriesOn(teammate));
+          assert.isFalse(yield* carryOn.carriesOn("ordinary-thread" as ThreadId));
 
-        yield* carryOn.resuming(teammate);
-        const store = yield* PivotStore.PivotStore;
-        assert.strictEqual((yield* store.getTeammate(teammate))?.resume, "pending");
-      }).pipe(Effect.provide(PivotCarryOn.layer.pipe(Layer.provideMerge(withSupervisor(fake)))));
-    });
+          const restrictions = yield* ThreadToolRestrictions;
+          assert.isTrue(yield* restrictions.withoutBrowserOrDevice(pivot));
+          assert.isFalse(yield* restrictions.withoutBrowserOrDevice(teammate));
+
+          yield* carryOn.resuming(teammate);
+          const store = yield* PivotStore.PivotStore;
+          assert.strictEqual((yield* store.getTeammate(teammate))?.resume, "pending");
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(PivotCarryOn.layer, PivotToolRestrictions.layer).pipe(
+              Layer.provideMerge(withSupervisor(fake)),
+            ),
+          ),
+        );
+      },
+    );
 
     it.effect("releases held queues, resumes teammates, and opens with a digest", () => {
       const { fake } = setup();

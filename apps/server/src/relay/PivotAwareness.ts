@@ -11,13 +11,10 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 
-export interface PivotAwarenessShape {
+export class PivotAwareness extends Context.Reference<{
   readonly roleOf: (threadId: ThreadId) => Effect.Effect<ThreadAwarenessPivotRole | null>;
   /** Pivot threads whose escalated decisions changed. */
   readonly changes: Stream.Stream<ThreadId>;
-}
-
-export class PivotAwareness extends Context.Reference<PivotAwarenessShape>(
-  "t3/relay/PivotAwareness",
-  { defaultValue: () => ({ roleOf: () => Effect.succeed(null), changes: Stream.empty }) },
-) {}
+}>("t3/relay/PivotAwareness", {
+  defaultValue: () => ({ roleOf: () => Effect.succeed(null), changes: Stream.empty }),
+}) {}

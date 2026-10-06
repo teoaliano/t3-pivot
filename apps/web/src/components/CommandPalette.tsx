@@ -1,6 +1,7 @@
 "use client";
 
 import { openNewPivotDialog, usePivotProjectReadiness } from "./pivot/NewPivotDialog";
+import { usePivotModeSupported } from "../state/pivot";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
@@ -742,7 +743,6 @@ function OpenCommandPaletteDialog(props: {
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const projects = useProjects();
-  const serverConfigsForPivot = useServerConfigs();
   const referenceThreadRef =
     pathname === "/pull-requests"
       ? environments.some(
@@ -1149,10 +1149,7 @@ function OpenCommandPaletteDialog(props: {
     : null;
   // T3 Pivot: New Pivot needs a git repository and a server that runs Pivot mode.
   const pivotReadiness = usePivotProjectReadiness(currentProjectEnvironmentId, currentProjectCwd);
-  const pivotModeSupported =
-    currentProjectEnvironmentId !== null &&
-    serverConfigsForPivot.get(currentProjectEnvironmentId)?.environment.capabilities.pivotMode ===
-      true;
+  const pivotModeSupported = usePivotModeSupported(currentProjectEnvironmentId);
   const currentProjectCwdForBrowse =
     browseEnvironmentId && currentProjectEnvironmentId === browseEnvironmentId
       ? currentProjectCwd
