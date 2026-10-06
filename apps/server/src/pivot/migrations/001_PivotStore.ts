@@ -31,7 +31,8 @@ export default Effect.gen(function* () {
       created_at TEXT NOT NULL,
       retired_at TEXT,
       successor_thread_id TEXT,
-      wake_cursor INTEGER NOT NULL
+      wake_cursor INTEGER NOT NULL,
+      wake_from INTEGER NOT NULL
     )
   `;
   yield* sql`

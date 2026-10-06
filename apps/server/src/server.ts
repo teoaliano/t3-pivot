@@ -116,6 +116,7 @@ import * as PivotDatabase from "./pivot/PivotDatabase.ts";
 import * as PivotGit from "./pivot/PivotGit.ts";
 import * as PivotService from "./pivot/PivotService.ts";
 import * as PivotStore from "./pivot/PivotStore.ts";
+import * as PivotSupervisor from "./pivot/PivotSupervisor.ts";
 import * as PivotThreads from "./pivot/PivotThreads.ts";
 import { ObservabilityLive } from "./observability/Layers/Observability.ts";
 import * as HeapSnapshot from "./observability/HeapSnapshot.ts";
@@ -586,6 +587,13 @@ const RuntimeCoreDependenciesBaseLive = Layer.mergeAll(
     Layer.provide(PullRequestServiceLive),
     Layer.provide(ProjectionStoreV2.layer),
   ),
+  // Pivot mode: records teammate changes from V2's events and wakes each Pivot.
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const supervisor = yield* PivotSupervisor.PivotSupervisor;
+      yield* supervisor.start;
+    }),
+  ).pipe(Layer.provide(PivotSupervisor.layer)),
   // Subscribes to `account.rate-limits.updated` so usage bars track live
   // telemetry instead of waiting for the next status probe.
   ProviderUsageLimitsIngestionLive,

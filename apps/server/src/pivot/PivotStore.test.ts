@@ -521,6 +521,7 @@ describe("PivotStore", () => {
             type: "pivot.record-wake",
             threadId: pivotA,
             messageId: MessageId.make("wake-1"),
+            fromSequence: 0,
             throughSequence: done!.sequence,
           });
           assert.deepStrictEqual(yield* store.pendingWake(pivotA), []);

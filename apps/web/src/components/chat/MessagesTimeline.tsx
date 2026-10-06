@@ -4908,6 +4908,7 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
     switch (source.kind) {
       case "subagent":
       case "delegated_task":
+      case "teammate":
         return "bot";
       case "command":
         return "terminal";

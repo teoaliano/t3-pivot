@@ -40,6 +40,8 @@ export const PivotEvent = Schema.Union([
   event("pivot.woke", {
     threadId: ThreadId,
     messageId: MessageId,
+    /** Where the wake's content starts: a wake that joins a queued one starts where it did. */
+    fromSequence: Schema.Number,
     throughSequence: Schema.Number,
   }),
   event("teammate.dispatched", {

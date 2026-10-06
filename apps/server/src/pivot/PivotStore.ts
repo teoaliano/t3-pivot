@@ -90,6 +90,7 @@ export type PivotCommand =
       readonly type: "pivot.record-wake";
       readonly threadId: ThreadId;
       readonly messageId: MessageId;
+      readonly fromSequence: number;
       readonly throughSequence: number;
     }
   | {
@@ -215,6 +216,8 @@ export interface PivotRow extends PivotRecord {
   readonly homePath: string;
   /** The Pivot-log sequence its last wake covered. */
   readonly wakeCursor: number;
+  /** Where the last wake's content started, for a wake that joins it while it is queued. */
+  readonly wakeFrom: number;
 }
 
 /** A teammate with its brief and the supervisor's bookkeeping. */
@@ -264,9 +267,13 @@ export class PivotStore extends Context.Service<
       readonly beforeSequence?: number;
       readonly limit: number;
     }) => Effect.Effect<ReadonlyArray<StoredPivotEvent>, PivotStoreError>;
-    /** The events after the Pivot's wake cursor that should wake it, oldest first. */
+    /**
+     * The events that should wake the Pivot, oldest first: after its wake cursor, or
+     * after `afterSequence` when a wake still queued is being rebuilt.
+     */
     readonly pendingWake: (
       pivotThreadId: ThreadId,
+      afterSequence?: number,
     ) => Effect.Effect<ReadonlyArray<StoredPivotEvent>, PivotStoreError>;
     /** Snapshot, then changed records. */
     readonly stream: Stream.Stream<PivotStreamEvent, PivotStoreError>;
@@ -283,6 +290,7 @@ interface PivotSqlRow {
   readonly retired_at: string | null;
   readonly successor_thread_id: string | null;
   readonly wake_cursor: number;
+  readonly wake_from: number;
   readonly open_decisions: number;
   readonly escalated_decisions: number;
 }
@@ -359,6 +367,7 @@ const toPivot = (row: PivotSqlRow): PivotRow => ({
   escalatedDecisionCount: row.escalated_decisions,
   homePath: row.home_path,
   wakeCursor: row.wake_cursor,
+  wakeFrom: row.wake_from,
 });
 
 const toTeammate = (row: TeammateSqlRow): TeammateRow => ({
@@ -593,6 +602,7 @@ export const make = Effect.gen(function* () {
           type: "pivot.woke",
           threadId: command.threadId,
           messageId: command.messageId,
+          fromSequence: command.fromSequence,
           throughSequence: command.throughSequence,
         });
         break;
@@ -904,9 +914,13 @@ export const make = Effect.gen(function* () {
           event.predecessorThreadId === null ? null : yield* readPivot(event.predecessorThreadId);
         // A takeover inherits the predecessor's pending wakes; a fresh Pivot starts caught up.
         const cursor = predecessor?.wakeCursor ?? stored.sequence;
+        const from = predecessor?.wakeFrom ?? stored.sequence;
         yield* sql`
-          INSERT INTO pivot_pivots (thread_id, project_id, home_path, created_at, wake_cursor)
-          VALUES (${event.threadId}, ${event.projectId}, ${event.homePath}, ${at}, ${cursor})
+          INSERT INTO pivot_pivots (
+            thread_id, project_id, home_path, created_at, wake_cursor, wake_from
+          ) VALUES (
+            ${event.threadId}, ${event.projectId}, ${event.homePath}, ${at}, ${cursor}, ${from}
+          )
         `;
         return;
       }
@@ -927,7 +941,8 @@ export const make = Effect.gen(function* () {
       }
       case "pivot.woke":
         yield* sql`
-          UPDATE pivot_pivots SET wake_cursor = ${event.throughSequence}
+          UPDATE pivot_pivots
+          SET wake_cursor = ${event.throughSequence}, wake_from = ${event.fromSequence}
           WHERE thread_id = ${event.threadId}
         `;
         return;
@@ -1245,7 +1260,7 @@ export const make = Effect.gen(function* () {
           LIMIT ${limit}
         `.pipe(Effect.map((rows) => rows.map(toStoredEvent))),
       ),
-    pendingWake: (pivotThreadId) =>
+    pendingWake: (pivotThreadId, afterSequence) =>
       read(
         "pendingWake",
         sql<EventSqlRow>`
@@ -1254,7 +1269,7 @@ export const make = Effect.gen(function* () {
           JOIN pivot_pivots p ON p.thread_id = ${pivotThreadId}
           LEFT JOIN pivot_teammates t ON t.thread_id = e.teammate_thread_id
           LEFT JOIN pivot_decisions d ON d.decision_id = e.decision_id
-          WHERE e.wakes = 1 AND e.sequence > p.wake_cursor
+          WHERE e.wakes = 1 AND e.sequence > ${afterSequence ?? sql`p.wake_cursor`}
             AND COALESCE(d.pivot_thread_id, t.pivot_thread_id) = ${pivotThreadId}
           ORDER BY e.sequence
         `.pipe(Effect.map((rows) => rows.map(toStoredEvent))),

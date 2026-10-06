@@ -1091,6 +1091,11 @@ export const OrchestrationV2NotificationSource = kindUnionWithFallback(
     SubagentNotificationSource,
     CommandNotificationSource,
     Schema.Struct({ kind: Schema.Literal("monitor") }),
+    /** A T3 Pivot wake: teammates that changed. Builds without it read `background_task`. */
+    Schema.Struct({
+      kind: Schema.Literal("teammate"),
+      teammateThreadIds: Schema.Array(ThreadId),
+    }),
     Schema.Struct({ kind: Schema.Literal("background_task") }),
   ],
   (kind) => Schema.Struct({ kind }),

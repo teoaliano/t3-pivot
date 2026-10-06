@@ -11,6 +11,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 
 import {
   PivotThreads,
@@ -54,6 +55,18 @@ export interface FakeV2 {
   failSend: boolean;
   /** The id the next created thread gets. */
   nextThreadId: ThreadId | null;
+  /** Wakes posted on Pivot threads, oldest first; a joined wake replaces the queued one. */
+  readonly wakes: Array<FakeWake>;
+  /** Pivot threads whose last wake is still queued, so the next one joins it. */
+  readonly queuedWakes: Set<string>;
+}
+
+export interface FakeWake {
+  readonly pivotThreadId: ThreadId;
+  readonly messageId: string;
+  readonly text: string;
+  readonly summary: string;
+  readonly teammateThreadIds: ReadonlyArray<ThreadId>;
 }
 
 export const makeFakeV2 = (): FakeV2 => ({
@@ -65,6 +78,8 @@ export const makeFakeV2 = (): FakeV2 => ({
   failPivotThreadCreate: false,
   failSend: false,
   nextThreadId: null,
+  wakes: [],
+  queuedWakes: new Set(),
 });
 
 let counter = 0;
@@ -211,5 +226,15 @@ export const layer = (fake: FakeV2) =>
           const found = fake.threads.get(threadId);
           return found === undefined ? null : fakeShell(found);
         }),
+      events: Stream.never,
+      wake: (input) =>
+        Effect.sync(() => {
+          const wake = { ...input, messageId: String(input.messageId) };
+          const queued = fake.queuedWakes.has(input.pivotThreadId);
+          const index = fake.wakes.findLastIndex((w) => w.pivotThreadId === input.pivotThreadId);
+          if (queued && index >= 0) fake.wakes[index] = wake;
+          else fake.wakes.push(wake);
+        }),
+      hasQueuedWake: (pivotThreadId) => Effect.sync(() => fake.queuedWakes.has(pivotThreadId)),
     }),
   );

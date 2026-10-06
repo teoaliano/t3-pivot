@@ -14,13 +14,16 @@ import {
   type ModelSelection,
   type OrchestrationV2ThreadShell,
   type ProjectId,
+  type OrchestrationV2DomainEvent,
   type RunId,
   ThreadId,
+  type ThreadPullRequestLink,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
@@ -60,6 +63,24 @@ export interface TeammateLaunch {
   /** The first run, preparing its worktree. Null when the launch created none. */
   readonly runId: RunId | null;
 }
+
+/** What the supervisor hears from V2, already narrowed to what Pivot mode acts on. */
+export type PivotThreadEvent =
+  | { readonly type: "activity"; readonly threadId: ThreadId }
+  /** The user typed into the thread directly: no sender thread, not a notification. */
+  | {
+      readonly type: "user-message";
+      readonly threadId: ThreadId;
+      readonly messageId: string;
+      readonly text: string;
+    }
+  /** The user answered an approval or question the thread's run was held on. */
+  | { readonly type: "request-answered"; readonly threadId: ThreadId; readonly answer: string }
+  | {
+      readonly type: "pull-requests";
+      readonly threadId: ThreadId;
+      readonly links: ReadonlyArray<ThreadPullRequestLink>;
+    };
 
 export class PivotThreads extends Context.Service<
   PivotThreads,
@@ -116,6 +137,22 @@ export class PivotThreads extends Context.Service<
     readonly shell: (
       threadId: ThreadId,
     ) => Effect.Effect<OrchestrationV2ThreadShell | null, PivotThreadsError>;
+    /** V2's live events, narrowed for the supervisor. Every thread's, not only teammates'. */
+    readonly events: Stream.Stream<PivotThreadEvent>;
+    /**
+     * Posts a wake on the Pivot's thread as a `teammate` notification message. V2 steers
+     * it into a running turn that steers without interrupting tools, joins it to a wake
+     * still queued, or queues it.
+     */
+    readonly wake: (input: {
+      readonly pivotThreadId: ThreadId;
+      readonly messageId: MessageId;
+      readonly text: string;
+      readonly summary: string;
+      readonly teammateThreadIds: ReadonlyArray<ThreadId>;
+    }) => Effect.Effect<void, PivotThreadsError>;
+    /** Whether a teammate wake is still queued on the Pivot's thread, undelivered. */
+    readonly hasQueuedWake: (pivotThreadId: ThreadId) => Effect.Effect<boolean, PivotThreadsError>;
   }
 >()("t3/pivot/PivotThreads") {}
 
@@ -341,7 +378,112 @@ export const make = Effect.gen(function* () {
 
     shell: (threadId) =>
       threads.getThreadShell(threadId).pipe(Effect.mapError(fail("read", threadId))),
+
+    events: threads.streamDomainEvents.pipe(
+      Stream.flatMap((event) => Stream.fromIterable(toPivotThreadEvents(event))),
+      // A broken subscription resubscribes rather than leaving the supervisor deaf.
+      Stream.retry(Schedule.spaced("1 second")),
+      Stream.orDie,
+    ),
+
+    wake: ({ pivotThreadId, messageId, text, summary, teammateThreadIds }) =>
+      Effect.gen(function* () {
+        yield* threads.dispatch({
+          type: "message.dispatch",
+          commandId: yield* commandId("wake"),
+          threadId: pivotThreadId,
+          messageId,
+          text,
+          notification: {
+            source: { kind: "teammate", teammateThreadIds: [...teammateThreadIds] },
+            outcome: "updated",
+            summary,
+          },
+          attachments: [],
+          dispatchMode: { type: "queue_after_active" },
+          createdBy: "agent",
+          creationSource: "server",
+        });
+      }).pipe(Effect.mapError(fail("wake", pivotThreadId))),
+
+    hasQueuedWake: (pivotThreadId) =>
+      threads.getThreadRecords(pivotThreadId, ["runs", "messages"]).pipe(
+        Effect.map((records) =>
+          records.runs.some(
+            (run) =>
+              run.status === "queued" &&
+              records.messages.some(
+                (message) =>
+                  message.id === run.userMessageId &&
+                  message.notification?.source.kind === "teammate",
+              ),
+          ),
+        ),
+        Effect.mapError(fail("read the queue", pivotThreadId)),
+      ),
   });
 });
+
+const describeAnswer = (
+  request: Extract<OrchestrationV2DomainEvent, { type: "runtime-request.updated" }>["payload"],
+) => {
+  if (request.decision !== undefined) return `Approval: ${String(request.decision)}`;
+  if (request.answers !== undefined) {
+    return Object.values(request.answers)
+      .map((answer) => (Array.isArray(answer) ? answer.join(", ") : String(answer)))
+      .join("; ");
+  }
+  return "Answered.";
+};
+
+/** Narrows one V2 domain event to the Pivot thread events it carries. */
+export const toPivotThreadEvents = (
+  event: OrchestrationV2DomainEvent,
+): ReadonlyArray<PivotThreadEvent> => {
+  const activity: PivotThreadEvent = { type: "activity", threadId: event.threadId };
+  switch (event.type) {
+    case "message.updated": {
+      const message = event.payload;
+      const typedByUser =
+        message.role === "user" &&
+        message.createdBy === "user" &&
+        message.senderThreadId === undefined &&
+        message.notification === undefined;
+      return typedByUser
+        ? [
+            activity,
+            {
+              type: "user-message",
+              threadId: event.threadId,
+              messageId: message.id,
+              text: message.text,
+            },
+          ]
+        : [activity];
+    }
+    case "runtime-request.updated":
+      return event.payload.status === "resolved"
+        ? [
+            activity,
+            {
+              type: "request-answered",
+              threadId: event.threadId,
+              answer: describeAnswer(event.payload),
+            },
+          ]
+        : [activity];
+    case "thread.pull-request-synced":
+      return [
+        activity,
+        {
+          type: "pull-requests",
+          threadId: event.threadId,
+          links: event.payload.pullRequests ?? [],
+        },
+      ];
+    default:
+      return [activity];
+  }
+};
 
 export const layer = Layer.effect(PivotThreads, make);
