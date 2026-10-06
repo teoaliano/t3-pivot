@@ -7,6 +7,7 @@ import type {
 import * as DateTime from "effect/DateTime";
 
 import { backgroundWorkHoldsCompletion } from "./orchestrationV2PendingBackgroundWork.ts";
+import { pivotTurnAnswersUser } from "./teammateStatus.ts";
 
 export type AgentAwarenessPhase =
   | "starting"
@@ -54,6 +55,8 @@ export interface ProjectThreadAwarenessV2Input {
     OrchestrationV2ThreadShell,
     | "activityRunStatus"
     | "id"
+    | "latestRunRequestedAt"
+    | "latestUserAuthoredMessageAt"
     | "lineage"
     | "modelSelection"
     | "pendingBackgroundTasks"
@@ -76,6 +79,11 @@ export function projectThreadAwarenessV2(
     input.pivotRole?.kind === "pivot" && input.pivotRole.escalatedDecisions > 0,
   );
   if (phase === null) {
+    return null;
+  }
+  // A Pivot reports finishing only a turn that answered the user, not one spent on
+  // teammate news: in Pivot mode the user hears what needs them, not every wake.
+  if (phase === "completed" && input.pivotRole?.kind === "pivot" && !pivotTurnAnswersUser(thread)) {
     return null;
   }
   const detail =

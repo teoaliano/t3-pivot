@@ -29,9 +29,13 @@ pinned to the commit it checked. Red checks block the merge unless you waive a s
 name. On other forges you merge by hand. In a project with no remote, a ready branch lands on
 your default branch by fast-forward.
 
-Calls that need you appear above the Pivot's composer until you answer, and on your phone as
-notifications. Your answer is recorded in your words and passed on to the teammate. Teammates
-send no notifications of their own.
+Calls that need you appear above the Pivot's composer until you answer. A merge, a landing or
+discarding work asks for your approval: answer with **Approve** or **Decline**, adding a note if
+you want to waive a check. Your answer is recorded in your words and passed on to the teammate.
+
+The Pivot notifies you when it needs a call, when a scout's findings are ready, and when it
+replies to you. Teammates send no notifications of their own, and the Pivot stays quiet while it
+handles their updates.
 
 ## Seeing it all
 

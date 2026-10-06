@@ -25,6 +25,8 @@ describe("projectThreadAwarenessV2", () => {
         OrchestrationV2ThreadShell,
         | "activityRunStatus"
         | "status"
+        | "latestRunRequestedAt"
+        | "latestUserAuthoredMessageAt"
         | "pendingBackgroundTasks"
         | "pendingRuntimeRequest"
         | "lineage"
@@ -96,6 +98,26 @@ describe("projectThreadAwarenessV2", () => {
       });
     expect(pivot(1)).toMatchObject({ phase: "waiting_for_input" });
     expect(pivot(0)).toBeNull();
+  });
+
+  it("reports a Pivot finishing only a turn that answered the user", () => {
+    const at = (iso: string) => DateTime.makeUnsafe(iso);
+    const pivot = (requestedAt: string, authoredAt: string) =>
+      projectThreadAwarenessV2({
+        environmentId: "env-1" as EnvironmentId,
+        project,
+        thread: v2Thread({
+          status: "completed",
+          latestRunRequestedAt: at(requestedAt),
+          latestUserAuthoredMessageAt: at(authoredAt),
+        }),
+        pivotRole: { kind: "pivot", escalatedDecisions: 0 },
+      });
+    expect(pivot("2026-10-06T10:00:00.000Z", "2026-10-06T10:00:00.000Z")).toMatchObject({
+      phase: "completed",
+    });
+    // A wake started the run after the user's last message.
+    expect(pivot("2026-10-06T11:00:00.000Z", "2026-10-06T10:00:00.000Z")).toBeNull();
   });
 
   it("keeps an older activity run visible over a newer cancelled run", () => {

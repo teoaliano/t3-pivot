@@ -1,4 +1,5 @@
 import { TEAMMATE_TERMINAL_REPORTED_STATUSES } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import type {
   OrchestrationV2ShellThreadStatus,
   OrchestrationV2ThreadShell,
@@ -85,4 +86,21 @@ export function deriveTeammateStatus(input: TeammateStatusInput): TeammateStatus
     return { status: "paused", detail: report.summary };
   }
   return { status: "unreported", detail: report?.summary ?? null };
+}
+
+/**
+ * Whether a Pivot's latest turn answers the user: the user's own message started its
+ * run. A wake starts a run of its own, so a turn spent on teammate news does not
+ * count. A server that does not report the user's last message reads as answering.
+ */
+export function pivotTurnAnswersUser(
+  shell: Pick<OrchestrationV2ThreadShell, "latestRunRequestedAt" | "latestUserAuthoredMessageAt">,
+): boolean {
+  if (shell.latestUserAuthoredMessageAt === undefined) return true;
+  if (shell.latestUserAuthoredMessageAt === null) return false;
+  if (shell.latestRunRequestedAt == null) return true;
+  return (
+    DateTime.toEpochMillis(shell.latestUserAuthoredMessageAt) >=
+    DateTime.toEpochMillis(shell.latestRunRequestedAt)
+  );
 }
