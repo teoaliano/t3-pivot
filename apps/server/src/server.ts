@@ -114,6 +114,7 @@ import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as PivotHome from "./pivot/PivotHome.ts";
 import * as PivotCarryOn from "./pivot/PivotCarryOn.ts";
 import * as PivotDatabase from "./pivot/PivotDatabase.ts";
+import * as PivotRelayAwareness from "./pivot/PivotRelayAwareness.ts";
 import * as PivotGit from "./pivot/PivotGit.ts";
 import * as PivotService from "./pivot/PivotService.ts";
 import * as PivotStore from "./pivot/PivotStore.ts";
@@ -619,8 +620,9 @@ const RuntimeCoreDependenciesBaseLive = Layer.mergeAll(
   ),
   // Core Services
   Layer.provideMerge(OrchestrationApplicationLayerLive),
-  // Pivot mode: a Pivot and its teammates carry on after a restart.
-  Layer.provideMerge(PivotCarryOn.layer),
+  // Pivot mode: a Pivot and its teammates carry on after a restart, and the
+  // relay publishes nothing for teammates and a Pivot's decisions as input needed.
+  Layer.provideMerge(Layer.merge(PivotCarryOn.layer, PivotRelayAwareness.layer)),
   Layer.provideMerge(OrchestrationEventInfrastructureLayerLive),
   Layer.provideMerge(Layer.merge(ProjectStore.layer, ThreadSearch.layer)),
   Layer.provideMerge(ServerSettingsLayerLive),

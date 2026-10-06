@@ -37,8 +37,18 @@ function buildAgentAwarenessDeepLink(input: {
   return `/threads/${encodeURIComponent(input.environmentId)}/${encodeURIComponent(input.threadId)}`;
 }
 
+/**
+ * A thread's role in T3 Pivot's Pivot mode. Teammates publish nothing: their news
+ * reaches the user through their Pivot. A Pivot holding decisions for the user is
+ * waiting for their input.
+ */
+export type ThreadAwarenessPivotRole =
+  | { readonly kind: "teammate" }
+  | { readonly kind: "pivot"; readonly escalatedDecisions: number };
+
 export interface ProjectThreadAwarenessV2Input {
   readonly environmentId: EnvironmentId;
+  readonly pivotRole?: ThreadAwarenessPivotRole | null;
   readonly project: Pick<Project, "title">;
   readonly thread: Pick<
     OrchestrationV2ThreadShell,
@@ -60,7 +70,11 @@ export function projectThreadAwarenessV2(
 ): AgentAwarenessState | null {
   const { environmentId, project, thread } = input;
   if (thread.lineage.relationshipToParent === "subagent") return null;
-  const phase = resolveThreadAwarenessPhaseV2(thread);
+  if (input.pivotRole?.kind === "teammate") return null;
+  const phase = resolveThreadAwarenessPhaseV2(
+    thread,
+    input.pivotRole?.kind === "pivot" && input.pivotRole.escalatedDecisions > 0,
+  );
   if (phase === null) {
     return null;
   }
@@ -86,6 +100,7 @@ export function projectThreadAwarenessV2(
 
 function resolveThreadAwarenessPhaseV2(
   thread: ProjectThreadAwarenessV2Input["thread"],
+  holdsDecisionsForUser = false,
 ): AgentAwarenessPhase | null {
   if (thread.pendingRuntimeRequest?.kind === "user_input") {
     return "waiting_for_input";
@@ -96,6 +111,8 @@ function resolveThreadAwarenessPhaseV2(
   ) {
     return "waiting_for_approval";
   }
+  // An escalated decision is a question for the user, whatever the run is doing.
+  if (holdsDecisionsForUser) return "waiting_for_input";
   switch (thread.activityRunStatus ?? thread.status) {
     case "preparing":
     case "starting":

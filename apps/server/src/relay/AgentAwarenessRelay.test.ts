@@ -38,6 +38,7 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as PivotAwareness from "./PivotAwareness.ts";
 import * as AgentAwarenessRelay from "./AgentAwarenessRelay.ts";
 
 const THREAD_ID = ThreadId.make("relay-thread");
@@ -144,6 +145,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
     /** Serves shells from this source instead of `currentShell`. */
     readonly readShell?: (threadId: ThreadId) => Effect.Effect<OrchestrationV2ThreadShell | null>;
     readonly domainEvents?: Stream.Stream<OrchestrationV2DomainEvent>;
+    readonly pivotAwareness?: PivotAwareness.PivotAwarenessShape;
   } = {},
 ) {
   const values = new Map<string, Uint8Array>(
@@ -243,6 +245,9 @@ const makeTestRelay = Effect.fnUntraced(function* (
     { preconnect: () => {} },
   );
   const relay = yield* AgentAwarenessRelay.make.pipe(
+    options.pivotAwareness === undefined
+      ? (effect) => effect
+      : Effect.provideService(PivotAwareness.PivotAwareness, options.pivotAwareness),
     Effect.provideService(ServerSecretStore.ServerSecretStore, secrets),
     Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
     Effect.provideService(ServerEnvironment.ServerEnvironment, {
@@ -680,6 +685,22 @@ describe("AgentAwarenessRelay", () => {
           ...(archived ? { archivedAt: yield* DateTime.now } : {}),
         }),
       );
+      yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      assert.equal(publications.length, 0);
+    }),
+  );
+
+  it.effect("never publishes for a T3 Pivot teammate", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay({
+        pivotAwareness: {
+          roleOf: () => Effect.succeed({ kind: "teammate" }),
+          changes: Stream.empty,
+        },
+      });
+      yield* Ref.set(currentShell, shell({ status: "running" }));
       yield* relay.publishThread(THREAD_ID);
       yield* TestClock.adjust("5 seconds");
       yield* relay.drain;

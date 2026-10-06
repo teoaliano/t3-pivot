@@ -75,6 +75,29 @@ describe("projectThreadAwarenessV2", () => {
     },
   );
 
+  it("publishes nothing for a T3 Pivot teammate", () => {
+    expect(
+      projectThreadAwarenessV2({
+        environmentId: "env-1" as EnvironmentId,
+        project,
+        thread: v2Thread({ status: "completed" }),
+        pivotRole: { kind: "teammate" },
+      }),
+    ).toBeNull();
+  });
+
+  it("reads a Pivot holding decisions for the user as waiting for input", () => {
+    const pivot = (escalatedDecisions: number) =>
+      projectThreadAwarenessV2({
+        environmentId: "env-1" as EnvironmentId,
+        project,
+        thread: v2Thread({ status: "idle" }),
+        pivotRole: { kind: "pivot", escalatedDecisions },
+      });
+    expect(pivot(1)).toMatchObject({ phase: "waiting_for_input" });
+    expect(pivot(0)).toBeNull();
+  });
+
   it("keeps an older activity run visible over a newer cancelled run", () => {
     expect(
       projectThreadAwarenessV2({
