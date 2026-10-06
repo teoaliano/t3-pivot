@@ -429,6 +429,12 @@ import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
 import { MessagesTimeline, type MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
 import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
+import {
+  PivotComposerBar,
+  PivotDecisionsStrip,
+  PivotViewSwitch,
+  usePivotChatRole,
+} from "./pivot/PivotChatChrome";
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveTimelineIsAtEnd, worktreeSetupAgentStarted } from "./chat/MessagesTimeline.logic";
 import {
@@ -813,6 +819,8 @@ type ChatViewProps =
       onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
       forceExpandedMobileComposer?: boolean;
+      /** T3 Pivot: a teammate shown in the Pivot view, steered through its Pivot. */
+      pivotReadOnly?: boolean;
       routeKind: "server";
       draftId?: never;
     }
@@ -822,6 +830,7 @@ type ChatViewProps =
       onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
       forceExpandedMobileComposer?: boolean;
+      pivotReadOnly?: never;
       routeKind: "draft";
       draftId: DraftId;
     };
@@ -1532,7 +1541,9 @@ export default function ChatView(props: ChatViewProps) {
     onDiffPanelOpen,
     reserveTitleBarControlInset = true,
     forceExpandedMobileComposer = false,
+    pivotReadOnly = false,
   } = props;
+  const pivotRole = usePivotChatRole(environmentId, threadId);
   const draftId = routeKind === "draft" ? props.draftId : null;
   const handleNewThread = useNewThreadHandler();
   const { settleThread, pinThread, confirmAndUnpinThread } = useThreadActions();
@@ -4172,7 +4183,12 @@ export default function ChatView(props: ChatViewProps) {
   // composer and its strips. Its approvals and questions are asked on the
   // top-level parent thread.
   const showProviderSubagentBar = isProviderSubagent;
-  const composerMounted = !showProviderSubagentBar;
+  // T3 Pivot: a retired Pivot is read-only history, and a teammate in the Pivot view
+  // takes no typing, only answers to the approval or question it is held on.
+  const showPivotComposerBar =
+    (pivotRole.kind === "pivot" && pivotRole.retired) ||
+    (pivotReadOnly && pendingApprovals.length === 0 && pendingUserInputs.length === 0);
+  const composerMounted = !showProviderSubagentBar && !showPivotComposerBar;
   const providerSubagentModels = selectedProviderEntry?.models ?? EMPTY_PROVIDER_MODELS;
   // Providers can report a dated id or alias (claude-haiku-4-5-20251001).
   const providerSubagentModelSlug = selectedProviderEntry
@@ -10957,6 +10973,9 @@ export default function ChatView(props: ChatViewProps) {
               ? { onOpenProjectSettings: handleOpenDraftProjectSettings }
               : {})}
           />
+          {isServerThread ? (
+            <PivotViewSwitch environmentId={environmentId} threadId={threadId} />
+          ) : null}
         </header>
 
         {/* Main content area with optional plan sidebar */}
@@ -11176,6 +11195,9 @@ export default function ChatView(props: ChatViewProps) {
                         : undefined
                     }
                   >
+                    {pivotRole.kind === "pivot" && !pivotRole.retired ? (
+                      <PivotDecisionsStrip environmentId={environmentId} pivotThreadId={threadId} />
+                    ) : null}
                     <ComposerSurface.Shell
                       contextStrip={showComposerContextStrip || showComposerModelStrip}
                     >
@@ -11203,6 +11225,9 @@ export default function ChatView(props: ChatViewProps) {
                                   : null
                               }
                             />
+                          ) : null}
+                          {showPivotComposerBar ? (
+                            <PivotComposerBar environmentId={environmentId} role={pivotRole} />
                           ) : null}
                           {!composerMounted ? null : (
                             <ChatComposer

@@ -1,4 +1,11 @@
-import type { TeammateRecord, TeammateStatus, ThreadId } from "@t3tools/contracts";
+import type {
+  OrchestrationV2ThreadShell,
+  TeammateRecord,
+  TeammateStatus,
+  ThreadId,
+  ThreadPullRequestLink,
+} from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import { deriveTeammateStatus, type TeammateStatusInput } from "@t3tools/shared/teammateStatus";
 
 /**
@@ -121,4 +128,28 @@ export function elapsedLabel(since: string | null, nowMs: number): string | null
   const hours = Math.floor(minutes / 60);
   if (hours < 48) return `${hours}h`;
   return `${Math.floor(hours / 24)}d`;
+}
+
+const isoOrNull = (value: DateTime.Utc | null | undefined): string | null =>
+  value === null || value === undefined ? null : DateTime.formatIso(value);
+
+/** What a card reads, from the teammate's V2 shell and its linked PRs. */
+export function teammateCardShellOf(
+  source: OrchestrationV2ThreadShell,
+  pullRequests: ReadonlyArray<ThreadPullRequestLink>,
+): TeammateCardShell {
+  const link = pullRequests.find((candidate) => candidate.source !== "stack-dismissed") ?? null;
+  return {
+    title: source.title,
+    providerInstanceId: source.providerInstanceId,
+    status: source.status,
+    latestRunId: source.latestRunId,
+    pendingRuntimeRequest: source.pendingRuntimeRequest,
+    pendingBackgroundTasks: source.pendingBackgroundTasks ?? [],
+    lastError: source.lastError ?? null,
+    lastErrorClass: source.lastErrorClass ?? null,
+    latestRunStartedAt: isoOrNull(source.latestRunStartedAt),
+    latestRunCompletedAt: isoOrNull(source.latestRunCompletedAt),
+    pullRequest: link === null ? null : { number: link.number, url: link.url },
+  };
 }

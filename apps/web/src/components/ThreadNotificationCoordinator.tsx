@@ -21,7 +21,9 @@ import {
   setNotificationBadge,
   unlockNotificationAudio,
 } from "../threadNotifications";
+import { usePivotState } from "../state/pivot";
 import { resolveSidebarThreadStatus } from "./Sidebar.logic";
+import { threadNotifiesUser } from "./sidebar/pivotNesting.logic";
 import { toastManager } from "./ui/toast";
 
 export function ThreadNotificationCoordinator() {
@@ -115,6 +117,7 @@ function EnvironmentNotifications({
     strict: false,
   });
   const previous = useRef(new Map<ThreadId, NotificationState>());
+  const pivotState = usePivotState(environmentId);
 
   useEffect(() => {
     if (threads === null) {
@@ -124,6 +127,8 @@ function EnvironmentNotifications({
     const next = new Map<ThreadId, NotificationState>();
     for (const rawThread of threads) {
       if (rawThread.lineage.relationshipToParent === "subagent") continue;
+      // A teammate's news reaches the user through its Pivot.
+      if (!threadNotifiesUser(rawThread.id, pivotState)) continue;
       const prior = previous.current.get(rawThread.id);
       // The same object cannot produce a new notification.
       if (prior?.raw === rawThread) {
@@ -240,6 +245,7 @@ function EnvironmentNotifications({
     mode,
     navigate,
     onNotification,
+    pivotState,
     threads,
   ]);
 

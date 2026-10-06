@@ -1,5 +1,6 @@
 "use client";
 
+import { openNewPivotDialog, usePivotProjectReadiness } from "./pivot/NewPivotDialog";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
@@ -64,6 +65,7 @@ import {
   SquarePenIcon,
   SunIcon,
   TextSearchIcon,
+  LayoutDashboardIcon,
 } from "lucide-react";
 import {
   useCallback,
@@ -740,6 +742,7 @@ function OpenCommandPaletteDialog(props: {
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const projects = useProjects();
+  const serverConfigsForPivot = useServerConfigs();
   const referenceThreadRef =
     pathname === "/pull-requests"
       ? environments.some(
@@ -1144,6 +1147,12 @@ function OpenCommandPaletteDialog(props: {
   const currentProjectCwd = currentProjectId
     ? (projectCwdById.get(currentProjectId) ?? null)
     : null;
+  // T3 Pivot: New Pivot needs a git repository and a server that runs Pivot mode.
+  const pivotReadiness = usePivotProjectReadiness(currentProjectEnvironmentId, currentProjectCwd);
+  const pivotModeSupported =
+    currentProjectEnvironmentId !== null &&
+    serverConfigsForPivot.get(currentProjectEnvironmentId)?.environment.capabilities.pivotMode ===
+      true;
   const currentProjectCwdForBrowse =
     browseEnvironmentId && currentProjectEnvironmentId === browseEnvironmentId
       ? currentProjectCwd
@@ -1905,6 +1914,33 @@ function OpenCommandPaletteDialog(props: {
             handleNewThread,
           });
         },
+      });
+    }
+
+    if (
+      activeProjectTitle &&
+      pivotModeSupported &&
+      currentProjectId !== null &&
+      currentProjectEnvironmentId !== null
+    ) {
+      const pivotTarget = {
+        environmentId: currentProjectEnvironmentId,
+        projectId: currentProjectId,
+      };
+      actionItems.push({
+        kind: "action",
+        value: "action:new-pivot",
+        searchTerms: ["new pivot", "pivot", "supervise", "teammates", "takeover"],
+        title: (
+          <>
+            New Pivot in <span className="font-semibold">{activeProjectTitle}</span>
+          </>
+        ),
+        ...(pivotReadiness.reason === null ? {} : { description: pivotReadiness.reason }),
+        disabled: !pivotReadiness.ready,
+        icon: <LayoutDashboardIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "pivot.new",
+        run: async () => openNewPivotDialog(pivotTarget),
       });
     }
 

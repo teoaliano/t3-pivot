@@ -408,6 +408,22 @@ export function isDiffToggleShortcut(
   return matchesCommandShortcut(event, keybindings, "diff.toggle", options);
 }
 
+export function isPivotToggleViewShortcut(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+): boolean {
+  return matchesCommandShortcut(event, keybindings, "pivot.toggleView", options);
+}
+
+export function isNewPivotShortcut(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+): boolean {
+  return matchesCommandShortcut(event, keybindings, "pivot.new", options);
+}
+
 export function isOpenFavoriteEditorShortcut(
   event: ShortcutEventLike,
   keybindings: ResolvedKeybindingsConfig,

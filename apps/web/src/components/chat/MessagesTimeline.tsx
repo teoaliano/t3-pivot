@@ -1,4 +1,5 @@
 import { ComputerUseAppIcon } from "~/components/Icons";
+import { useSenderLabel } from "../pivot/senderLabel";
 import { useChatCanvas } from "./ChatCanvasContext";
 import { WorkLogBlock, WorkLogButton, WorkLogDetails, WorkLogList, WorkLogRow } from "./WorkLog";
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
@@ -1950,6 +1951,11 @@ function MessageAuthorHeading({ children }: { children: string }) {
   return <h3 className="sr-only select-none">{children}</h3>;
 }
 
+/** T3 Pivot: a message from a Pivot reads as the Pivot's. */
+function SenderAttribution(props: { environmentId: EnvironmentId; senderThreadId: ThreadId }) {
+  return useSenderLabel(props.environmentId, props.senderThreadId);
+}
+
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const { onImageExpand, onFileOpen } = ctx;
@@ -2138,7 +2144,10 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
               tone="muted"
               aria-label="Open sending thread"
             >
-              Sent by another agent
+              <SenderAttribution
+                environmentId={ctx.activeThreadEnvironmentId}
+                senderThreadId={senderThreadId}
+              />
             </InlineButton>
           ) : (
             "Sent by another agent"

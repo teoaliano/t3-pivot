@@ -1,4 +1,8 @@
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
+import { usePivotStatesStore } from "./pivot/pivotStatesStore";
+import { SidebarPivotStrip } from "./pivot/SidebarPivotStrip";
+import { nestPivotTeammates, sidebarPivotBadge } from "./sidebar/pivotNesting.logic";
+import { SidebarNewPivotButton } from "./pivot/SidebarNewPivotButton";
 import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
 import { setThreadChangeRequestSnapshot } from "./ThreadStatusIndicators";
 import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
@@ -2409,6 +2413,19 @@ export default function Sidebar() {
     },
   });
   const newThreadContext = useHandleNewThread();
+  const pivotStatesByEnvironment = usePivotStatesStore((store) => store.byEnvironment);
+  // Pivots start expanded; the user folds the ones they want out of the way.
+  const [collapsedPivotKeys, setCollapsedPivotKeys] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const togglePivotExpanded = useCallback((pivotKey: string) => {
+    setCollapsedPivotKeys((current) => {
+      const next = new Set(current);
+      if (next.has(pivotKey)) next.delete(pivotKey);
+      else next.add(pivotKey);
+      return next;
+    });
+  }, []);
   const openAddProjectCommandPalette = useCallback(
     () => openCommandPalette({ open: "add-project" }),
     [],
@@ -2698,6 +2715,7 @@ export default function Sidebar() {
     snoozedThreads,
     settledThreads,
     snoozeNow,
+    pivotTeammatesByKey,
   } = useMemo(() => {
     // Snooze classification uses a REAL clock, not the quantized minute:
     // wake times are second-precise and a woken thread must not linger on
@@ -2707,7 +2725,12 @@ export default function Sidebar() {
     const preciseNow = new Date().toISOString();
     // Subagent child threads live in the parent's Agents surface, not the
     // sidebar roster (v2 models them as real threads with lineage).
-    const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys);
+    // T3 Pivot: teammates leave the shelves and sit under their Pivot's row.
+    const pivotNesting = nestPivotTeammates(
+      filterSidebarV2VisibleThreads(threads, scopedProjectKeys),
+      (environmentId) => pivotStatesByEnvironment[environmentId] ?? null,
+    );
+    const visible = pivotNesting.topLevel;
     inboxReturns.observe(workingShelfEnabled ? threads : null);
     const pinned: EnvironmentThreadShell[] = [];
     const active: EnvironmentThreadShell[] = [];
@@ -2806,9 +2829,11 @@ export default function Sidebar() {
       ),
       settledThreads: sortSettledThreads(settled),
       snoozeNow: preciseNow,
+      pivotTeammatesByKey: pivotNesting.teammatesByPivotKey,
     };
   }, [
     nowMinute,
+    pivotStatesByEnvironment,
     optimisticDrop,
     scopedProjectKeys,
     serverConfigs,
@@ -2828,8 +2853,17 @@ export default function Sidebar() {
       ...workingThreads,
       ...snoozedThreads,
       ...settledThreads,
+      // Nested under their Pivot, but still found by search.
+      ...[...pivotTeammatesByKey.values()].flat(),
     ],
-    [activeThreads, pinnedThreads, settledThreads, snoozedThreads, workingThreads],
+    [
+      activeThreads,
+      pinnedThreads,
+      pivotTeammatesByKey,
+      settledThreads,
+      snoozedThreads,
+      workingThreads,
+    ],
   );
   const searchEnvironmentIds = useConnectedEnvironmentIds();
   // useThreadSearch owns the debounce and the two-character floor.
@@ -4973,6 +5007,18 @@ export default function Sidebar() {
               onNewProject={openAddProjectCommandPalette}
               onNewThread={handleNewThreadClick}
               newThreadDisabled={projects.length === 0}
+              newPivot={
+                <SidebarNewPivotButton
+                  projectRef={
+                    newThreadContext.activeThread
+                      ? scopeProjectRef(
+                          newThreadContext.activeThread.environmentId,
+                          newThreadContext.activeThread.projectId,
+                        )
+                      : (newThreadContext.defaultProjectRef ?? null)
+                  }
+                />
+              }
               newThreadShortcutLabel={newThreadShortcutLabel}
               newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
               showNewThreadInProjectHint={projectGroups.length > 1}
@@ -5253,7 +5299,42 @@ export default function Sidebar() {
                       ];
                       for (const item of sidebarListItems) {
                         if (item.kind === "thread") {
-                          items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
+                          const thread = threadByKey.get(item.key)!;
+                          items.push(renderThreadRow(thread, item.section));
+                          // T3 Pivot: the Pivot strip, then its teammates when expanded.
+                          const pivotKey = `${thread.environmentId}:${thread.id}`;
+                          const teammates = pivotTeammatesByKey.get(pivotKey) ?? [];
+                          const badge = sidebarPivotBadge(
+                            thread,
+                            pivotStatesByEnvironment[thread.environmentId] ?? null,
+                            teammates.length,
+                          );
+                          if (badge !== null) {
+                            const expanded = !collapsedPivotKeys.has(pivotKey);
+                            items.push(
+                              <SidebarPivotStrip
+                                key={`${item.key}:pivot`}
+                                badge={badge}
+                                expanded={expanded}
+                                onToggle={() => togglePivotExpanded(pivotKey)}
+                              />,
+                            );
+                            if (expanded && teammates.length > 0) {
+                              items.push(
+                                <li key={`${item.key}:teammates`} role="presentation">
+                                  <ul
+                                    role="presentation"
+                                    aria-label="Teammates"
+                                    className="ml-3 flex flex-col gap-px border-l border-sidebar-border pl-1"
+                                  >
+                                    {teammates.map((teammate) =>
+                                      renderThreadRowInner(teammate, item.section),
+                                    )}
+                                  </ul>
+                                </li>,
+                              );
+                            }
+                          }
                           continue;
                         }
                         switch (item.marker) {
