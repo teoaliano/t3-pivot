@@ -67,5 +67,8 @@ clash with upstream's `v*` tags.
   T3 Code has no such check, so quit T3 Pivot before opening T3 Code.
 - T3 Code updates itself; T3 Pivot doesn't. After T3 Code updates, run `pivot:sync` and
   `pivot:release` before opening T3 Pivot again. If T3 Code has already migrated the database
-  past what T3 Pivot knows, T3 Pivot refuses to start and says so.
+  past what T3 Pivot knows, T3 Pivot refuses to start and says so. To warn before that, a
+  release records the upstream nightly it was built on, and each update check compares it
+  with the newest nightly on upstream's release feed. When upstream is ahead, the sidebar
+  says so next to the update button.
 - Pivot mode's own records live in `~/.t3/userdata/pivot.sqlite`, which T3 Code never opens.

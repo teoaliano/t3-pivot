@@ -379,6 +379,10 @@
       "types": "./src/cliRelease.ts",
       "import": "./src/cliRelease.ts"
     },
+    "./nightlyTag": {
+      "types": "./src/nightlyTag.ts",
+      "import": "./src/nightlyTag.ts"
+    },
     "./gitPatchPath": {
       "types": "./src/gitPatchPath.ts",
       "import": "./src/gitPatchPath.ts"

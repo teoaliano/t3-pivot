@@ -5,6 +5,8 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import { newestNightlyTag, parseNightlyTag } from "@t3tools/shared/nightlyTag";
+
 /** Fork releases are tagged `pivot-vX.Y.Z`, which never collides with upstream's `v*`. */
 export const FORK_TAG_PREFIX = "pivot-v";
 
@@ -36,49 +38,9 @@ function parseStableVersion(version: string): Option.Option<StableVersion> {
   return Option.some({ major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]) });
 }
 
-function compareStableVersions(left: StableVersion, right: StableVersion): number {
-  return left.major - right.major || left.minor - right.minor || left.patch - right.patch;
-}
-
-// Upstream's nightly builds, the channel the T3 Code app T3 Pivot tracks:
-// `vX.Y.Z-nightly.YYYYMMDD.BUILD`.
-const NIGHTLY_TAG_PATTERN = /^v(\d+\.\d+\.\d+)-nightly\.(\d{8})\.(\d+)$/;
-
-interface NightlyTag {
-  readonly tag: string;
-  readonly version: StableVersion;
-  readonly build: number;
-}
-
-function parseNightlyTag(tag: string): Option.Option<NightlyTag> {
-  const match = NIGHTLY_TAG_PATTERN.exec(tag);
-  if (!match) return Option.none();
-  return parseStableVersion(match[1]!).pipe(
-    Option.map((version) => ({ tag, version, build: Number(match[3]) })),
-  );
-}
-
-/** The newest upstream nightly tag, ignoring stable, preview and PR tags. */
-export function newestNightlyTag(tags: ReadonlyArray<string>): Option.Option<string> {
-  let newest: NightlyTag | undefined;
-  for (const tag of tags) {
-    const nightly = parseNightlyTag(tag);
-    if (Option.isNone(nightly)) continue;
-    if (
-      !newest ||
-      compareStableVersions(nightly.value.version, newest.version) > 0 ||
-      (compareStableVersions(nightly.value.version, newest.version) === 0 &&
-        nightly.value.build > newest.build)
-    ) {
-      newest = nightly.value;
-    }
-  }
-  return Option.fromNullishOr(newest?.tag);
-}
-
 /** The `X.Y.Z` a nightly tag builds toward, which T3 Pivot versions are based on. */
 export function nightlyBaseVersion(tag: string): Option.Option<string> {
-  return Option.fromNullishOr(NIGHTLY_TAG_PATTERN.exec(tag)?.[1]);
+  return parseNightlyTag(tag).pipe(Option.map((nightly) => nightly.base));
 }
 
 /**

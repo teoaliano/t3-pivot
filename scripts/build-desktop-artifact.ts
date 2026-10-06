@@ -930,6 +930,8 @@ interface StagePackageJson {
   readonly version: string;
   readonly buildVersion: string;
   readonly t3codeCommitHash: string;
+  /** T3 Pivot only: the upstream nightly tag this build is based on. */
+  readonly t3codeUpstreamBaseTag?: string;
   readonly private: true;
   readonly packageManager: string;
   readonly description: string;
@@ -3480,6 +3482,10 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const appVersion = options.version ?? serverPackageJson.version;
   const iconAssets = resolveDesktopBuildIconAssets(appVersion);
   const commitHash = yield* resolveGitCommitHash(repoRoot);
+  // Set by `pivot release`; the app compares it with upstream's newest nightly.
+  const upstreamBaseTag = Option.getOrUndefined(
+    yield* Config.String("T3CODE_UPSTREAM_BASE_TAG").pipe(Config.option),
+  )?.trim();
   const mkdir = options.keepStage ? fs.makeTempDirectory : fs.makeTempDirectoryScoped;
   const stageRoot = yield* mkdir({
     prefix: `t3code-desktop-${options.platform}-stage-`,
@@ -3731,6 +3737,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     version: appVersion,
     buildVersion: appVersion,
     t3codeCommitHash: commitHash,
+    ...(upstreamBaseTag ? { t3codeUpstreamBaseTag: upstreamBaseTag } : {}),
     private: true,
     packageManager: rootPackageJson.packageManager,
     description: "T3 Code desktop build",

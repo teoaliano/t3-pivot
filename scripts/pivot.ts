@@ -18,9 +18,10 @@ import * as Stream from "effect/Stream";
 import { Command } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
+import { newestNightlyTag } from "@t3tools/shared/nightlyTag";
+
 import {
   FORK_TAG_PREFIX,
-  newestNightlyTag,
   nightlyBaseVersion,
   planForkVersion,
   planUpstreamSync,
@@ -239,6 +240,8 @@ const release = Effect.gen(function* () {
     ],
     {
       T3CODE_DESKTOP_UPDATE_REPOSITORY: FORK_REPOSITORY,
+      // The app warns when upstream publishes a newer nightly than this one.
+      T3CODE_UPSTREAM_BASE_TAG: upstreamBaseTag.value,
       T3CODE_MACOS_SIGNING_MODE: "developer-id",
       CSC_NAME: identity,
       APPLE_KEYCHAIN_PROFILE: NOTARY_KEYCHAIN_PROFILE,

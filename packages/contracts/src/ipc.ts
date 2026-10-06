@@ -293,7 +293,21 @@ export interface DesktopUpdateState {
   message: string | null;
   errorContext: "check" | "download" | "install" | null;
   canRetry: boolean;
+  /** T3 Pivot only. Set while upstream T3 Code has a newer nightly than this build's base. */
+  upstreamNightly?: DesktopUpstreamNightlyNotice;
 }
+
+export interface DesktopUpstreamNightlyNotice {
+  /** Upstream's newest nightly version, e.g. `0.0.47-nightly.20261010.2801`. */
+  latestVersion: string;
+  /** The upstream nightly version this T3 Pivot build is based on. */
+  baseVersion: string;
+}
+
+export const DesktopUpstreamNightlyNoticeSchema = Schema.Struct({
+  latestVersion: Schema.String,
+  baseVersion: Schema.String,
+});
 
 export interface DesktopUpdateReleaseNote {
   version: string;
@@ -324,6 +338,7 @@ export const DesktopUpdateStateSchema = Schema.Struct({
   message: Schema.NullOr(Schema.String),
   errorContext: Schema.NullOr(Schema.Literals(["check", "download", "install"])),
   canRetry: Schema.Boolean,
+  upstreamNightly: Schema.optional(DesktopUpstreamNightlyNoticeSchema),
 });
 
 export interface DesktopUpdateActionResult {

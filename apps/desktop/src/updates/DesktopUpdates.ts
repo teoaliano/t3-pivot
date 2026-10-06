@@ -6,6 +6,7 @@ import {
   type DesktopUpdateChannel,
   type DesktopUpdateCheckResult,
   type DesktopUpdateState,
+  type DesktopUpstreamNightlyNotice,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -22,6 +23,7 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import * as HttpClient from "effect/unstable/http/HttpClient";
 
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
@@ -34,6 +36,11 @@ import * as IpcChannels from "../ipc/channels.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import { normalizeDesktopUpdateReleaseNotes } from "./releaseNotes.ts";
 import { resolveDefaultDesktopUpdateChannel } from "./updateChannels.ts";
+import {
+  fetchUpstreamReleaseTags,
+  readUpstreamBaseTag,
+  resolveUpstreamNightlyNotice,
+} from "./upstreamNightly.ts";
 import {
   createInitialDesktopUpdateState,
   reduceDesktopUpdateStateOnCheckFailure,
@@ -269,6 +276,30 @@ function getAutoUpdateDisabledReason(args: {
   return null;
 }
 
+function withUpstreamNightly(
+  state: DesktopUpdateState,
+  notice: Option.Option<DesktopUpstreamNightlyNotice>,
+): DesktopUpdateState {
+  const { upstreamNightly: _previous, ...rest } = state;
+  return Option.match(notice, {
+    onNone: () => rest,
+    onSome: (upstreamNightly) => ({ ...rest, upstreamNightly }),
+  });
+}
+
+function isSameUpstreamNightly(
+  left: Option.Option<DesktopUpstreamNightlyNotice>,
+  right: Option.Option<DesktopUpstreamNightlyNotice>,
+): boolean {
+  if (Option.isNone(left) || Option.isNone(right)) {
+    return Option.isNone(left) === Option.isNone(right);
+  }
+  return (
+    left.value.latestVersion === right.value.latestVersion &&
+    left.value.baseVersion === right.value.baseVersion
+  );
+}
+
 function isArm64HostRunningIntelBuild(runtimeInfo: DesktopRuntimeInfo): boolean {
   return runtimeInfo.hostArch === "arm64" && runtimeInfo.appArch === "x64";
 }
@@ -283,6 +314,7 @@ export const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
+  const httpClient = yield* HttpClient.HttpClient;
 
   const appUpdateYmlConfigRef = yield* Ref.make<Option.Option<AppUpdateYmlConfig>>(Option.none());
   const activeUpdateActionRef = yield* Ref.make<Option.Option<UpdateAction>>(Option.none());
@@ -297,6 +329,18 @@ export const make = Effect.gen(function* () {
     ),
   );
 
+  // T3 Pivot release builds carry the upstream nightly they were built on.
+  const upstreamBaseTag = environment.isPackaged
+    ? yield* fileSystem
+        .readFileString(environment.path.join(environment.appRoot, "package.json"))
+        .pipe(
+          Effect.flatMap(readUpstreamBaseTag),
+          Effect.orElseSucceed(() => Option.none<string>()),
+        )
+    : Option.none<string>();
+  // Kept out of the reducers and laid over every state this service publishes.
+  const upstreamNightlyRef = yield* Ref.make(Option.none<DesktopUpstreamNightlyNotice>());
+
   const stateChanges = yield* PubSub.sliding<DesktopUpdateState>(16);
   // Makes ref writes + publishes atomic against subscribe, so a snapshot
   // never overlaps with the first change a subscriber receives.
@@ -306,12 +350,51 @@ export const make = Effect.gen(function* () {
     Effect.flatMap((state) => electronWindow.sendAll(IpcChannels.UPDATE_STATE_CHANNEL, state)),
   );
 
+  // Callers hold stateMutex.
+  const publishState = (state: DesktopUpdateState) =>
+    Ref.get(upstreamNightlyRef).pipe(
+      Effect.map((notice) => withUpstreamNightly(state, notice)),
+      Effect.tap((nextState) => Ref.set(updateStateRef, nextState)),
+      Effect.flatMap((nextState) => PubSub.publish(stateChanges, nextState)),
+    );
+
   const setState = (state: DesktopUpdateState): Effect.Effect<void> =>
-    stateMutex
-      .withPermits(1)(
-        Ref.set(updateStateRef, state).pipe(Effect.andThen(PubSub.publish(stateChanges, state))),
-      )
-      .pipe(Effect.andThen(emitState));
+    stateMutex.withPermits(1)(publishState(state)).pipe(Effect.andThen(emitState));
+
+  // Runs alongside every update check. Informational only: a failed fetch is
+  // logged and keeps the last notice.
+  const refreshUpstreamNightlyFrom = Effect.fn("desktop.updates.refreshUpstreamNightly")(
+    function* (baseTag: string) {
+      const upstreamTags = yield* fetchUpstreamReleaseTags;
+      const notice = resolveUpstreamNightlyNotice(baseTag, upstreamTags);
+      if (isSameUpstreamNightly(notice, yield* Ref.get(upstreamNightlyRef))) return;
+      // Reads the current state under the mutex, so a concurrent updater
+      // event is never overwritten with an older state.
+      yield* stateMutex
+        .withPermits(1)(
+          Ref.set(upstreamNightlyRef, notice).pipe(
+            Effect.andThen(Ref.get(updateStateRef)),
+            Effect.flatMap(publishState),
+          ),
+        )
+        .pipe(Effect.andThen(emitState));
+      if (Option.isSome(notice)) {
+        yield* logUpdaterInfo("upstream has a newer nightly", { ...notice.value });
+      }
+    },
+    Effect.provideService(HttpClient.HttpClient, httpClient),
+    Effect.catchCause((cause) =>
+      Cause.hasInterruptsOnly(cause)
+        ? Effect.interrupt
+        : logUpdaterWarning("could not check upstream's newest nightly", {
+            cause: Cause.pretty(cause),
+          }),
+    ),
+  );
+  const refreshUpstreamNightly = Option.match(upstreamBaseTag, {
+    onNone: () => Effect.void,
+    onSome: refreshUpstreamNightlyFrom,
+  });
 
   const updateState = (
     f: (state: DesktopUpdateState) => DesktopUpdateState,
@@ -430,7 +513,7 @@ export const make = Effect.gen(function* () {
       yield* setState(reduceDesktopUpdateStateOnCheckStart(state, checkedAt));
       yield* logUpdaterInfo("checking for updates", { reason });
 
-      return yield* electronUpdater.checkForUpdates.pipe(
+      const electronCheck = electronUpdater.checkForUpdates.pipe(
         Effect.as(true),
         Effect.catchTags({
           ElectronUpdaterCheckForUpdatesError: Effect.fn(
@@ -448,6 +531,10 @@ export const make = Effect.gen(function* () {
           }),
         }),
       );
+      const [checked] = yield* Effect.all([electronCheck, refreshUpstreamNightly], {
+        concurrency: "unbounded",
+      });
+      return checked;
     });
 
     return yield* actionReservation === "held"
