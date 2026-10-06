@@ -20,6 +20,7 @@ import * as EffectOutbox from "./EffectOutbox.ts";
 import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "./IdAllocator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
+import * as RestartCarryOn from "./RestartCarryOn.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { restartContinuationRun } from "./RestartContinuation.ts";
 import {
@@ -716,12 +717,14 @@ export const make = Effect.gen(function* () {
         stoppedSessions,
         closedRequests: requests.length,
         retiredEffects,
+        resuming: continuationRun !== undefined,
       };
     },
   );
 
   const reconcile = (trigger: "startup" | "shutdown") =>
     Effect.gen(function* () {
+      const carryOn = yield* RestartCarryOn.RestartCarryOn;
       const continueAfterRestart = yield* settings.getSettings.pipe(
         Effect.orElseSucceed(() => null),
       );
@@ -747,11 +750,14 @@ export const make = Effect.gen(function* () {
               }),
           ),
         );
+        const carriesOn = yield* carryOn.carriesOn(threadId);
         const enabled =
-          continueAfterRestart !== null &&
-          resolveProjectSettings(continueAfterRestart, projection.thread.projectId).settings
-            .continueThreadsAfterServerUpdate;
+          carriesOn ||
+          (continueAfterRestart !== null &&
+            resolveProjectSettings(continueAfterRestart, projection.thread.projectId).settings
+              .continueThreadsAfterServerUpdate);
         const result = yield* reconcileProjection(projection, trigger, enabled);
+        if (result.resuming && carriesOn) yield* carryOn.resuming(threadId);
         terminalizedRuns += result.terminalizedRuns;
         stoppedSessions += result.stoppedSessions;
         closedRequests += result.closedRequests;
@@ -776,14 +782,18 @@ export const make = Effect.gen(function* () {
   // rejects any source run that actually completed.
   const prepareForShutdown = Effect.gen(function* () {
     const enabled = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
-    if (!enabled) return;
+    const carryOn = yield* RestartCarryOn.RestartCarryOn;
     const threadIds = yield* projections.getRecoveryThreadIds("runtime");
     for (const threadId of threadIds) {
       yield* Effect.gen(function* () {
         const projection = yield* projections.getRuntimeRecoveryProjection(threadId);
         if (
-          !resolveProjectSettings(enabled, projection.thread.projectId).settings
-            .continueThreadsAfterServerUpdate
+          !(yield* carryOn.carriesOn(threadId)) &&
+          !(
+            enabled !== null &&
+            resolveProjectSettings(enabled, projection.thread.projectId).settings
+              .continueThreadsAfterServerUpdate
+          )
         )
           return;
         const run = restartContinuationRun(projection);

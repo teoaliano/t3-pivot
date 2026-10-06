@@ -156,6 +156,8 @@ export class PivotThreads extends Context.Service<
       readonly summary: string;
       readonly teammateThreadIds: ReadonlyArray<ThreadId>;
     }) => Effect.Effect<void, PivotThreadsError>;
+    /** Releases the queue restart recovery held, so queued messages run after the resumed turn. */
+    readonly releaseHeldQueue: (threadId: ThreadId) => Effect.Effect<void, PivotThreadsError>;
     /** Whether a teammate wake is still queued on the Pivot's thread, undelivered. */
     readonly hasQueuedWake: (pivotThreadId: ThreadId) => Effect.Effect<boolean, PivotThreadsError>;
     /** The PR's live state, read from its forge. */
@@ -445,6 +447,17 @@ export const make = Effect.gen(function* () {
         ),
         Effect.mapError(fail("read the queue", pivotThreadId)),
       ),
+
+    releaseHeldQueue: (threadId) =>
+      Effect.gen(function* () {
+        const records = yield* threads.getThreadRecords(threadId, ["runs"]);
+        if (!records.runs.some((run) => run.status === "queued" && run.queueHeld === true)) return;
+        yield* threads.dispatch({
+          type: "queue.resume",
+          commandId: yield* commandId("release-queue"),
+          threadId,
+        });
+      }).pipe(Effect.mapError(fail("release the queue", threadId))),
 
     pullRequestDetail: (ref) => pullRequests.detail(ref).pipe(Effect.mapError(fail("read the PR"))),
 

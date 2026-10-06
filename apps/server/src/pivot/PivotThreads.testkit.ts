@@ -65,6 +65,8 @@ export interface FakeV2 {
   /** Merges asked of the forge, with the head they were pinned to. */
   readonly merges: Array<{ readonly url: string; readonly expectedHeadSha: string }>;
   readonly stoppedCheckouts: Array<string>;
+  /** Threads whose held queue was released. */
+  readonly releasedQueues: Array<string>;
   readonly removedWorktrees: Array<{ readonly worktreePath: string; readonly force: boolean }>;
 }
 
@@ -90,6 +92,7 @@ export const makeFakeV2 = (): FakeV2 => ({
   pullRequests: new Map(),
   merges: [],
   stoppedCheckouts: [],
+  releasedQueues: [],
   removedWorktrees: [],
 });
 
@@ -245,6 +248,10 @@ export const layer = (fake: FakeV2) =>
           const index = fake.wakes.findLastIndex((w) => w.pivotThreadId === input.pivotThreadId);
           if (queued && index >= 0) fake.wakes[index] = wake;
           else fake.wakes.push(wake);
+        }),
+      releaseHeldQueue: (threadId) =>
+        Effect.sync(() => {
+          fake.releasedQueues.push(threadId);
         }),
       hasQueuedWake: (pivotThreadId) => Effect.sync(() => fake.queuedWakes.has(pivotThreadId)),
       pullRequestDetail: (ref) =>

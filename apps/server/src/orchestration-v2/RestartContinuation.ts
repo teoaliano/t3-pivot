@@ -11,6 +11,7 @@ import * as Effect from "effect/Effect";
 import type { ProjectionRuntimeRecoveryState } from "./ProjectionStore.ts";
 
 import * as ServerSettings from "../serverSettings.ts";
+import * as RestartCarryOn from "./RestartCarryOn.ts";
 import { isNativeMaintenanceCommand } from "./Orchestrator.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import {
@@ -91,7 +92,8 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
   function* (input: { readonly threadId: ThreadId; readonly sourceRunId: RunId }) {
     const settings = yield* ServerSettings.ServerSettingsService;
     const enabled = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
-    if (!enabled) return;
+    const carriesOn = yield* (yield* RestartCarryOn.RestartCarryOn).carriesOn(input.threadId);
+    if (!enabled && !carriesOn) return;
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const messageId = MessageId.make(`message:restart-continuation:${input.sourceRunId}`);
     const projection = yield* threads.getThreadRecords(
@@ -100,8 +102,12 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
       { messageIds: [messageId] },
     );
     if (
-      !resolveProjectSettings(enabled, projection.thread.projectId).settings
-        .continueThreadsAfterServerUpdate
+      !carriesOn &&
+      !(
+        enabled !== null &&
+        resolveProjectSettings(enabled, projection.thread.projectId).settings
+          .continueThreadsAfterServerUpdate
+      )
     )
       return;
     if (projection.thread.archivedAt !== null || projection.thread.deletedAt !== null) return;

@@ -112,6 +112,7 @@ import * as SourceControlRateLimit from "./sourceControl/SourceControlRateLimit.
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as PivotHome from "./pivot/PivotHome.ts";
+import * as PivotCarryOn from "./pivot/PivotCarryOn.ts";
 import * as PivotDatabase from "./pivot/PivotDatabase.ts";
 import * as PivotGit from "./pivot/PivotGit.ts";
 import * as PivotService from "./pivot/PivotService.ts";
@@ -618,6 +619,8 @@ const RuntimeCoreDependenciesBaseLive = Layer.mergeAll(
   ),
   // Core Services
   Layer.provideMerge(OrchestrationApplicationLayerLive),
+  // Pivot mode: a Pivot and its teammates carry on after a restart.
+  Layer.provideMerge(PivotCarryOn.layer),
   Layer.provideMerge(OrchestrationEventInfrastructureLayerLive),
   Layer.provideMerge(Layer.merge(ProjectStore.layer, ThreadSearch.layer)),
   Layer.provideMerge(ServerSettingsLayerLive),

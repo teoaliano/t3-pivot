@@ -36,6 +36,8 @@ import * as PivotStore from "./PivotStore.ts";
 import * as PivotThreads from "./PivotThreads.ts";
 import { composeWake, type WakeDigest, type WakeTeammate } from "./pivotWake.ts";
 
+/** A teammate still resuming this long after the supervisor started did not survive the restart. */
+export const RESUME_GRACE_MS = 5 * 60 * 1000;
 /** A running teammate with no activity this long wakes its Pivot, once per run. */
 export const STUCK_AFTER_MS = 30 * 60 * 1000;
 /** How often the timers are checked when nothing else happens. */
@@ -56,6 +58,14 @@ export class PivotSupervisor extends Context.Service<
     readonly tick: Effect.Effect<void>;
   }
 >()("t3/pivot/PivotSupervisor") {}
+
+const RESUMED: ReadonlySet<string> = new Set([
+  "preparing",
+  "queued",
+  "starting",
+  "running",
+  "waiting",
+]);
 
 const FAILING_CHECKS = new Set(["failing", "failure", "failed", "error"]);
 
@@ -115,6 +125,7 @@ export const make = Effect.gen(function* () {
   // The first wake after a server start, and a takeover's first, tell the whole state.
   const digests = new Map<string, WakeDigest>();
   let started = false;
+  let startedAtMs: number | null = null;
 
   const logFailure = (operation: string) => (cause: unknown) =>
     Effect.logWarning("Pivot supervisor step failed", { operation, cause });
@@ -211,12 +222,25 @@ export const make = Effect.gen(function* () {
 
   const observe = (threadId: ThreadId) =>
     Effect.gen(function* () {
-      const teammate = yield* store.getTeammate(threadId);
+      let teammate = yield* store.getTeammate(threadId);
       if (teammate === null || teammate.tornDownAt !== null) return;
       const shell = yield* threads.shell(threadId);
       if (shell === null) return;
       if (!pullRequests.has(threadId))
         pullRequests.set(threadId, linkStates(shell.pullRequests ?? []));
+      if (teammate.resume === "pending") {
+        // Resumed once its run is going again; did not survive if it failed or never came back.
+        const now = yield* Clock.currentTimeMillis;
+        const resume = RESUMED.has(shell.status)
+          ? null
+          : shell.status === "failed" || now - (startedAtMs ?? now) >= RESUME_GRACE_MS
+            ? ("failed" as const)
+            : ("pending" as const);
+        if (resume !== "pending") {
+          yield* record({ type: "teammate.set-resume", threadId, resume });
+          teammate = { ...teammate, resume };
+        }
+      }
       const derived = deriveTeammateStatus({
         status: shell.status,
         latestRunId: shell.latestRunId,
@@ -367,6 +391,22 @@ export const make = Effect.gen(function* () {
   const tick: PivotSupervisor["Service"]["tick"] = Effect.gen(function* () {
     const teammates = yield* refreshTeammates;
     const pivots = yield* store.listActivePivots;
+    if (startedAtMs === null) {
+      startedAtMs = yield* Clock.currentTimeMillis;
+      // A Pivot and its teammates carry on after a restart: restart recovery held their
+      // queues behind the resumed turn, and they go on without waiting for the user.
+      for (const threadId of [
+        ...pivots.map((pivot) => pivot.threadId),
+        ...teammates.map((teammate) => teammate.threadId),
+      ]) {
+        yield* threads
+          .releaseHeldQueue(threadId)
+          .pipe(Effect.catchCause(logFailure("release queue")));
+      }
+    }
+    for (const teammate of teammates) {
+      if (teammate.resume === "pending") dirty.add(teammate.threadId);
+    }
     yield* notePivots(pivots);
     for (const threadId of [...dirty]) {
       dirty.delete(threadId);

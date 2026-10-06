@@ -4,6 +4,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
 
+import { RestartCarryOn } from "../orchestration-v2/RestartCarryOn.ts";
+import * as PivotCarryOn from "./PivotCarryOn.ts";
 import * as PivotService from "./PivotService.ts";
 import { harness, modelSelection, projectId, setup } from "./PivotService.testkit.ts";
 import * as PivotStore from "./PivotStore.ts";
@@ -480,5 +482,72 @@ describe("PivotSupervisor", () => {
       assert.include(digest!.text, "The server restarted.");
       assert.include(digest!.text, "(did not survive the restart)");
     }).pipe(Effect.provide(records));
+  });
+
+  describe("after a restart", () => {
+    it.effect("a Pivot and its live teammates carry on; other threads keep the setting", () => {
+      const { fake } = setup();
+      return Effect.gen(function* () {
+        const { pivot, teammate } = yield* running(fake);
+        const carryOn = yield* RestartCarryOn;
+        assert.isTrue(yield* carryOn.carriesOn(pivot));
+        assert.isTrue(yield* carryOn.carriesOn(teammate));
+        assert.isFalse(yield* carryOn.carriesOn("ordinary-thread" as ThreadId));
+
+        yield* carryOn.resuming(teammate);
+        const store = yield* PivotStore.PivotStore;
+        assert.strictEqual((yield* store.getTeammate(teammate))?.resume, "pending");
+      }).pipe(Effect.provide(PivotCarryOn.layer.pipe(Layer.provideMerge(withSupervisor(fake)))));
+    });
+
+    it.effect("releases held queues, resumes teammates, and opens with a digest", () => {
+      const { fake } = setup();
+      const records = harness(fake);
+      return Effect.gen(function* () {
+        // Before the restart: a Pivot with two running teammates.
+        const first = yield* running(fake, "First task").pipe(
+          Effect.provide(PivotSupervisor.layer),
+        );
+        const second = yield* running(fake, "Second task").pipe(
+          Effect.provide(PivotSupervisor.layer),
+        );
+        // Restart recovery cut both runs and scheduled them to resume.
+        const store = yield* PivotStore.PivotStore;
+        for (const teammate of [first.teammate, second.teammate]) {
+          yield* store.dispatch({
+            type: "teammate.set-resume",
+            threadId: teammate,
+            resume: "pending",
+          });
+          const thread = fake.threads.get(teammate)!;
+          thread.shell = { ...thread.shell, status: "idle", activeRunId: null };
+        }
+
+        yield* Effect.gen(function* () {
+          yield* tick;
+          assert.includeMembers(fake.releasedQueues, [
+            first.pivot,
+            first.teammate,
+            second.teammate,
+          ]);
+          const [digest] = wakesFor(fake, first.pivot);
+          assert.strictEqual(digest?.summary, "Restart: 2 teammates");
+          assert.include(digest!.text, '"First task"');
+          assert.include(digest!.text, "working (resuming after the restart)");
+
+          // The first comes back; the second never does.
+          yield* shell(fake, first.teammate, { status: "running" });
+          yield* tick;
+          assert.isNull((yield* store.getTeammate(first.teammate))?.resume);
+          assert.strictEqual((yield* store.getTeammate(second.teammate))?.resume, "pending");
+          yield* TestClock.adjust("5 minutes");
+          yield* tick;
+          assert.strictEqual((yield* store.getTeammate(second.teammate))?.resume, "failed");
+          const [, failed] = wakesFor(fake, first.pivot);
+          assert.include(failed!.text, '"Second task"');
+          assert.include(failed!.text, "failed (did not survive the restart)");
+        }).pipe(Effect.provide(PivotSupervisor.layer));
+      }).pipe(Effect.provide(records));
+    });
   });
 });
