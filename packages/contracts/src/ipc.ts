@@ -338,7 +338,7 @@ export const DesktopUpdateStateSchema = Schema.Struct({
   message: Schema.NullOr(Schema.String),
   errorContext: Schema.NullOr(Schema.Literals(["check", "download", "install"])),
   canRetry: Schema.Boolean,
-  upstreamNightly: Schema.optional(DesktopUpstreamNightlyNoticeSchema),
+  upstreamNightly: Schema.optionalKey(DesktopUpstreamNightlyNoticeSchema),
 });
 
 export interface DesktopUpdateActionResult {

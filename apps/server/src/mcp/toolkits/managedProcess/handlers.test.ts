@@ -17,7 +17,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import type { Tool } from "effect/unstable/ai";
+import type { Tool } from "effect/ai";
 
 import * as ManagedProcesses from "../../../managedProcess/ManagedProcesses.ts";
 import { ProjectStoreV2 } from "../../../orchestration-v2/ProjectStore.ts";

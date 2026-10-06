@@ -9,7 +9,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientResponse } from "effect/http";
 
 /** Upstream's release feed. Its nightly app's updater finds new builds in the same feed. */
 export const UPSTREAM_RELEASES_FEED_URL = "https://github.com/pingdotgg/t3code/releases.atom";
