@@ -7,9 +7,13 @@ import {
   PivotMcpDispatchTeammateInput,
   PivotMcpDispatchTeammateResult,
   PivotMcpEscalateDecisionInput,
+  PivotMcpLandTeammateInput,
+  PivotMcpLandTeammateResult,
   PivotMcpListTeammatesInput,
   PivotMcpListTeammatesResult,
   PivotMcpMarkDecisionMootInput,
+  PivotMcpMergeTeammateInput,
+  PivotMcpMergeTeammateResult,
   PivotMcpOpenDecisionInput,
   PivotMcpPromoteScoutInput,
   PivotMcpRecordScoutReportInput,
@@ -20,6 +24,8 @@ import {
   PivotMcpTeammateHistoryResult,
   PivotMcpTeammateResult,
   PivotMcpTeammateTarget,
+  PivotMcpTeardownTeammateInput,
+  PivotMcpTeardownTeammateResult,
 } from "@t3tools/contracts";
 import { Tool, Toolkit } from "effect/ai";
 
@@ -120,6 +126,33 @@ const RelaunchTeammateTool = Tool.make("relaunch_teammate", {
   .annotate(Tool.Title, "Relaunch a teammate")
   .annotate(Tool.Destructive, true);
 
+const MergeTeammateTool = Tool.make("merge_teammate", {
+  ...pivotTool,
+  description: `${PIVOT_ONLY} Squash-merge a ship's PR on GitHub or GitLab once the user approved its decision. Reads live state and refuses a closed, draft or unmergeable PR and any check not green, naming every failing condition; waivedChecks only for checks the user waived by name. Pinned to the head it checked.`,
+  parameters: PivotMcpMergeTeammateInput,
+  success: PivotMcpMergeTeammateResult,
+})
+  .annotate(Tool.Title, "Merge a teammate's PR")
+  .annotate(Tool.Destructive, true);
+
+const LandTeammateTool = Tool.make("land_teammate", {
+  ...pivotTool,
+  description: `${PIVOT_ONLY} In a project with no remote, fast-forward the default branch to a ship's ready branch once the user approved its decision. A diverged branch refuses; the teammate rebases.`,
+  parameters: PivotMcpLandTeammateInput,
+  success: PivotMcpLandTeammateResult,
+})
+  .annotate(Tool.Title, "Land a teammate's branch")
+  .annotate(Tool.Destructive, true);
+
+const TeardownTeammateTool = Tool.make("teardown_teammate", {
+  ...pivotTool,
+  description: `${PIVOT_ONLY} Clean up a teammate whose work landed (merged PR, landed branch, recorded scout report): stop it and its dev servers, remove its worktree, archive its thread. Keeps the branch, history and open decisions. Refuses unlanded work unless discardDecisionId names the user's answer to discard it.`,
+  parameters: PivotMcpTeardownTeammateInput,
+  success: PivotMcpTeardownTeammateResult,
+})
+  .annotate(Tool.Title, "Tear down a teammate")
+  .annotate(Tool.Destructive, true);
+
 export const PivotToolkit = Toolkit.make(
   DispatchTeammateTool,
   PromoteScoutTool,
@@ -132,6 +165,9 @@ export const PivotToolkit = Toolkit.make(
   TeammateHistoryTool,
   StopTeammateTool,
   RelaunchTeammateTool,
+  MergeTeammateTool,
+  LandTeammateTool,
+  TeardownTeammateTool,
 );
 
 const ReportStatusTool = Tool.make("report_status", {

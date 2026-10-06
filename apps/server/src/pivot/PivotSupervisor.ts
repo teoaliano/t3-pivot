@@ -179,7 +179,12 @@ export const make = Effect.gen(function* () {
           for (const [url, state] of next) {
             const before = previous.get(url);
             if (before === undefined) continue;
-            if (before.state === "open" && (state.state === "merged" || state.state === "closed")) {
+            const mergedByPivot = state.state === "merged" && teammate?.mergeRequestedUrl === url;
+            if (
+              before.state === "open" &&
+              (state.state === "merged" || state.state === "closed") &&
+              !mergedByPivot
+            ) {
               yield* record({
                 type: "teammate.record-delivery",
                 threadId: event.threadId,

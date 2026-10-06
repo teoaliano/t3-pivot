@@ -86,6 +86,9 @@ export const PivotEvent = Schema.Union([
     url: Schema.String,
     change: DeliveryChange,
   }),
+  /** The Pivot merged the teammate's PR, so its sync reading merged is not news. */
+  event("teammate.merge-requested", { threadId: ThreadId, url: Schema.String }),
+  event("teammate.landed", { threadId: ThreadId, head: Schema.String }),
   event("teammate.torn-down", { threadId: ThreadId }),
   event("decision.opened", {
     decisionId: PivotDecisionId,

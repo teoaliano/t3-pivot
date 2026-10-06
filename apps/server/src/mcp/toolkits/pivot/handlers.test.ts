@@ -604,3 +604,372 @@ describe("Pivot and teammate tools", () => {
     }).pipe(Effect.provide(layer));
   });
 });
+
+describe("delivery and teardown", () => {
+  const prUrl = "https://github.com/o/r/pull/9";
+  const link = (state: "open" | "merged" = "open", host = "github.com") => ({
+    host,
+    repository: "o/r",
+    number: 9,
+    url: `https://${host}/o/r/pull/9`,
+    source: "agent" as const,
+    linkedAt: "2026-10-06T00:00:00.000Z",
+    snapshot: {
+      state,
+      title: "Fix",
+      headBranch: "pivot/fix-the-login-bug",
+      baseBranch: "main",
+      isDraft: false,
+      updatedAt: null,
+      syncedAt: "2026-10-06T00:00:00.000Z",
+    },
+    stack: null,
+  });
+  const linkPr = (
+    fake: FakeV2,
+    threadId: ThreadId,
+    state: "open" | "merged" = "open",
+    host = "github.com",
+  ) => {
+    const thread = fake.threads.get(threadId)!;
+    thread.shell = { ...thread.shell, pullRequests: [link(state, host)] } as typeof thread.shell;
+  };
+  const greenPr = {
+    provider: "github" as const,
+    state: "open" as const,
+    isDraft: false,
+    mergeability: "mergeable" as const,
+    headSha: "abc123",
+    checks: [{ name: "ci", status: "success" as const, description: null, url: null }],
+  };
+
+  /** A ship with a decision the user answered, the approval its delivery needs. */
+  const approvedShip = (fake: FakeV2) =>
+    Effect.gen(function* () {
+      const pivot = yield* createPivot;
+      const ship = yield* dispatch(pivot);
+      const pivots = yield* PivotService.PivotService;
+      const { decision } = yield* pivots.openDecision(pivot, {
+        teammateThreadId: ship.threadId,
+        question: "The fix is ready. Merge it?",
+      });
+      return { pivot, ship, decisionId: decision.decisionId, fake };
+    });
+  const approve = (pivot: ThreadId, decisionId: string) =>
+    Effect.gen(function* () {
+      const pivots = yield* PivotService.PivotService;
+      yield* pivots.escalateDecision(pivot, {
+        decisionId: decisionId as never,
+        questions: ["Merge it?"],
+        evidence: "CI is green.",
+        consequence: "It ships.",
+        options: ["Merge", "Hold"],
+        recommendation: "Merge",
+      });
+      yield* pivots.recordUserAnswer({ decisionId: decisionId as never, answer: "Yes, merge." });
+    });
+
+  it.effect("merges a GitHub PR on approval, pinned to the head it checked", () => {
+    const { fake, layer } = setup({ remote: true });
+    return Effect.gen(function* () {
+      const { pivot, ship, decisionId } = yield* approvedShip(fake);
+      linkPr(fake, ship.threadId);
+      fake.pullRequests.set(prUrl, greenPr);
+
+      expectRefused(
+        yield* call(pivot, "merge_teammate", { threadId: ship.threadId, decisionId }),
+        "invalid_request",
+        "recorded word",
+      );
+      assert.deepStrictEqual(fake.merges, []);
+
+      yield* approve(pivot, decisionId);
+      const merged = expectOk(
+        yield* call(pivot, "merge_teammate", { threadId: ship.threadId, decisionId }),
+      );
+      assert.deepStrictEqual(merged, { threadId: ship.threadId, url: prUrl, mergedHead: "abc123" });
+      assert.deepStrictEqual(fake.merges, [{ url: prUrl, expectedHeadSha: "abc123" }]);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("merges on GitLab, and leaves other forges to the user", () => {
+    const { fake, layer } = setup({ remote: true });
+    return Effect.gen(function* () {
+      const { pivot, ship, decisionId } = yield* approvedShip(fake);
+      yield* approve(pivot, decisionId);
+      linkPr(fake, ship.threadId, "open", "gitlab.com");
+      fake.pullRequests.set("https://gitlab.com/o/r/pull/9", { ...greenPr, provider: "gitlab" });
+      expectOk(yield* call(pivot, "merge_teammate", { threadId: ship.threadId, decisionId }));
+
+      linkPr(fake, ship.threadId, "open", "bitbucket.org");
+      fake.pullRequests.set("https://bitbucket.org/o/r/pull/9", {
+        ...greenPr,
+        provider: "bitbucket",
+      });
+      expectRefused(
+        yield* call(pivot, "merge_teammate", { threadId: ship.threadId, decisionId }),
+        "invalid_request",
+        "by hand",
+      );
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect(
+    "refuses an unmergeable PR naming every failing condition, and takes a named waiver",
+    () => {
+      const { fake, layer } = setup({ remote: true });
+      return Effect.gen(function* () {
+        const { pivot, ship, decisionId } = yield* approvedShip(fake);
+        yield* approve(pivot, decisionId);
+        linkPr(fake, ship.threadId);
+        fake.pullRequests.set(prUrl, {
+          ...greenPr,
+          state: "closed",
+          isDraft: true,
+          mergeability: "conflicting",
+          checks: [
+            { name: "ci", status: "failure", description: null, url: null },
+            {
+              name: "deploy-preview",
+              status: "pending",
+              description: null,
+              url: null,
+              required: true,
+            },
+          ],
+        });
+        const refused = yield* call(pivot, "merge_teammate", {
+          threadId: ship.threadId,
+          decisionId,
+        });
+        expectRefused(refused, "invalid_request");
+        if (!refused.ok) {
+          for (const reason of [
+            "The PR is closed.",
+            "The PR is a draft.",
+            "merge conflicts",
+            'Check "ci" is failure.',
+            'Check "deploy-preview" (required) is pending.',
+          ]) {
+            assert.include(refused.message, reason);
+          }
+        }
+
+        fake.pullRequests.set(prUrl, {
+          ...greenPr,
+          checks: [{ name: "flaky-e2e", status: "failure", description: null, url: null }],
+        });
+        expectRefused(
+          yield* call(pivot, "merge_teammate", { threadId: ship.threadId, decisionId }),
+          "invalid_request",
+          'Check "flaky-e2e" is failure.',
+        );
+        expectRefused(
+          yield* call(pivot, "merge_teammate", {
+            threadId: ship.threadId,
+            decisionId,
+            waivedChecks: ["lint"],
+          }),
+          "invalid_request",
+          'No check named "lint" to waive.',
+        );
+        expectOk(
+          yield* call(pivot, "merge_teammate", {
+            threadId: ship.threadId,
+            decisionId,
+            waivedChecks: ["flaky-e2e"],
+          }),
+        );
+      }).pipe(Effect.provide(layer));
+    },
+  );
+
+  it.effect("a push after the check fails the merge", () => {
+    const { fake, layer } = setup({ remote: true });
+    return Effect.gen(function* () {
+      const { pivot, ship, decisionId } = yield* approvedShip(fake);
+      yield* approve(pivot, decisionId);
+      linkPr(fake, ship.threadId);
+      fake.pullRequests.set(prUrl, greenPr);
+      // The fake forge's head moves between the read and the merge.
+      const realDetail = fake.pullRequests;
+      const original = realDetail.get.bind(realDetail);
+      let reads = 0;
+      realDetail.get = (key) => {
+        const value = original(key);
+        reads += 1;
+        if (reads === 1 && value !== undefined)
+          realDetail.set(key, { ...value, headSha: "pushed" });
+        return value;
+      };
+      expectRefused(
+        yield* call(pivot, "merge_teammate", { threadId: ship.threadId, decisionId }),
+        "orchestration_error",
+        "Head branch was modified",
+      );
+      assert.deepStrictEqual(fake.merges, []);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("lands a local-only branch by fast-forward and refuses a diverged one", () => {
+    const { fake, workspaceRoot, layer } = setup();
+    return Effect.gen(function* () {
+      const { pivot, ship, decisionId } = yield* approvedShip(fake);
+      addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
+      NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "fix.txt"), "fixed\n");
+      sh(ship.worktreePath, "git add -A && git commit -q -m fix");
+      expectRefused(
+        yield* call(pivot, "land_teammate", { threadId: ship.threadId, decisionId }),
+        "invalid_request",
+        "recorded word",
+      );
+      yield* approve(pivot, decisionId);
+
+      // Someone else moved main: the branch no longer fast-forwards.
+      NodeFS.writeFileSync(NodePath.join(workspaceRoot, "other.txt"), "other\n");
+      sh(workspaceRoot, "git add -A && git commit -q -m other");
+      expectRefused(
+        yield* call(pivot, "land_teammate", { threadId: ship.threadId, decisionId }),
+        "invalid_request",
+        "diverged",
+      );
+
+      sh(ship.worktreePath, "git rebase -q main");
+      const landed = expectOk(
+        yield* call(pivot, "land_teammate", { threadId: ship.threadId, decisionId }),
+      );
+      assert.strictEqual(landed.defaultBranch, "main");
+      assert.strictEqual(
+        sh(workspaceRoot, "git rev-parse main"),
+        sh(ship.worktreePath, "git rev-parse HEAD"),
+      );
+      // main is checked out in the project, so its files follow.
+      assert.isTrue(NodeFS.existsSync(NodePath.join(workspaceRoot, "fix.txt")));
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("tears down landed work, keeping the branch, and refuses unlanded work", () => {
+    const { fake, workspaceRoot, layer } = setup();
+    return Effect.gen(function* () {
+      const { pivot, ship, decisionId } = yield* approvedShip(fake);
+      addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
+      NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "fix.txt"), "fixed\n");
+      sh(ship.worktreePath, "git add -A && git commit -q -m fix");
+
+      expectRefused(
+        yield* call(pivot, "teardown_teammate", { threadId: ship.threadId }),
+        "invalid_request",
+        "has not landed",
+      );
+      NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "wip.txt"), "wip\n");
+      expectRefused(
+        yield* call(pivot, "teardown_teammate", { threadId: ship.threadId }),
+        "invalid_request",
+        "uncommitted changes",
+      );
+      NodeFS.rmSync(NodePath.join(ship.worktreePath, "wip.txt"));
+      assert.deepStrictEqual(fake.removedWorktrees, []);
+      assert.strictEqual(fake.threads.get(ship.threadId)?.archived, false);
+
+      yield* approve(pivot, decisionId);
+      expectOk(yield* call(pivot, "land_teammate", { threadId: ship.threadId, decisionId }));
+      const torn = expectOk(yield* call(pivot, "teardown_teammate", { threadId: ship.threadId }));
+      assert.strictEqual(torn.reason, "Its commits are in main.");
+      assert.deepStrictEqual(fake.stoppedCheckouts, [ship.worktreePath]);
+      assert.deepStrictEqual(fake.removedWorktrees, [
+        { worktreePath: ship.worktreePath, force: false },
+      ]);
+      assert.isTrue(fake.threads.get(ship.threadId)?.archived);
+      assert.strictEqual(fake.threads.get(ship.threadId)?.stops, 1);
+      assert.strictEqual(
+        sh(workspaceRoot, `git branch --list ${ship.branch}`).replace(/^[*+ ]+/, ""),
+        ship.branch,
+      );
+
+      const store = yield* PivotStore.PivotStore;
+      assert.isNotNull((yield* store.getTeammate(ship.threadId))?.tornDownAt);
+      // Its decision stays open, and its history stays readable.
+      assert.strictEqual(
+        (yield* store.listDecisions({ pivotThreadId: pivot, openOnly: true })).length,
+        1,
+      );
+      expectOk(yield* call(pivot, "teammate_history", { threadId: ship.threadId }));
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("discards unlanded work only on the user's answer", () => {
+    const { fake, workspaceRoot, layer } = setup();
+    return Effect.gen(function* () {
+      const { pivot, ship, decisionId } = yield* approvedShip(fake);
+      addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
+      NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "fix.txt"), "fixed\n");
+      sh(ship.worktreePath, "git add -A && git commit -q -m fix");
+      expectRefused(
+        yield* call(pivot, "teardown_teammate", {
+          threadId: ship.threadId,
+          discardDecisionId: decisionId,
+        }),
+        "invalid_request",
+        "recorded word",
+      );
+      yield* approve(pivot, decisionId);
+      const torn = expectOk(
+        yield* call(pivot, "teardown_teammate", {
+          threadId: ship.threadId,
+          discardDecisionId: decisionId,
+        }),
+      );
+      assert.include(torn.reason, "Discarded on the user's word");
+      assert.deepStrictEqual(fake.removedWorktrees, [
+        { worktreePath: ship.worktreePath, force: true },
+      ]);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("counts a squash-merged PR as landed, even with its branch deleted", () => {
+    const { fake, workspaceRoot, layer } = setup({ remote: true });
+    return Effect.gen(function* () {
+      const { pivot, ship } = yield* approvedShip(fake);
+      addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
+      NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "fix.txt"), "fixed\n");
+      sh(ship.worktreePath, "git add -A && git commit -q -m 'fix part 1'");
+      NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "fix.txt"), "fixed better\n");
+      sh(ship.worktreePath, "git add -A && git commit -q -m 'fix part 2'");
+      sh(ship.worktreePath, `git push -q origin ${ship.branch}`);
+
+      // The forge squash-merges it into main and deletes the branch.
+      const squash = NodePath.join(NodePath.dirname(workspaceRoot), "squash");
+      sh(NodePath.dirname(workspaceRoot), `git clone -q origin.git ${squash}`);
+      sh(
+        squash,
+        "git config user.email t@t && git config user.name t && git config commit.gpgsign false",
+      );
+      NodeFS.writeFileSync(NodePath.join(squash, "fix.txt"), "fixed better\n");
+      sh(squash, "git add -A && git commit -q -m 'Fix (#9)' && git push -q origin main");
+      sh(squash, `git push -q origin --delete ${ship.branch}`);
+      sh(workspaceRoot, "git fetch -q --prune origin");
+
+      linkPr(fake, ship.threadId, "merged");
+      // The forge no longer reports a head commit for it.
+      fake.pullRequests.set(prUrl, { ...greenPr, state: "merged", headSha: undefined } as never);
+      const torn = expectOk(yield* call(pivot, "teardown_teammate", { threadId: ship.threadId }));
+      assert.strictEqual(torn.reason, "Its changes are already in main.");
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("a scout's worktree goes once its report is recorded", () => {
+    const { fake, layer } = setup();
+    return Effect.gen(function* () {
+      const pivot = yield* createPivot;
+      const scout = yield* dispatch(pivot, { title: "Investigate", kind: "scout" });
+      expectRefused(
+        yield* call(pivot, "teardown_teammate", { threadId: scout.threadId }),
+        "invalid_request",
+      );
+      expectOk(yield* call(scout.threadId, "record_scout_report", { report: "Found it." }));
+      expectOk(yield* call(pivot, "teardown_teammate", { threadId: scout.threadId }));
+      const pivots = yield* PivotService.PivotService;
+      assert.strictEqual((yield* pivots.teammateDetail(scout.threadId)).scoutReport, "Found it.");
+    }).pipe(Effect.provide(layer));
+  });
+});

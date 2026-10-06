@@ -741,6 +741,8 @@ export class GitHubPullRequestCli extends Context.Service<
       readonly removeAgentCreditsOnMerge?: boolean;
       readonly mergeMethod?: PullRequestMergeMethod;
       readonly updateMethod?: PullRequestUpdateMethod;
+      /** For `merge`: passed as `--match-head-commit`, so a moved head refuses. */
+      readonly expectedHeadSha?: string;
     }) => Effect.Effect<void, GitHubPullRequestCliError>;
 
     readonly commentOnPullRequest: (input: {
@@ -2689,7 +2691,8 @@ export const make = Effect.gen(function* () {
       );
       return Effect.gen(function* () {
         let body: string | undefined;
-        let expectedHead: string | undefined;
+        let expectedHead: string | undefined =
+          input.action === "merge" ? input.expectedHeadSha : undefined;
         if (
           input.removeAgentCreditsOnMerge === true &&
           (input.action === "merge" || input.action === "enable-auto-merge") &&
@@ -2715,7 +2718,8 @@ export const make = Effect.gen(function* () {
             const cleaned = removeAgentCredits(message.viewerMergeBodyText);
             if (cleaned !== message.viewerMergeBodyText) {
               body = cleaned;
-              expectedHead = message.headRefOid;
+              // A caller's pinned head wins: the message was read for that head or a later one.
+              expectedHead ??= message.headRefOid;
             }
           }
         }

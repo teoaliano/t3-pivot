@@ -176,6 +176,18 @@ export type PivotCommand =
       readonly change: DeliveryChange;
     }
   | {
+      readonly type: "teammate.record-merge";
+      readonly pivotThreadId: ThreadId;
+      readonly threadId: ThreadId;
+      readonly url: string;
+    }
+  | {
+      readonly type: "teammate.record-landing";
+      readonly pivotThreadId: ThreadId;
+      readonly threadId: ThreadId;
+      readonly head: string;
+    }
+  | {
       readonly type: "teammate.tear-down";
       readonly pivotThreadId: ThreadId;
       readonly threadId: ThreadId;
@@ -232,6 +244,8 @@ export interface TeammateRow extends TeammateRecord {
   readonly observedRunId: RunId | null;
   readonly stuckRunId: RunId | null;
   readonly recheckAt: IsoDateTime | null;
+  /** The PR the Pivot merged, so the supervisor does not report that merge as news. */
+  readonly mergeRequestedUrl: string | null;
 }
 
 export class PivotStore extends Context.Service<
@@ -316,6 +330,7 @@ interface TeammateSqlRow {
   readonly observed_run_id: string | null;
   readonly stuck_run_id: string | null;
   readonly recheck_at: string | null;
+  readonly merge_requested_url: string | null;
   readonly escalated_decisions: number;
 }
 
@@ -393,6 +408,7 @@ const toTeammate = (row: TeammateSqlRow): TeammateRow => ({
   observedRunId: row.observed_run_id as RunId | null,
   stuckRunId: row.stuck_run_id as RunId | null,
   recheckAt: row.recheck_at,
+  mergeRequestedUrl: row.merge_requested_url,
 });
 
 const toDecision = (row: DecisionSqlRow): PivotDecision => ({
@@ -802,6 +818,16 @@ export const make = Effect.gen(function* () {
         );
         break;
       }
+      case "teammate.record-merge": {
+        yield* ownLiveTeammate(command.pivotThreadId, command.threadId);
+        emit({ type: "teammate.merge-requested", threadId: command.threadId, url: command.url });
+        break;
+      }
+      case "teammate.record-landing": {
+        yield* ownLiveTeammate(command.pivotThreadId, command.threadId);
+        emit({ type: "teammate.landed", threadId: command.threadId, head: command.head });
+        break;
+      }
       case "teammate.tear-down": {
         yield* ownLiveTeammate(command.pivotThreadId, command.threadId);
         emit({ type: "teammate.torn-down", threadId: command.threadId });
@@ -1021,6 +1047,14 @@ export const make = Effect.gen(function* () {
         return;
       case "teammate.user-message":
       case "teammate.delivery-changed":
+        return;
+      case "teammate.merge-requested":
+        yield* sql`
+          UPDATE pivot_teammates SET merge_requested_url = ${event.url}
+          WHERE thread_id = ${event.threadId}
+        `;
+        return;
+      case "teammate.landed":
         return;
       case "teammate.torn-down":
         yield* sql`

@@ -62,7 +62,8 @@ export default Effect.gen(function* () {
       observed_run_id TEXT,
       stopped_run_id TEXT,
       stuck_run_id TEXT,
-      recheck_at TEXT
+      recheck_at TEXT,
+      merge_requested_url TEXT
     )
   `;
   yield* sql`CREATE INDEX idx_pivot_teammates_pivot ON pivot_teammates(pivot_thread_id, dispatched_at)`;

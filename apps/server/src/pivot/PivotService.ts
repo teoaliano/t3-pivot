@@ -22,9 +22,13 @@ import {
   type PivotMcpDispatchTeammateInput,
   type PivotMcpDispatchTeammateResult,
   type PivotMcpEscalateDecisionInput,
+  type PivotMcpLandTeammateInput,
+  type PivotMcpLandTeammateResult,
   type PivotMcpListTeammatesInput,
   type PivotMcpListTeammatesResult,
   type PivotMcpMarkDecisionMootInput,
+  type PivotMcpMergeTeammateInput,
+  type PivotMcpMergeTeammateResult,
   type PivotMcpOpenDecisionInput,
   type PivotMcpPromoteScoutInput,
   type PivotMcpRecordScoutReportInput,
@@ -36,6 +40,8 @@ import {
   type PivotMcpTeammateLine,
   type PivotMcpTeammateResult,
   type PivotMcpTeammateTarget,
+  type PivotMcpTeardownTeammateInput,
+  type PivotMcpTeardownTeammateResult,
   type PivotStreamEvent,
   type PivotTeammateDetail,
   type ProjectId,
@@ -61,6 +67,7 @@ import {
   teammateBranchBase,
   uniqueBranch,
 } from "./pivotBrief.ts";
+import { mergeRefusals, PIVOT_MERGE_PROVIDERS } from "./pivotDelivery.ts";
 import type { PivotEvent, StoredPivotEvent } from "./PivotEvents.ts";
 import * as PivotGit from "./PivotGit.ts";
 import * as PivotHome from "./PivotHome.ts";
@@ -170,6 +177,30 @@ export class PivotService extends Context.Service<
       caller: ThreadId,
       input: PivotMcpTeammateTarget,
     ) => Result<PivotMcpControlResult>;
+    /**
+     * Squash-merges a ship's PR on the user's recorded approval, after reading live
+     * state: refuses a closed, draft or unmergeable PR and any check not green at the
+     * current head unless the user waived it by name, and pins the merge to that head.
+     * GitHub and GitLab only.
+     */
+    readonly mergeTeammate: (
+      caller: ThreadId,
+      input: PivotMcpMergeTeammateInput,
+    ) => Result<PivotMcpMergeTeammateResult>;
+    /** Fast-forwards the default branch to a local-only ship's branch, on approval. */
+    readonly landTeammate: (
+      caller: ThreadId,
+      input: PivotMcpLandTeammateInput,
+    ) => Result<PivotMcpLandTeammateResult>;
+    /**
+     * Removes a teammate whose work landed: stops its session and managed processes,
+     * removes its worktree, archives its thread. The branch, history and open
+     * decisions stay. Unlanded work needs a decision the user answered to discard it.
+     */
+    readonly teardownTeammate: (
+      caller: ThreadId,
+      input: PivotMcpTeardownTeammateInput,
+    ) => Result<PivotMcpTeardownTeammateResult>;
 
     // A teammate's tools. Only a live teammate may call.
 
@@ -227,6 +258,10 @@ export const historyLine = (event: PivotEvent): string => {
         : event.change === "closed"
           ? `Its PR closed without merging: ${event.url}`
           : `Checks went red on its PR: ${event.url}`;
+    case "teammate.merge-requested":
+      return `Its PR was merged by the Pivot: ${event.url}`;
+    case "teammate.landed":
+      return `Landed by fast-forward at ${event.head.slice(0, 12)}.`;
     case "teammate.torn-down":
       return "Torn down.";
     case "decision.opened":
@@ -792,6 +827,192 @@ export const make = Effect.gen(function* () {
       };
     });
 
+  // --- Delivery ---
+
+  /** A decision about this teammate that the user answered: their recorded word. */
+  const userApproval = (
+    command: string,
+    pivot: PivotStore.PivotRow,
+    teammate: PivotStore.TeammateRow,
+    decisionId: PivotDecisionId,
+    what: string,
+  ) =>
+    Effect.gen(function* () {
+      const decision = yield* store.getDecision(decisionId);
+      if (
+        decision === null ||
+        decision.pivotThreadId !== pivot.threadId ||
+        decision.teammateThreadId !== teammate.threadId
+      ) {
+        return yield* refuse(command, `Decision ${decisionId} is not about this teammate.`);
+      }
+      if (decision.userAnswer === null) {
+        return yield* refuse(
+          command,
+          `${what} needs the user's recorded word: escalate the decision and wait for their answer.`,
+        );
+      }
+      return decision;
+    });
+
+  const linkedPullRequest = (teammate: PivotStore.TeammateRow) =>
+    Effect.gen(function* () {
+      const shell = yield* threads.shell(teammate.threadId);
+      const links = (shell?.pullRequests ?? []).filter((link) => link.source !== "stack-dismissed");
+      return (
+        links.find((link) => link.snapshot?.headBranch === teammate.branch) ?? links[0] ?? null
+      );
+    });
+
+  const mergeTeammate: PivotService["Service"]["mergeTeammate"] = (caller, input) =>
+    Effect.gen(function* () {
+      const command = "merge_teammate";
+      const pivot = yield* activePivot(command, caller);
+      const teammate = yield* ownTeammate(command, pivot, input.threadId);
+      if (teammate.kind !== "ship") return yield* refuse(command, "Only a ship's work merges.");
+      if (teammate.deliveryMode !== "direct-pr") {
+        return yield* refuse(
+          command,
+          "This project has no remote; land the branch with land_teammate.",
+        );
+      }
+      yield* userApproval(command, pivot, teammate, input.decisionId, "Merging");
+      const link = yield* linkedPullRequest(teammate);
+      if (link === null) return yield* refuse(command, "The teammate has no linked PR.");
+      const ref = {
+        projectId: teammate.projectId,
+        host: link.host,
+        repository: link.repository,
+        number: link.number,
+      };
+      const detail = yield* threads.pullRequestDetail(ref);
+      if (!PIVOT_MERGE_PROVIDERS.has(detail.provider)) {
+        return yield* refuse(
+          command,
+          `The Pivot merges on GitHub and GitLab only. Ask the user to merge ${link.url} on ${detail.provider} by hand.`,
+        );
+      }
+      const reasons = mergeRefusals(detail, input.waivedChecks ?? []);
+      if (reasons.length > 0) {
+        return yield* refuse(command, `Not merging ${link.url}:\n- ${reasons.join("\n- ")}`);
+      }
+      const head = detail.headSha!;
+      // Recorded first: the merge V2's sync then reports is the Pivot's own, not news.
+      yield* store.dispatch({
+        type: "teammate.record-merge",
+        pivotThreadId: pivot.threadId,
+        threadId: teammate.threadId,
+        url: link.url,
+      });
+      yield* threads.mergePullRequest({ ...ref, expectedHeadSha: head });
+      return { threadId: teammate.threadId, url: link.url, mergedHead: head };
+    });
+
+  const landTeammate: PivotService["Service"]["landTeammate"] = (caller, input) =>
+    Effect.gen(function* () {
+      const command = "land_teammate";
+      const pivot = yield* activePivot(command, caller);
+      const teammate = yield* ownTeammate(command, pivot, input.threadId);
+      if (teammate.kind !== "ship") return yield* refuse(command, "Only a ship's work lands.");
+      if (teammate.deliveryMode !== "local-only") {
+        return yield* refuse(command, "This project delivers PRs; merge with merge_teammate.");
+      }
+      yield* userApproval(command, pivot, teammate, input.decisionId, "Landing");
+      const project = yield* gitProject(command, pivot.projectId);
+      if (!(yield* git.isClean(teammate.worktreePath))) {
+        return yield* refuse(
+          command,
+          "The teammate's worktree has uncommitted changes; it commits them first.",
+        );
+      }
+      const defaultBranch = yield* git.defaultBranch(project.workspaceRoot);
+      const result = yield* git.fastForward({
+        projectRoot: project.workspaceRoot,
+        branch: teammate.branch,
+        defaultBranch,
+      });
+      if (!result.landed) return yield* refuse(command, result.reason);
+      yield* store.dispatch({
+        type: "teammate.record-landing",
+        pivotThreadId: pivot.threadId,
+        threadId: teammate.threadId,
+        head: result.head,
+      });
+      return {
+        threadId: teammate.threadId,
+        branch: teammate.branch,
+        defaultBranch,
+        landedHead: result.head,
+      };
+    });
+
+  const teardownTeammate: PivotService["Service"]["teardownTeammate"] = (caller, input) =>
+    Effect.gen(function* () {
+      const command = "teardown_teammate";
+      const pivot = yield* activePivot(command, caller);
+      const teammate = yield* ownTeammate(command, pivot, input.threadId);
+      const project = yield* gitProject(command, pivot.projectId);
+      const worktreeExists = yield* fs
+        .exists(teammate.worktreePath)
+        .pipe(Effect.orElseSucceed(() => false));
+
+      let reason: string;
+      if (teammate.kind === "scout" && teammate.scoutReport !== null) {
+        reason = "Its scout report is recorded.";
+      } else {
+        const link = yield* linkedPullRequest(teammate);
+        let mergedHead: string | null = null;
+        if (link?.snapshot?.state === "merged") {
+          const detail = yield* threads
+            .pullRequestDetail({
+              projectId: teammate.projectId,
+              host: link.host,
+              repository: link.repository,
+              number: link.number,
+            })
+            .pipe(Effect.orElseSucceed(() => null));
+          mergedHead = detail?.state === "merged" ? (detail.headSha ?? null) : null;
+        }
+        const verdict = yield* git.landed({
+          projectRoot: project.workspaceRoot,
+          worktreePath: teammate.worktreePath,
+          branch: teammate.branch,
+          defaultBranch: yield* git.defaultBranch(project.workspaceRoot),
+          mergedPullRequestHead: mergedHead,
+        });
+        if (verdict.landed) {
+          reason = verdict.reason;
+        } else if (input.discardDecisionId !== undefined) {
+          yield* userApproval(command, pivot, teammate, input.discardDecisionId, "Discarding work");
+          reason = `Discarded on the user's word: ${verdict.reason}`;
+        } else {
+          return yield* refuse(
+            command,
+            `Not torn down, its work has not landed. ${verdict.reason}`,
+          );
+        }
+      }
+      const discarding = reason.startsWith("Discarded");
+
+      // The session goes first; if it will not stop, nothing else is touched.
+      yield* threads.stop(teammate.threadId);
+      yield* threads.stopProcesses(teammate.worktreePath);
+      if (worktreeExists) {
+        yield* threads.removeWorktree({
+          projectRoot: project.workspaceRoot,
+          worktreePath: teammate.worktreePath,
+          force: discarding || teammate.kind === "scout",
+        });
+      }
+      yield* threads.archive(teammate.threadId);
+      yield* store.dispatch({
+        type: "teammate.tear-down",
+        pivotThreadId: pivot.threadId,
+        threadId: teammate.threadId,
+      });
+      return { threadId: teammate.threadId, reason, branch: teammate.branch };
+    });
+
   // --- Teammate tools ---
 
   const reportStatus: PivotService["Service"]["reportStatus"] = (caller, input) =>
@@ -881,6 +1102,9 @@ export const make = Effect.gen(function* () {
     teammateHistory,
     stopTeammate,
     relaunchTeammate,
+    mergeTeammate,
+    landTeammate,
+    teardownTeammate,
     reportStatus,
     recordScoutReport,
   });

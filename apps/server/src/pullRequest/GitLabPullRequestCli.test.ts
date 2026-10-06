@@ -414,6 +414,35 @@ layer("GitLabPullRequestCli.layer", (it) => {
     }),
   );
 
+  it.effect("pins a merge to the head the caller checked", () =>
+    Effect.gen(function* () {
+      mockedExecute.mockReturnValueOnce(Effect.succeed(output("")));
+      const cli = yield* GitLabPullRequestCli.GitLabPullRequestCli;
+
+      yield* cli.runMergeRequestAction({
+        cwd: "/w",
+        repository: "acme/web",
+        number: 7,
+        action: "merge",
+        mergeMethod: "squash",
+        expectedHeadSha: "def456",
+      });
+
+      expect(argsOfCall(0)).toEqual([
+        "mr",
+        "merge",
+        "7",
+        "--repo",
+        "acme/web",
+        "--auto-merge=false",
+        "--yes",
+        "--squash",
+        "--sha",
+        "def456",
+      ]);
+    }),
+  );
+
   it.effect("arms auto-merge with the same strategy a merge would have used", () =>
     Effect.gen(function* () {
       mockedExecute.mockReturnValueOnce(Effect.succeed(output("")));

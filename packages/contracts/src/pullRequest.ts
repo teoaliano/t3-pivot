@@ -1084,6 +1084,11 @@ export const PullRequestActionInput = Schema.Struct({
   mergeMethod: Schema.optional(PullRequestMergeMethod),
   /** Only read for `update-branch`, where absent means the host's own default. */
   updateMethod: Schema.optional(PullRequestUpdateMethod),
+  /**
+   * For `merge`: the head commit the caller checked. The host refuses the merge if the head has
+   * moved since, so a push after the check cannot land unverified.
+   */
+  expectedHeadSha: Schema.optional(TrimmedNonEmptyString),
 });
 export type PullRequestActionInput = typeof PullRequestActionInput.Type;
 

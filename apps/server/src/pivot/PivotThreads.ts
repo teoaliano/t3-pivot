@@ -15,6 +15,8 @@ import {
   type OrchestrationV2ThreadShell,
   type ProjectId,
   type OrchestrationV2DomainEvent,
+  type PullRequestDetail,
+  type PullRequestRef,
   type RunId,
   ThreadId,
   type ThreadPullRequestLink,
@@ -27,7 +29,10 @@ import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
+import * as GitWorkflow from "../git/GitWorkflowService.ts";
+import * as ManagedProcesses from "../managedProcess/ManagedProcesses.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import { randomUuidV4 } from "../orchestration-v2/RandomUuid.ts";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadLifecycle from "../orchestration-v2/ThreadLifecycleService.ts";
@@ -153,6 +158,22 @@ export class PivotThreads extends Context.Service<
     }) => Effect.Effect<void, PivotThreadsError>;
     /** Whether a teammate wake is still queued on the Pivot's thread, undelivered. */
     readonly hasQueuedWake: (pivotThreadId: ThreadId) => Effect.Effect<boolean, PivotThreadsError>;
+    /** The PR's live state, read from its forge. */
+    readonly pullRequestDetail: (
+      ref: PullRequestRef,
+    ) => Effect.Effect<PullRequestDetail, PivotThreadsError>;
+    /** Squash-merges the PR, refused by the forge unless its head is still `expectedHeadSha`. */
+    readonly mergePullRequest: (
+      ref: PullRequestRef & { readonly expectedHeadSha: string },
+    ) => Effect.Effect<void, PivotThreadsError>;
+    /** Stops every managed process the worktree runs and frees its port block. */
+    readonly stopProcesses: (worktreePath: string) => Effect.Effect<void>;
+    /** Removes the worktree; without `force`, T3's clean-tree check refuses a dirty one. */
+    readonly removeWorktree: (input: {
+      readonly projectRoot: string;
+      readonly worktreePath: string;
+      readonly force: boolean;
+    }) => Effect.Effect<void, PivotThreadsError>;
   }
 >()("t3/pivot/PivotThreads") {}
 
@@ -161,6 +182,9 @@ export const make = Effect.gen(function* () {
   const launches = yield* ThreadLaunch.ThreadLaunchService;
   const lifecycle = yield* ThreadLifecycle.ThreadLifecycleService;
   const projects = yield* ProjectService.ProjectService;
+  const pullRequests = yield* PullRequestService.PullRequestService;
+  const processes = yield* ManagedProcesses.ManagedProcesses;
+  const git = yield* GitWorkflow.GitWorkflowService;
 
   const fail = (operation: string, threadId?: string) => (cause: unknown) =>
     new PivotThreadsError({
@@ -421,6 +445,21 @@ export const make = Effect.gen(function* () {
         ),
         Effect.mapError(fail("read the queue", pivotThreadId)),
       ),
+
+    pullRequestDetail: (ref) => pullRequests.detail(ref).pipe(Effect.mapError(fail("read the PR"))),
+
+    mergePullRequest: ({ expectedHeadSha, ...ref }) =>
+      pullRequests
+        .runAction({ ...ref, action: "merge", mergeMethod: "squash", expectedHeadSha })
+        .pipe(Effect.mapError(fail("merge the PR"))),
+
+    stopProcesses: (worktreePath) =>
+      processes.stopAllForCheckout(worktreePath, { releaseReservation: true }),
+
+    removeWorktree: ({ projectRoot, worktreePath, force }) =>
+      git
+        .removeWorktree({ cwd: projectRoot, path: worktreePath, force })
+        .pipe(Effect.mapError(fail("remove the worktree"))),
   });
 });
 

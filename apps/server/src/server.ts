@@ -600,18 +600,20 @@ const RuntimeCoreDependenciesBaseLive = Layer.mergeAll(
   ProviderInstallationRefreshLive,
   ReplayMarkers.layer,
 ).pipe(
+  // Pivot mode: its service and the adapter it reaches V2 threads, PRs and
+  // checkouts through. Teardown stops a worktree's managed processes, so it
+  // sits inside them.
+  Layer.provideMerge(
+    PivotService.layer.pipe(
+      Layer.provideMerge(PivotThreads.layer.pipe(Layer.provide(PullRequestServiceLive))),
+      Layer.provideMerge(PivotGit.layer.pipe(Layer.provide(ProcessRunner.layer))),
+    ),
+  ),
   // Storage cleanup stops a checkout's dev servers before removing it; the
   // RPC and MCP layers start and stop them.
   Layer.provideMerge(
     ManagedProcesses.layer.pipe(
       Layer.provide(ProcessInspector.layer.pipe(Layer.provide(ProcessRunner.layer))),
-    ),
-  ),
-  // Pivot mode: its service and the V2 adapter it reaches threads through.
-  Layer.provideMerge(
-    PivotService.layer.pipe(
-      Layer.provideMerge(PivotThreads.layer),
-      Layer.provideMerge(PivotGit.layer.pipe(Layer.provide(ProcessRunner.layer))),
     ),
   ),
   // Core Services

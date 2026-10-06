@@ -382,6 +382,71 @@ describe("PivotSupervisor", () => {
     },
   );
 
+  it.effect("a PR the Pivot merged itself is not news", () => {
+    const { fake } = setup({ remote: true });
+    return Effect.gen(function* () {
+      const supervisor = yield* PivotSupervisor.PivotSupervisor;
+      const pivots = yield* PivotService.PivotService;
+      const { pivot, teammate } = yield* running(fake);
+      const link = (state: string) =>
+        ({
+          host: "github.com",
+          repository: "o/r",
+          number: 7,
+          url: "https://github.com/o/r/pull/7",
+          source: "agent",
+          linkedAt: "2026-10-06T00:00:00.000Z",
+          snapshot: {
+            state,
+            title: "Fix",
+            headBranch: "pivot/fix-the-login-bug",
+            baseBranch: "main",
+            isDraft: false,
+            updatedAt: null,
+            syncedAt: "2026-10-06T00:00:00.000Z",
+          },
+          stack: null,
+        }) as never;
+      yield* supervisor.handleEvent({
+        type: "pull-requests",
+        threadId: teammate,
+        links: [link("open")],
+      });
+      yield* shell(fake, teammate, { pullRequests: [link("open")] });
+      const { decision } = yield* pivots.openDecision(pivot, {
+        teammateThreadId: teammate,
+        question: "Merge?",
+      });
+      yield* pivots.escalateDecision(pivot, {
+        decisionId: decision.decisionId,
+        questions: ["Merge?"],
+        evidence: "Green.",
+        consequence: "Ships.",
+        options: ["Merge"],
+        recommendation: "Merge",
+      });
+      yield* pivots.recordUserAnswer({ decisionId: decision.decisionId, answer: "Merge it." });
+      yield* tick;
+      const before = wakesFor(fake, pivot).length;
+      fake.pullRequests.set("https://github.com/o/r/pull/7", {
+        provider: "github",
+        state: "open",
+        isDraft: false,
+        mergeability: "mergeable",
+        headSha: "abc",
+        checks: [],
+      });
+      yield* pivots.mergeTeammate(pivot, { threadId: teammate, decisionId: decision.decisionId });
+      yield* supervisor.handleEvent({
+        type: "pull-requests",
+        threadId: teammate,
+        links: [link("merged")],
+      });
+      yield* tick;
+      assert.strictEqual(wakesFor(fake, pivot).length, before);
+    }).pipe(Effect.provide(withSupervisor(fake)));
+  });
+
   it.effect("a takeover opens the new Pivot with a digest of every teammate and decision", () => {
     const { fake } = setup();
     return Effect.gen(function* () {

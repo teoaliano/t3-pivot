@@ -52,6 +52,10 @@ export const PivotToolkitHandlersLive = PivotToolkit.toLayer({
   stop_teammate: (input) => asCaller((service, caller) => service.stopTeammate(caller, input)),
   relaunch_teammate: (input) =>
     asCaller((service, caller) => service.relaunchTeammate(caller, input)),
+  merge_teammate: (input) => asCaller((service, caller) => service.mergeTeammate(caller, input)),
+  land_teammate: (input) => asCaller((service, caller) => service.landTeammate(caller, input)),
+  teardown_teammate: (input) =>
+    asCaller((service, caller) => service.teardownTeammate(caller, input)),
 });
 
 export const TeammateToolkitHandlersLive = TeammateToolkit.toLayer({

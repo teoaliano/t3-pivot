@@ -930,6 +930,8 @@ export function PullRequestDetailPanel({
         action,
         ...(method ? { mergeMethod: method } : {}),
         ...(updateMethod ? { updateMethod } : {}),
+        // Pinned to the head on screen: a push after the reader looked refuses the merge.
+        ...(action === "merge" && detail?.headSha ? { expectedHeadSha: detail.headSha } : {}),
       },
     });
     setPendingAction(null);

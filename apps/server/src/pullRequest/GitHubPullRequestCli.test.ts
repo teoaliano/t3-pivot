@@ -1831,6 +1831,34 @@ layer("GitHubPullRequestCli.layer", (it) => {
     }),
   );
 
+  it.effect("pins a merge to the head the caller checked", () =>
+    Effect.gen(function* () {
+      mockedExecute.mockReturnValue(Effect.succeed(output("")));
+      const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+
+      yield* cli.runPullRequestAction({
+        cwd: "/w",
+        repository: "acme/web",
+        host: "github.com",
+        number: 7,
+        action: "merge",
+        mergeMethod: "squash",
+        expectedHeadSha: "def456",
+      });
+
+      expect(callAt(0).args).toEqual([
+        "pr",
+        "merge",
+        "7",
+        "--repo",
+        "github.com/acme/web",
+        "--squash",
+        "--match-head-commit",
+        "def456",
+      ]);
+    }),
+  );
+
   it.effect.each(["merge", "enable-auto-merge"] as const)(
     "removes agent credits from the proposed message for %s",
     (action) =>

@@ -4,6 +4,7 @@
  */
 import {
   type ModelSelection,
+  type PullRequestDetail,
   type OrchestrationV2ThreadShell,
   type ProjectId,
   RunId,
@@ -59,6 +60,12 @@ export interface FakeV2 {
   readonly wakes: Array<FakeWake>;
   /** Pivot threads whose last wake is still queued, so the next one joins it. */
   readonly queuedWakes: Set<string>;
+  /** Live PR state by URL, as the forge would report it. */
+  readonly pullRequests: Map<string, Partial<PullRequestDetail>>;
+  /** Merges asked of the forge, with the head they were pinned to. */
+  readonly merges: Array<{ readonly url: string; readonly expectedHeadSha: string }>;
+  readonly stoppedCheckouts: Array<string>;
+  readonly removedWorktrees: Array<{ readonly worktreePath: string; readonly force: boolean }>;
 }
 
 export interface FakeWake {
@@ -80,6 +87,10 @@ export const makeFakeV2 = (): FakeV2 => ({
   nextThreadId: null,
   wakes: [],
   queuedWakes: new Set(),
+  pullRequests: new Map(),
+  merges: [],
+  stoppedCheckouts: [],
+  removedWorktrees: [],
 });
 
 let counter = 0;
@@ -236,5 +247,39 @@ export const layer = (fake: FakeV2) =>
           else fake.wakes.push(wake);
         }),
       hasQueuedWake: (pivotThreadId) => Effect.sync(() => fake.queuedWakes.has(pivotThreadId)),
+      pullRequestDetail: (ref) =>
+        Effect.suspend(() => {
+          const url = `https://${ref.host ?? "github.com"}/${ref.repository}/pull/${ref.number}`;
+          const detail = fake.pullRequests.get(url);
+          return detail === undefined
+            ? Effect.fail(
+                new PivotThreadsError({ operation: "read the PR", detail: "No such PR." }),
+              )
+            : Effect.succeed({ url, checks: [], ...detail } as PullRequestDetail);
+        }),
+      mergePullRequest: ({ expectedHeadSha, ...ref }) =>
+        Effect.suspend(() => {
+          const url = `https://${ref.host ?? "github.com"}/${ref.repository}/pull/${ref.number}`;
+          const detail = fake.pullRequests.get(url);
+          if (detail?.headSha !== expectedHeadSha) {
+            return Effect.fail(
+              new PivotThreadsError({
+                operation: "merge the PR",
+                detail: "Head branch was modified.",
+              }),
+            );
+          }
+          fake.merges.push({ url, expectedHeadSha });
+          fake.pullRequests.set(url, { ...detail, state: "merged" });
+          return Effect.void;
+        }),
+      stopProcesses: (worktreePath) =>
+        Effect.sync(() => {
+          fake.stoppedCheckouts.push(worktreePath);
+        }),
+      removeWorktree: ({ worktreePath, force }) =>
+        Effect.sync(() => {
+          fake.removedWorktrees.push({ worktreePath, force });
+        }),
     }),
   );
