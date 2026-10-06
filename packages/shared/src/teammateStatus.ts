@@ -4,7 +4,7 @@ import type {
   OrchestrationV2ThreadShell,
   TeammateReportedStatus,
   TeammateStatus,
-  ThreadTeammate,
+  TeammateRecord,
 } from "@t3tools/contracts";
 
 import { backgroundWorkHoldsCompletion } from "./orchestrationV2PendingBackgroundWork.ts";
@@ -28,7 +28,7 @@ export interface TeammateStatusInput extends Pick<
   | "lastError"
   | "lastErrorClass"
 > {
-  readonly teammate: Pick<ThreadTeammate, "report" | "resume">;
+  readonly teammate: Pick<TeammateRecord, "report" | "resume">;
 }
 
 export interface TeammateStatusResult {

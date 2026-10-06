@@ -112,6 +112,11 @@ import * as SourceControlRateLimit from "./sourceControl/SourceControlRateLimit.
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as PivotHome from "./pivot/PivotHome.ts";
+import * as PivotDatabase from "./pivot/PivotDatabase.ts";
+import * as PivotGit from "./pivot/PivotGit.ts";
+import * as PivotService from "./pivot/PivotService.ts";
+import * as PivotStore from "./pivot/PivotStore.ts";
+import * as PivotThreads from "./pivot/PivotThreads.ts";
 import { ObservabilityLive } from "./observability/Layers/Observability.ts";
 import * as HeapSnapshot from "./observability/HeapSnapshot.ts";
 import * as EventLoopMonitor from "./observability/EventLoopMonitor.ts";
@@ -594,6 +599,13 @@ const RuntimeCoreDependenciesBaseLive = Layer.mergeAll(
       Layer.provide(ProcessInspector.layer.pipe(Layer.provide(ProcessRunner.layer))),
     ),
   ),
+  // Pivot mode: its service and the V2 adapter it reaches threads through.
+  Layer.provideMerge(
+    PivotService.layer.pipe(
+      Layer.provideMerge(PivotThreads.layer),
+      Layer.provideMerge(PivotGit.layer.pipe(Layer.provide(ProcessRunner.layer))),
+    ),
+  ),
   // Core Services
   Layer.provideMerge(OrchestrationApplicationLayerLive),
   Layer.provideMerge(OrchestrationEventInfrastructureLayerLive),
@@ -653,6 +665,7 @@ const RuntimeCoreDependenciesLive = RuntimeCoreDependenciesBaseLive.pipe(
   Layer.provideMerge(ProjectEnrichmentService.layer),
   Layer.provideMerge(Layer.mergeAll(NativeAppIconResolver.layer, ProjectFaviconResolverLayerLive)),
   Layer.provideMerge(PivotHome.layer.pipe(Layer.provide(ProcessRunner.layer))),
+  Layer.provideMerge(PivotStore.layer.pipe(Layer.provide(PivotDatabase.layer))),
   Layer.provideMerge(RepositoryIdentityResolverLayerLive),
   Layer.provideMerge(ServerEnvironmentLayerLive),
   Layer.provideMerge(AuthLayerLive),

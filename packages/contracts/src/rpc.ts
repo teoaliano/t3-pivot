@@ -330,6 +330,17 @@ import {
   ScheduledTaskUpsertInput,
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
+import {
+  PivotAnswerDecisionInput,
+  PivotAnswerDecisionResult,
+  PivotCreateInput,
+  PivotCreateResult,
+  PivotError,
+  PivotStreamEvent,
+  PivotSubscribeInput,
+  PivotTeammateDetail,
+  PivotTeammateDetailInput,
+} from "./pivot.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import {
   ProjectCloneActionInput,
@@ -484,6 +495,10 @@ export const WS_METHODS = {
   serverRefreshUsageRates: "server.refreshUsageRates",
 
   // Scheduled tasks
+  pivotSubscribe: "pivot.subscribe",
+  pivotCreate: "pivot.create",
+  pivotAnswerDecision: "pivot.answerDecision",
+  pivotTeammateDetail: "pivot.teammateDetail",
   scheduledTasksList: "scheduledTasks.list",
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
   scheduledTasksUpsert: "scheduledTasks.upsert",
@@ -1685,6 +1700,32 @@ const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServerLifecyc
   stream: true,
 });
 
+/** Pivot mode's records: a snapshot on subscribe, then the records that changed. */
+const WsPivotSubscribeRpc = Rpc.make(WS_METHODS.pivotSubscribe, {
+  payload: PivotSubscribeInput,
+  success: PivotStreamEvent,
+  error: Schema.Union([PivotError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+const WsPivotCreateRpc = Rpc.make(WS_METHODS.pivotCreate, {
+  payload: PivotCreateInput,
+  success: PivotCreateResult,
+  error: Schema.Union([PivotError, EnvironmentAuthorizationError]),
+});
+
+const WsPivotAnswerDecisionRpc = Rpc.make(WS_METHODS.pivotAnswerDecision, {
+  payload: PivotAnswerDecisionInput,
+  success: PivotAnswerDecisionResult,
+  error: Schema.Union([PivotError, EnvironmentAuthorizationError]),
+});
+
+const WsPivotTeammateDetailRpc = Rpc.make(WS_METHODS.pivotTeammateDetail, {
+  payload: PivotTeammateDetailInput,
+  success: PivotTeammateDetail,
+  error: Schema.Union([PivotError, EnvironmentAuthorizationError]),
+});
+
 const WsScheduledTasksListRpc = Rpc.make(WS_METHODS.scheduledTasksList, {
   payload: ScheduledTaskListInput,
   success: ScheduledTaskListResult,
@@ -1836,6 +1877,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerSignalProcessRpc,
   WsScheduledTasksListRpc,
   WsScheduledTasksSubscribeRpc,
+  WsPivotSubscribeRpc,
+  WsPivotCreateRpc,
+  WsPivotAnswerDecisionRpc,
+  WsPivotTeammateDetailRpc,
   WsScheduledTasksUpsertRpc,
   WsScheduledTasksSetEnabledRpc,
   WsScheduledTasksDeleteRpc,

@@ -1,4 +1,4 @@
-import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
+import { OrchestrationDispatchCommandError, PivotError } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as NodeCrypto from "node:crypto";
@@ -121,6 +121,7 @@ import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts"
 import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts";
 import * as IdAllocator from "./orchestration-v2/IdAllocator.ts";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
+import * as PivotService from "./pivot/PivotService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import {
   archivedShellStreamItemFromThreadShell,
@@ -1223,6 +1224,9 @@ const makeWsRpcLayer = (
       const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
       const providerSessionManager = yield* ProviderSessionManager.ProviderSessionManagerV2;
       const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
+      const pivots = yield* PivotService.PivotService;
+      const toPivotError = (cause: PivotService.PivotServiceError) =>
+        new PivotError({ message: cause.message, cause });
       const secretRequests = yield* SecretRequests.SecretRequests;
       const pullRequests = yield* PullRequestService.PullRequestService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
@@ -2075,6 +2079,33 @@ const makeWsRpcLayer = (
             WS_METHODS.scheduledTasksList,
             scheduledTasks.list().pipe(Effect.map(withVisibleWebhookUrls)),
             { "rpc.aggregate": "scheduledTasks" },
+          ),
+        [WS_METHODS.pivotSubscribe]: (_input) =>
+          observeRpcStream(
+            WS_METHODS.pivotSubscribe,
+            pivots.stream.pipe(Stream.mapError(toPivotError)),
+            { "rpc.aggregate": "pivot" },
+          ),
+        [WS_METHODS.pivotCreate]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pivotCreate,
+            pivots.create(input).pipe(Effect.mapError(toPivotError)),
+            { "rpc.aggregate": "pivot" },
+          ),
+        [WS_METHODS.pivotAnswerDecision]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pivotAnswerDecision,
+            pivots.recordUserAnswer(input).pipe(
+              Effect.map((decision) => ({ decision })),
+              Effect.mapError(toPivotError),
+            ),
+            { "rpc.aggregate": "pivot" },
+          ),
+        [WS_METHODS.pivotTeammateDetail]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pivotTeammateDetail,
+            pivots.teammateDetail(input.threadId).pipe(Effect.mapError(toPivotError)),
+            { "rpc.aggregate": "pivot" },
           ),
         [WS_METHODS.scheduledTasksSubscribe]: (_input) =>
           observeRpcStream(
