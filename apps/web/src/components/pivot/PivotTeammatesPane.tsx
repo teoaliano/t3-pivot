@@ -9,8 +9,11 @@ import { useThreadShells } from "../../state/entities";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import { useEnvironmentQuery } from "../../state/query";
+import { vcsEnvironment } from "../../state/vcs";
 import {
   elapsedLabel,
+  setupProgressLine,
   type TeammateCard,
   teammateCardShellOf,
   teammateCards,
@@ -61,6 +64,7 @@ export function PivotTeammatesPane(props: {
   const render = (card: TeammateCard) => (
     <PivotTeammateCard
       key={card.threadId}
+      environmentId={props.environmentId}
       card={card}
       nowMs={nowMs}
       providerEntries={props.providerEntries}
@@ -87,7 +91,27 @@ export function PivotTeammatesPane(props: {
   );
 }
 
+/**
+ * The worktree setup in progress, or how it went wrong. Subscribes only while the card
+ * follows setup, so a settled team holds no setup streams.
+ */
+function TeammateSetupLine(props: { environmentId: EnvironmentId; threadId: ThreadId }) {
+  const setup = useEnvironmentQuery(
+    vcsEnvironment.worktreeSetup({
+      environmentId: props.environmentId,
+      input: { threadId: props.threadId },
+    }),
+  );
+  const line = setupProgressLine(setup.data ?? null);
+  return line === null ? null : (
+    <div className="truncate text-xs text-muted-foreground" title={line}>
+      {line}
+    </div>
+  );
+}
+
 const PivotTeammateCard = memo(function PivotTeammateCard(props: {
+  environmentId: EnvironmentId;
   card: TeammateCard;
   nowMs: number;
   providerEntries: ReadonlyMap<string, ProviderInstanceEntry>;
@@ -163,6 +187,9 @@ const PivotTeammateCard = memo(function PivotTeammateCard(props: {
         </Menu>
       </div>
       <div className="line-clamp-2 text-sm">{card.title}</div>
+      {card.followsSetup ? (
+        <TeammateSetupLine environmentId={props.environmentId} threadId={card.threadId} />
+      ) : null}
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>
           {card.footer?.kind === "pull-request"

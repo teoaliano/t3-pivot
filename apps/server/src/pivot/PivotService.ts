@@ -571,6 +571,8 @@ export const make = Effect.gen(function* () {
             launched.runId === null
               ? ({ type: "failed", runId: null, detail: "The launch created no run." } as const)
               : yield* threads.awaitStart(launched.threadId, launched.runId);
+          // A failing setup script still starts the teammate; the result says so.
+          const setup = yield* threads.setupOutcome(launched.threadId);
           return {
             threadId: launched.threadId,
             title: input.title,
@@ -581,6 +583,8 @@ export const make = Effect.gen(function* () {
             deliveryMode,
             firstRun: start.type,
             detail: start.type === "failed" ? start.detail : null,
+            setupScript: setup.status,
+            setupDetail: setup.detail,
           };
         }),
       );

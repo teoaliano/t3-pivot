@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { CommandId, MessageId, ThreadId } from "@t3tools/contracts";
 
-import { toPivotThreadEvents } from "./PivotThreads.ts";
+import { setupScriptOutcome, toPivotThreadEvents } from "./PivotThreads.ts";
 
 const threadId = ThreadId.make("teammate-1");
 
@@ -58,5 +58,38 @@ describe("toPivotThreadEvents", () => {
       answer: "Approval: accept",
     });
     expect(toPivotThreadEvents(answered("mcp:abc"))).toEqual([{ type: "activity", threadId }]);
+  });
+});
+
+describe("setupScriptOutcome", () => {
+  const snapshot = (stage: Record<string, unknown> | null, script = true) =>
+    ({
+      setupScript: script ? { name: "setup", command: "pnpm i", terminalId: "setup-1" } : null,
+      stages:
+        stage === null
+          ? []
+          : [{ id: "setup-script", detail: null, tail: [], percent: null, ...stage }],
+      error: null,
+    }) as never;
+
+  it("reads the setup-script stage, and none when the project has no script", () => {
+    expect(setupScriptOutcome(null)).toEqual({ status: "none", detail: null });
+    expect(setupScriptOutcome(snapshot({ status: "skipped" }, false))).toEqual({
+      status: "none",
+      detail: null,
+    });
+    expect(setupScriptOutcome(snapshot({ status: "running" }))).toEqual({
+      status: "running",
+      detail: null,
+    });
+    expect(setupScriptOutcome(snapshot({ status: "done" }))).toEqual({
+      status: "succeeded",
+      detail: null,
+    });
+    expect(
+      setupScriptOutcome(
+        snapshot({ status: "failed", detail: "exited with 1", tail: ["ERR! missing dep"] }),
+      ),
+    ).toEqual({ status: "failed", detail: "exited with 1" });
   });
 });

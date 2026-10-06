@@ -178,6 +178,25 @@ describe("Pivot and teammate tools", () => {
       }).pipe(Effect.provide(layer));
     });
 
+    it.effect("says when the project's setup script failed, though the teammate started", () => {
+      const { fake, layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const clean = yield* dispatch(pivot);
+        assert.strictEqual(clean.setupScript, "none");
+        // The setup script runs in the background: the run starts, and setup reports apart.
+        fake.nextThreadId = "teammate-setup-fails" as ThreadId;
+        fake.setupOutcomes.set("teammate-setup-fails", {
+          status: "failed",
+          detail: "exited with 1",
+        });
+        const result = yield* dispatch(pivot, { title: "Second" });
+        assert.strictEqual(result.firstRun, "started");
+        assert.strictEqual(result.setupScript, "failed");
+        assert.strictEqual(result.setupDetail, "exited with 1");
+      }).pipe(Effect.provide(layer));
+    });
+
     it.effect("delivers a ready branch in a project with no remote", () => {
       const { fake, layer } = setup();
       return Effect.gen(function* () {

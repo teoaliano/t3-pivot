@@ -19,6 +19,7 @@ import {
   PivotThreadsError,
   type PivotProject,
   type RunStart,
+  type SetupScriptOutcome,
 } from "./PivotThreads.ts";
 
 export interface FakeMessage {
@@ -65,6 +66,8 @@ export interface FakeV2 {
   /** Merges asked of the forge, with the head they were pinned to. */
   readonly merges: Array<{ readonly url: string; readonly expectedHeadSha: string }>;
   readonly stoppedCheckouts: Array<string>;
+  /** Setup script outcomes by thread; none when unset. */
+  readonly setupOutcomes: Map<string, SetupScriptOutcome>;
   /** Threads whose held queue was released. */
   readonly releasedQueues: Array<string>;
   readonly removedWorktrees: Array<{ readonly worktreePath: string; readonly force: boolean }>;
@@ -93,6 +96,7 @@ export const makeFakeV2 = (): FakeV2 => ({
   merges: [],
   stoppedCheckouts: [],
   releasedQueues: [],
+  setupOutcomes: new Map(),
   removedWorktrees: [],
 });
 
@@ -192,6 +196,11 @@ export const layer = (fake: FakeV2) =>
         Effect.sync(
           (): RunStart =>
             fake.starts.get(threadId) ?? { type: "failed", runId: null, detail: "No run." },
+        ),
+      setupOutcome: (threadId) =>
+        Effect.sync(
+          (): SetupScriptOutcome =>
+            fake.setupOutcomes.get(threadId) ?? { status: "none", detail: null },
         ),
       retryLaunch: (threadId) =>
         Effect.map(thread(fake, threadId, "retry"), (found): RunStart => {

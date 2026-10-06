@@ -4,6 +4,8 @@ import type {
   TeammateStatus,
   ThreadId,
   ThreadPullRequestLink,
+  WorktreeSetupSnapshot,
+  WorktreeSetupStageId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { deriveTeammateStatus, type TeammateStatusInput } from "@t3tools/shared/teammateStatus";
@@ -40,6 +42,8 @@ export interface TeammateCard {
     | null;
   readonly providerInstanceId: string | null;
   readonly detail: string | null;
+  /** Before its first report, the card follows the worktree setup. */
+  readonly followsSetup: boolean;
 }
 
 export interface TeammateCards {
@@ -99,6 +103,7 @@ export function teammateCard(
           : null,
     providerInstanceId: shell?.providerInstanceId ?? null,
     detail: derived.detail,
+    followsSetup: teammate.report === null && teammate.tornDownAt === null,
   };
 }
 
@@ -152,4 +157,37 @@ export function teammateCardShellOf(
     latestRunCompletedAt: isoOrNull(source.latestRunCompletedAt),
     pullRequest: link === null ? null : { number: link.number, url: link.url },
   };
+}
+
+const SETUP_STAGE_LABELS: Record<WorktreeSetupStageId, string> = {
+  fetch: "Fetching the base branch",
+  checkout: "Checking out",
+  submodules: "Setting up submodules",
+  "setup-script": "Running the setup script",
+  agent: "Starting the agent",
+};
+
+/**
+ * One line of worktree setup for a card: the stage in progress, or how setup went
+ * wrong. Null once setup finished cleanly, so a healthy card says nothing about it.
+ */
+export function setupProgressLine(snapshot: WorktreeSetupSnapshot | null): string | null {
+  if (snapshot === null) return null;
+  if (snapshot.phase === "cancelled") return "Setup cancelled";
+  if (snapshot.phase === "failed") {
+    return snapshot.error === null ? "Setup failed" : `Setup failed: ${snapshot.error}`;
+  }
+  const scriptFailed = snapshot.stages.find(
+    (stage) => stage.id === "setup-script" && stage.status === "failed",
+  );
+  if (scriptFailed !== undefined) {
+    return scriptFailed.detail === null
+      ? "Setup script failed"
+      : `Setup script failed: ${scriptFailed.detail}`;
+  }
+  if (snapshot.phase !== "running") return null;
+  const current = snapshot.stages.find((stage) => stage.status === "running");
+  if (current === undefined) return "Setting up";
+  const label = SETUP_STAGE_LABELS[current.id];
+  return current.percent === null ? label : `${label} ${current.percent}%`;
 }

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   elapsedLabel,
+  setupProgressLine,
   type TeammateCardShell,
   teammateCard,
   teammateCards,
@@ -128,5 +129,50 @@ describe("teammate cards", () => {
     expect(elapsedLabel("2026-10-06T09:00:00.000Z", now)).toBe("3h");
     expect(elapsedLabel("2026-10-03T12:00:00.000Z", now)).toBe("3d");
     expect(elapsedLabel(null, now)).toBeNull();
+  });
+
+  it("reads worktree setup as one line, and nothing once it finished cleanly", () => {
+    const stage = (id: string, status: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      status,
+      startedAt: null,
+      endedAt: null,
+      percent: null,
+      detail: null,
+      tail: [],
+      ...extra,
+    });
+    const snapshot = (phase: string, stages: Array<unknown>, error: string | null = null) =>
+      ({ phase, stages, error }) as never;
+
+    expect(setupProgressLine(null)).toBeNull();
+    expect(
+      setupProgressLine(
+        snapshot("running", [
+          stage("fetch", "done"),
+          stage("checkout", "running", { percent: 42 }),
+        ]),
+      ),
+    ).toBe("Checking out 42%");
+    expect(setupProgressLine(snapshot("running", [stage("setup-script", "running")]))).toBe(
+      "Running the setup script",
+    );
+    expect(
+      setupProgressLine(
+        snapshot("done", [stage("setup-script", "failed", { detail: "exited with 1" })]),
+      ),
+    ).toBe("Setup script failed: exited with 1");
+    expect(setupProgressLine(snapshot("failed", [], "Branch already exists"))).toBe(
+      "Setup failed: Branch already exists",
+    );
+    expect(setupProgressLine(snapshot("done", [stage("setup-script", "done")]))).toBeNull();
+  });
+
+  it("follows setup until the teammate first reports", () => {
+    expect(teammateCard(teammate(), shell()).followsSetup).toBe(true);
+    expect(
+      teammateCard(teammate({ report: report("working", "2026-10-06T10:02:00.000Z") }), shell())
+        .followsSetup,
+    ).toBe(false);
   });
 });

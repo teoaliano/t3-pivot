@@ -21,6 +21,7 @@ import {
   type RunId,
   ThreadId,
   type ThreadPullRequestLink,
+  type WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -33,6 +34,7 @@ import * as Stream from "effect/Stream";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as ManagedProcesses from "../managedProcess/ManagedProcesses.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import { randomUuidV4 } from "../orchestration-v2/RandomUuid.ts";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
@@ -69,6 +71,34 @@ export interface TeammateLaunch {
   /** The first run, preparing its worktree. Null when the launch created none. */
   readonly runId: RunId | null;
 }
+
+export interface SetupScriptOutcome {
+  readonly status: "none" | "running" | "succeeded" | "failed";
+  readonly detail: string | null;
+}
+
+/** How the project's setup script went in a worktree setup, from V2's tracker snapshot. */
+export const setupScriptOutcome = (snapshot: WorktreeSetupSnapshot | null): SetupScriptOutcome => {
+  const stage = snapshot?.stages.find((candidate) => candidate.id === "setup-script");
+  if (snapshot === null || snapshot.setupScript === null || stage === undefined) {
+    return { status: "none", detail: null };
+  }
+  switch (stage.status) {
+    case "pending":
+    case "running":
+      return { status: "running", detail: null };
+    case "done":
+      return { status: "succeeded", detail: null };
+    case "skipped":
+      return { status: "none", detail: null };
+    case "warning":
+    case "failed":
+      return {
+        status: "failed",
+        detail: stage.detail ?? stage.tail.at(-1) ?? snapshot.error ?? null,
+      };
+  }
+};
 
 /** What the supervisor hears from V2, already narrowed to what Pivot mode acts on. */
 export type PivotThreadEvent =
@@ -119,6 +149,8 @@ export class PivotThreads extends Context.Service<
       threadId: ThreadId,
       runId: RunId,
     ) => Effect.Effect<RunStart, PivotThreadsError>;
+    /** How the teammate's setup script went, while V2 still tracks its worktree setup. */
+    readonly setupOutcome: (threadId: ThreadId) => Effect.Effect<SetupScriptOutcome>;
     /** Retries a teammate whose launch failed, reusing its recorded worktree. */
     readonly retryLaunch: (threadId: ThreadId) => Effect.Effect<RunStart, PivotThreadsError>;
     readonly archive: (threadId: ThreadId) => Effect.Effect<void, PivotThreadsError>;
@@ -188,6 +220,7 @@ export const make = Effect.gen(function* () {
   const pullRequests = yield* PullRequestService.PullRequestService;
   const processes = yield* ManagedProcesses.ManagedProcesses;
   const git = yield* GitWorkflow.GitWorkflowService;
+  const setupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
 
   const fail = (operation: string, threadId?: string) => (cause: unknown) =>
     new PivotThreadsError({
@@ -326,6 +359,8 @@ export const make = Effect.gen(function* () {
 
     awaitStart: (threadId, runId) =>
       awaitRunStart(threadId, runId).pipe(Effect.mapError(fail("await the run", threadId))),
+
+    setupOutcome: (threadId) => setupTracker.get(threadId).pipe(Effect.map(setupScriptOutcome)),
 
     retryLaunch: (threadId) =>
       Effect.gen(function* () {

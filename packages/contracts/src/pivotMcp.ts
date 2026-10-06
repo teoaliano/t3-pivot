@@ -45,6 +45,12 @@ export const PivotMcpDispatchTeammateResult = Schema.Struct({
   /** `failed` when setup failed; retry with relaunch_teammate or tear it down. */
   firstRun: Schema.Literals(["started", "failed"]),
   detail: Schema.NullOr(Schema.String),
+  /**
+   * The project's setup script: none configured, still running (an async script keeps
+   * going after the teammate starts), succeeded, or failed with `setupDetail`.
+   */
+  setupScript: Schema.Literals(["none", "running", "succeeded", "failed"]),
+  setupDetail: Schema.NullOr(Schema.String),
 });
 export type PivotMcpDispatchTeammateResult = typeof PivotMcpDispatchTeammateResult.Type;
 
