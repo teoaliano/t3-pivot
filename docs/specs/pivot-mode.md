@@ -522,10 +522,13 @@ status }`. The brief (intent, spec, definition of done) rides the dispatch comma
   full-access so it can read teammate worktrees and use `gh`. Where a harness sandboxes
   writes to its working directory, that enforcement comes for free.
 - **Capabilities.** V2 grants every thread `orchestration`, `worktree` and
-  `pull-requests`. The Pivot also gets a `pivot` capability: dispatch, promote, new asks,
-  decisions, list teammates, teammate history, stop, relaunch, merge and teardown. It gets
-  no browser or device tools; teammates verify. Teammates also get a `teammate` capability
-  (`report_status`, the scout report) on top of what V2 and the project grant.
+  `pull-requests`. The Pivot also gets a `pivot` capability with the tools its contract
+  names: `dispatch_teammate`, `promote_scout`, `add_intent`, `open_decision`,
+  `escalate_decision`, `answer_decision`, `mark_decision_moot`, `list_teammates`,
+  `teammate_history`, `stop_teammate`, `relaunch_teammate`, `merge_teammate`,
+  `land_teammate` (the local fast-forward) and `teardown_teammate`. It gets no browser or
+  device tools; teammates verify. Teammates also get a `teammate` capability
+  (`report_status` and `record_scout_report`) on top of what V2 and the project grant.
 
 ### The Pivot's contract
 
@@ -655,8 +658,10 @@ wallpaper setting) is the last step, verified in one integrated pass in a real c
 
 ## Tasks
 
-1. Create a Pivot through the thread launch, with auto-settle off, and read it back as a
-   Pivot in the shell. Seam: V2 orchestrator.
+Tasks marked **Done** landed on `main` before implementation started. Skip them.
+
+1. Create a Pivot through the thread launch in its Pivot home, with auto-settle off, and
+   read it back as a Pivot in the shell. Seam: V2 orchestrator.
 2. Refuse a second Pivot while one is active. Seam: same.
 3. Refuse a Pivot in a project that is not a git repository. Seam: same.
 4. Record a teammate at launch with its owning Pivot and kind, and show
@@ -665,13 +670,13 @@ wallpaper setting) is the last step, verified in one integrated pass in a real c
    same.
 6. Take over: a new Pivot receives every live teammate of the active one, and the old one
    reads retired. Seam: same.
-7. Combine report and V2 runtime state into the eight teammate statuses, covering every
+7. **Done.** Combine report and V2 runtime state into the eight teammate statuses, covering every
    precedence rule and the run scoping. Seam: teammate status.
-8. Read a run interrupted by a restart as `working` while it resumes, and a run stopped
+8. **Done.** Read a run interrupted by a restart as `working` while it resumes, and a run stopped
    by a usage limit as `paused` until the reset. Seam: same.
-9. Create the Pivot home with `AGENTS.md`, `CLAUDE.md` and an empty `preferences.md`,
-   and launch the Pivot thread in it. Seam: Pivot home.
-10. Rewrite `AGENTS.md` on update without touching `preferences.md`, and keep the
+9. **Done.** Create the Pivot home with `AGENTS.md`, `CLAUDE.md` and an empty
+   `preferences.md`. Seam: Pivot home.
+10. **Done.** Rewrite `AGENTS.md` on update without touching `preferences.md`, and keep the
     contract under 3,000 words. Seam: same.
 11. Grant the `pivot` capability only to the active Pivot and the `teammate` capability
     only to teammates. Seam: Pivot and teammate toolkits.
@@ -730,11 +735,11 @@ wallpaper setting) is the last step, verified in one integrated pass in a real c
 41. Skip Pivot homes in storage cleanup. Seam: storage cleanup.
 42. Group teammates under their Pivot in the sidebar, keep a retired Pivot's finished
     teammates, and produce no notifications for teammate threads. Seam: sidebar logic.
-43. Build and edit the layout tree: presets, hide, show, move to an edge, resize, and at
+43. **Done.** Build and edit the layout tree: presets, hide, show, move to an edge, resize, and at
     least one pane. Seam: Pivot view logic.
 44. Derive a card's label, attention, order and the finished chip from the shell. Seam:
     same.
-45. Write the Pivot contract from firstmate's judgment text under the ceiling. Seam:
+45. **Done.** Write the Pivot contract from firstmate's judgment text under the ceiling. Seam:
     Pivot home.
 46. Wire the UI: the New Pivot entry points with the takeover confirmation, the sidebar
     rows, the header switch and its keybinding, the Pivot view with its panes and card
