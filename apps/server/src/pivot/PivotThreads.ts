@@ -57,9 +57,8 @@ export type RunStart =
 
 export interface TeammateLaunch {
   readonly threadId: ThreadId;
-  /** The worktree the thread recorded, or null when none was created. */
-  readonly worktreePath: string | null;
-  readonly start: RunStart;
+  /** The first run, preparing its worktree. Null when the launch created none. */
+  readonly runId: RunId | null;
 }
 
 export class PivotThreads extends Context.Service<
@@ -76,7 +75,8 @@ export class PivotThreads extends Context.Service<
     }) => Effect.Effect<ThreadId, PivotThreadsError>;
     /**
      * Launches a teammate into a fresh worktree on `branch`, with `text` as its first
-     * message from the Pivot, and returns once the first run started or failed to.
+     * message from the Pivot. Returns once V2 accepted it; the worktree is still being
+     * prepared.
      */
     readonly launchTeammate: (input: {
       readonly projectId: ProjectId;
@@ -87,6 +87,11 @@ export class PivotThreads extends Context.Service<
       readonly modelSelection: ModelSelection;
       readonly text: string;
     }) => Effect.Effect<TeammateLaunch, PivotThreadsError>;
+    /** Waits until a run leaves preparation: started, or failed with V2's last error. */
+    readonly awaitStart: (
+      threadId: ThreadId,
+      runId: RunId,
+    ) => Effect.Effect<RunStart, PivotThreadsError>;
     /** Retries a teammate whose launch failed, reusing its recorded worktree. */
     readonly retryLaunch: (threadId: ThreadId) => Effect.Effect<RunStart, PivotThreadsError>;
     readonly archive: (threadId: ThreadId) => Effect.Effect<void, PivotThreadsError>;
@@ -253,14 +258,11 @@ export const make = Effect.gen(function* () {
           createdBy: "agent",
           creationSource: "mcp",
         });
-        const runId = launched.projection.runs[0]?.id ?? null;
-        const start: RunStart =
-          runId === null
-            ? { type: "failed", runId: null, detail: "The launch created no run." }
-            : yield* awaitRunStart(launched.threadId, runId);
-        const shell = yield* threads.getThreadShell(launched.threadId);
-        return { threadId: launched.threadId, worktreePath: shell?.worktreePath ?? null, start };
+        return { threadId: launched.threadId, runId: launched.projection.runs[0]?.id ?? null };
       }).pipe(Effect.mapError(fail("launch the teammate"))),
+
+    awaitStart: (threadId, runId) =>
+      awaitRunStart(threadId, runId).pipe(Effect.mapError(fail("await the run", threadId))),
 
     retryLaunch: (threadId) =>
       Effect.gen(function* () {

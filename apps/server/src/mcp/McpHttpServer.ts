@@ -20,6 +20,11 @@ import * as ServerConfig from "../config.ts";
 import * as DeviceService from "../device/DeviceService.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
 import * as PreviewBrowser from "../htmlRender/PreviewBrowser.ts";
+import {
+  PivotToolkitHandlersLive,
+  TeammateToolkitHandlersLive,
+} from "./toolkits/pivot/handlers.ts";
+import { PivotToolkit, TeammateToolkit } from "./toolkits/pivot/tools.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 import { PreviewControlsToolkit } from "./toolkits/previewControls/tools.ts";
@@ -743,6 +748,12 @@ const AttachmentRegistrationLive = McpServer.toolkit(AttachmentToolkit).pipe(
   Layer.provide(AttachmentHandlersLive),
 );
 
+// Every caller sees these; each call checks the caller is the active Pivot or a teammate.
+const PivotToolkitRegistrationLive = Layer.mergeAll(
+  McpServer.toolkit(PivotToolkit).pipe(Layer.provide(PivotToolkitHandlersLive)),
+  McpServer.toolkit(TeammateToolkit).pipe(Layer.provide(TeammateToolkitHandlersLive)),
+);
+
 export const PullRequestsToolkitRegistrationLive = McpServer.toolkit(PullRequestsToolkit).pipe(
   Layer.provide(PullRequestsToolkitHandlersLive),
 );
@@ -779,4 +790,5 @@ export const layer = Layer.mergeAll(
   PullRequestsToolkitRegistrationLive,
   DeviceToolkitRegistrationLive,
   HtmlToolkitRegistrationLive,
+  PivotToolkitRegistrationLive,
 ).pipe(Layer.provideMerge(McpTransportLive));

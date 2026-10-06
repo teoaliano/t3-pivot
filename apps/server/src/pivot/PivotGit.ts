@@ -39,6 +39,17 @@ export class PivotGit extends Context.Service<
     /** The origin's default branch when there is a remote, else the local one. */
     readonly defaultBranch: (cwd: string) => Effect.Effect<string, PivotGitError>;
     readonly branchExists: (cwd: string, branch: string) => Effect.Effect<boolean, PivotGitError>;
+    /** Local branch names under `prefix`, e.g. `pivot/`. */
+    readonly listBranches: (
+      cwd: string,
+      prefix: string,
+    ) => Effect.Effect<ReadonlyArray<string>, PivotGitError>;
+    readonly headCommit: (cwd: string) => Effect.Effect<string, PivotGitError>;
+    /** What `origin` has for the branch right now, or null when it has none. */
+    readonly remoteBranchCommit: (
+      cwd: string,
+      branch: string,
+    ) => Effect.Effect<string | null, PivotGitError>;
   }
 >()("t3/pivot/PivotGit") {}
 
@@ -91,6 +102,15 @@ export const make = Effect.gen(function* () {
     hasRemote,
     defaultBranch,
     branchExists,
+    listBranches: (cwd, prefix) =>
+      git(cwd, ["for-each-ref", "--format=%(refname:short)", `refs/heads/${prefix}`]).pipe(
+        Effect.map((out) => out.split("\n").filter((line) => line.length > 0)),
+      ),
+    headCommit: (cwd) => git(cwd, ["rev-parse", "HEAD"]),
+    remoteBranchCommit: (cwd, branch) =>
+      git(cwd, ["ls-remote", "origin", `refs/heads/${branch}`]).pipe(
+        Effect.map((out) => out.split(/\s+/)[0] || null),
+      ),
   });
 });
 

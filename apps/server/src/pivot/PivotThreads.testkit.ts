@@ -46,6 +46,8 @@ export interface FakeV2 {
   readonly threads: Map<string, FakeThread>;
   /** How the next teammate launch comes out. Defaults to a started run in a fresh worktree. */
   nextLaunch: { readonly worktreePath: string | null; readonly start: RunStart } | null;
+  /** First-run outcomes by thread, read by awaitStart. */
+  readonly starts: Map<string, RunStart>;
   /** How the next relaunch comes out. */
   nextRelaunch: RunStart | null;
   failPivotThreadCreate: boolean;
@@ -58,6 +60,7 @@ export const makeFakeV2 = (): FakeV2 => ({
   projects: new Map(),
   threads: new Map(),
   nextLaunch: null,
+  starts: new Map(),
   nextRelaunch: null,
   failPivotThreadCreate: false,
   failSend: false,
@@ -86,6 +89,7 @@ export const fakeShell = (found: FakeThread): OrchestrationV2ThreadShell =>
     id: found.threadId,
     projectId: found.projectId,
     title: found.title,
+    modelSelection: found.modelSelection,
     branch: found.branch,
     worktreePath: found.worktreePath,
     archivedAt: found.archived ? "2026-10-06T00:00:00.000Z" : null,
@@ -155,8 +159,14 @@ export const layer = (fake: FakeV2) =>
             messages: [{ senderThreadId: input.pivotThreadId, text: input.text, mode: "launch" }],
             shell: { latestRunId: outcome.start.runId },
           });
-          return { threadId, worktreePath: outcome.worktreePath, start: outcome.start };
+          fake.starts.set(threadId, outcome.start);
+          return { threadId, runId: outcome.start.runId };
         }),
+      awaitStart: (threadId) =>
+        Effect.sync(
+          (): RunStart =>
+            fake.starts.get(threadId) ?? { type: "failed", runId: null, detail: "No run." },
+        ),
       retryLaunch: (threadId) =>
         Effect.map(thread(fake, threadId, "retry"), (found): RunStart => {
           const outcome = fake.nextRelaunch ?? {
