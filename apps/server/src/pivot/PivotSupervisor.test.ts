@@ -428,8 +428,13 @@ describe("PivotSupervisor", () => {
         consequence: "Ships.",
         options: ["Merge"],
         recommendation: "Merge",
+        asksApproval: true,
       });
-      yield* pivots.recordUserAnswer({ decisionId: decision.decisionId, answer: "Merge it." });
+      yield* pivots.recordUserAnswer({
+        decisionId: decision.decisionId,
+        answer: "Merge it.",
+        approved: true,
+      });
       yield* tick;
       const before = wakesFor(fake, pivot).length;
       fake.pullRequests.set("https://github.com/o/r/pull/7", {

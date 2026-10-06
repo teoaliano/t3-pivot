@@ -216,6 +216,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
     streamStoredEvents: Stream.empty,
     streamStoredEventsFrom: () => Stream.empty,
     streamDomainEvents: options.domainEvents ?? Stream.empty,
+    streamLiveStoredEvents: Stream.empty,
   });
   const publications: Array<{
     readonly url: string;

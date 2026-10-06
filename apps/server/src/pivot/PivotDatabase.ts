@@ -20,12 +20,16 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import { ServerConfig } from "../config.ts";
 import Migration0001 from "./migrations/001_PivotStore.ts";
+import Migration0002 from "./migrations/002_DecisionApproval.ts";
 
 export class PivotSql extends Context.Service<PivotSql, SqlClient.SqlClient>()(
   "t3/pivot/PivotDatabase/PivotSql",
 ) {}
 
-const loader = Migrator.fromRecord({ "1_PivotStore": Migration0001 });
+const loader = Migrator.fromRecord({
+  "1_PivotStore": Migration0001,
+  "2_DecisionApproval": Migration0002,
+});
 
 const setup = Layer.effectDiscard(
   Effect.gen(function* () {

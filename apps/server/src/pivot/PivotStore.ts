@@ -215,6 +215,8 @@ export type PivotCommand =
       readonly type: "decision.record-user-answer";
       readonly decisionId: PivotDecisionId;
       readonly answer: string;
+      /** Required when the decision asks for approval; ignored otherwise. */
+      readonly approved: boolean | null;
     }
   | {
       readonly type: "decision.answer";
@@ -352,6 +354,7 @@ interface DecisionSqlRow {
   readonly escalated_at: string | null;
   readonly user_answer: string | null;
   readonly user_answered_at: string | null;
+  readonly user_approved: number | null;
   readonly resolution_json: string | null;
   readonly closed_at: string | null;
 }
@@ -429,6 +432,7 @@ const toDecision = (row: DecisionSqlRow): PivotDecision => ({
   escalatedAt: row.escalated_at,
   userAnswer: row.user_answer,
   userAnsweredAt: row.user_answered_at,
+  userApproved: row.user_approved === null ? null : row.user_approved === 1,
   resolution: row.resolution_json === null ? null : decodeResolution(row.resolution_json),
 });
 
@@ -899,11 +903,16 @@ export const make = Effect.gen(function* () {
         if (byteLength(command.answer) > PIVOT_USER_ANSWER_MAX_BYTES) {
           return yield* refuse("The answer is longer than 8 KB.");
         }
+        const asksApproval = decision.escalation?.asksApproval === true;
+        if (asksApproval && command.approved === null) {
+          return yield* refuse("This decision asks you to approve or decline.");
+        }
         emit(
           {
             type: "decision.user-answered",
             decisionId: command.decisionId,
             answer: command.answer,
+            approved: asksApproval ? command.approved : null,
           },
           true,
         );
@@ -1096,7 +1105,9 @@ export const make = Effect.gen(function* () {
         return;
       case "decision.user-answered":
         yield* sql`
-          UPDATE pivot_decisions SET user_answer = ${event.answer}, user_answered_at = ${at}
+          UPDATE pivot_decisions
+          SET user_answer = ${event.answer}, user_answered_at = ${at},
+            user_approved = ${event.approved === true ? 1 : event.approved === false ? 0 : null}
           WHERE decision_id = ${event.decisionId}
         `;
         return;

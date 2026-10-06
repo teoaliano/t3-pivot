@@ -15,6 +15,7 @@ import {
   type OrchestrationV2ThreadShell,
   type ProjectId,
   type OrchestrationV2DomainEvent,
+  type OrchestrationV2StoredEvent,
   type PullRequestDetail,
   type PullRequestRef,
   type RunId,
@@ -408,8 +409,8 @@ export const make = Effect.gen(function* () {
     shell: (threadId) =>
       threads.getThreadShell(threadId).pipe(Effect.mapError(fail("read", threadId))),
 
-    events: threads.streamDomainEvents.pipe(
-      Stream.flatMap((event) => Stream.fromIterable(toPivotThreadEvents(event))),
+    events: threads.streamLiveStoredEvents.pipe(
+      Stream.flatMap((stored) => Stream.fromIterable(toPivotThreadEvents(stored))),
       // A broken subscription resubscribes rather than leaving the supervisor deaf.
       Stream.retry(Schedule.spaced("1 second")),
       Stream.orDie,
@@ -491,10 +492,14 @@ const describeAnswer = (
   return "Answered.";
 };
 
-/** Narrows one V2 domain event to the Pivot thread events it carries. */
-export const toPivotThreadEvents = (
-  event: OrchestrationV2DomainEvent,
-): ReadonlyArray<PivotThreadEvent> => {
+/** Commands an agent sent through T3's MCP tools; never the user's own. */
+const sentByAnAgent = (commandId: string | null) => commandId?.startsWith("mcp:") === true;
+
+/** Narrows one stored V2 event to the Pivot thread events it carries. */
+export const toPivotThreadEvents = ({
+  event,
+  commandId,
+}: Pick<OrchestrationV2StoredEvent, "event" | "commandId">): ReadonlyArray<PivotThreadEvent> => {
   const activity: PivotThreadEvent = { type: "activity", threadId: event.threadId };
   switch (event.type) {
     case "message.updated": {
@@ -517,7 +522,8 @@ export const toPivotThreadEvents = (
         : [activity];
     }
     case "runtime-request.updated":
-      return event.payload.status === "resolved"
+      // An agent answering through its tools, the Pivot included, is not the user.
+      return event.payload.status === "resolved" && !sentByAnAgent(commandId)
         ? [
             activity,
             {

@@ -104,7 +104,12 @@ export const PivotEvent = Schema.Union([
     decisionId: PivotDecisionId,
     escalation: PivotDecisionEscalation,
   }),
-  event("decision.user-answered", { decisionId: PivotDecisionId, answer: Schema.String }),
+  event("decision.user-answered", {
+    decisionId: PivotDecisionId,
+    answer: Schema.String,
+    /** For a decision asking for approval: whether the user approved. */
+    approved: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  }),
   event("decision.closed", {
     decisionId: PivotDecisionId,
     kind: Schema.Literals(["answered", "cleared", "moot"]),

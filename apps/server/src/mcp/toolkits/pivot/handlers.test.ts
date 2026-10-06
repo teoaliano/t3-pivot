@@ -655,7 +655,12 @@ describe("delivery and teardown", () => {
       });
       return { pivot, ship, decisionId: decision.decisionId, fake };
     });
-  const approve = (pivot: ThreadId, decisionId: string, answer = "Yes, merge.") =>
+  const approve = (
+    pivot: ThreadId,
+    decisionId: string,
+    answer = "Yes, merge.",
+    approved: boolean = true,
+  ) =>
     Effect.gen(function* () {
       const pivots = yield* PivotService.PivotService;
       yield* pivots.escalateDecision(pivot, {
@@ -663,11 +668,53 @@ describe("delivery and teardown", () => {
         questions: ["Merge it?"],
         evidence: "CI is green.",
         consequence: "It ships.",
-        options: ["Merge", "Hold"],
+        options: [],
         recommendation: "Merge",
+        asksApproval: true,
       });
-      yield* pivots.recordUserAnswer({ decisionId: decisionId as never, answer });
+      yield* pivots.recordUserAnswer({ decisionId: decisionId as never, answer, approved });
     });
+
+  it.effect("merges only on the user's approval, not on any answer", () => {
+    const { fake, layer } = setup({ remote: true });
+    return Effect.gen(function* () {
+      const { pivot, ship, decisionId } = yield* approvedShip(fake);
+      linkPr(fake, ship.threadId);
+      fake.pullRequests.set(prUrl, greenPr);
+      const pivots = yield* PivotService.PivotService;
+      // A decision that never asked for approval does not grant one, whatever it says.
+      yield* pivots.escalateDecision(pivot, {
+        decisionId: decisionId as never,
+        questions: ["Ready?"],
+        evidence: "CI is green.",
+        consequence: "It ships.",
+        options: [],
+        recommendation: "Ship it",
+      });
+      yield* pivots.recordUserAnswer({ decisionId: decisionId as never, answer: "Yes, merge." });
+      expectRefused(
+        yield* call(pivot, "merge_teammate", { threadId: ship.threadId, decisionId }),
+        "invalid_request",
+        "asksApproval",
+      );
+
+      const { decision } = yield* pivots.openDecision(pivot, {
+        teammateThreadId: ship.threadId,
+        key: "merge",
+        question: "Merge it?",
+      });
+      yield* approve(pivot, decision.decisionId, "Hold off until Monday.", false);
+      expectRefused(
+        yield* call(pivot, "merge_teammate", {
+          threadId: ship.threadId,
+          decisionId: decision.decisionId,
+        }),
+        "invalid_request",
+        'The user declined merging: "Hold off until Monday."',
+      );
+      assert.deepStrictEqual(fake.merges, []);
+    }).pipe(Effect.provide(layer));
+  });
 
   it.effect("merges a GitHub PR on approval, pinned to the head it checked", () => {
     const { fake, layer } = setup({ remote: true });
@@ -679,7 +726,7 @@ describe("delivery and teardown", () => {
       expectRefused(
         yield* call(pivot, "merge_teammate", { threadId: ship.threadId, decisionId }),
         "invalid_request",
-        "recorded word",
+        "needs the user's approval",
       );
       assert.deepStrictEqual(fake.merges, []);
 
@@ -819,7 +866,7 @@ describe("delivery and teardown", () => {
       expectRefused(
         yield* call(pivot, "land_teammate", { threadId: ship.threadId, decisionId }),
         "invalid_request",
-        "recorded word",
+        "needs the user's approval",
       );
       yield* approve(pivot, decisionId);
 
@@ -908,7 +955,7 @@ describe("delivery and teardown", () => {
           discardDecisionId: decisionId,
         }),
         "invalid_request",
-        "recorded word",
+        "needs the user's approval",
       );
       yield* approve(pivot, decisionId);
       const torn = expectOk(

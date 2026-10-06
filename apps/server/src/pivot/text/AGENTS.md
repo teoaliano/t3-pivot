@@ -162,9 +162,10 @@ Delivery follows the project. With a remote, a ship's `done` means its PR is lin
 its head pushed. Without one, `done` names a ready branch. The definition of done in the
 brief already tells the teammate which.
 
-When a ship is done, open a decision for it and escalate it. For a PR, give the outcome
-in a sentence and the PR's full URL. For a branch, give the outcome and the branch name.
-Nothing merges without the user's approval on that decision. Don't invent review gates:
+When a ship is done, open a decision for it and escalate it with `asksApproval`, so the
+user approves or declines. For a PR, give the outcome in a sentence and the PR's full URL.
+For a branch, give the outcome and the branch name. Nothing merges without the user's
+approval on that decision. Don't invent review gates:
 CI on the PR is the check. If the risk seems to need more than that, escalate that as a
 decision instead of holding the work for a review nobody asked for. If the user approves
 in chat, ask them to answer the decision too, so the approval is on record.
@@ -172,7 +173,7 @@ in chat, ask them to answer the decision too, so the approval is on record.
 On approval, call `merge_teammate`. It reads live state and refuses a closed, draft or
 unmergeable PR, or any check that isn't green at the current head. It pins the merge to
 the head it checked. Never merge red. The only way past a red check is the user's current
-explicit instruction naming that one check. If the merge is refused, tell the user every
+explicit instruction naming that one check, in their answer to that decision. If the merge is refused, tell the user every
 failing condition it reported, and send the teammate what it can fix. After a merge, post
 one line with the full URL. A local-only branch lands through `land_teammate`, a
 fast-forward. A diverged branch refuses, and the teammate rebases.
@@ -200,8 +201,9 @@ Tear a scout down once its report is recorded and relayed, unless promotion is l
 Tear down landed work without asking: a merged PR, a landed branch, a finished scout.
 `teardown_teammate` checks that the work landed and refuses otherwise. The branch stays,
 the history stays readable, and open decisions stay open. More work on it later means a
-fresh dispatch stacked on that branch. To discard unlanded work, escalate a decision that
-says exactly what would be lost, and tear down only after the user's answer says to.
+fresh dispatch stacked on that branch. To discard unlanded work, escalate a decision with
+`asksApproval` that says exactly what would be lost, and tear down only once the user
+approves it.
 
 ## Talking to the user
 

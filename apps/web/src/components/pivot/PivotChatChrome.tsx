@@ -145,12 +145,17 @@ function PivotDecisionCard(props: { environmentId: EnvironmentId; decision: Pivo
   const answerDecision = useAtomCommand(serverEnvironment.answerPivotDecision, {
     reportFailure: false,
   });
-  const submit = async (text: string) => {
+  const asksApproval = escalation?.asksApproval === true;
+  const submit = async (text: string, approved?: boolean) => {
     if (text.trim().length === 0 || sending) return;
     setSending(true);
     const result = await answerDecision({
       environmentId: props.environmentId,
-      input: { decisionId: decision.decisionId, answer: text },
+      input: {
+        decisionId: decision.decisionId,
+        answer: text,
+        ...(approved === undefined ? {} : { approved }),
+      },
     });
     setSending(false);
     if (result._tag === "Failure") {
@@ -165,7 +170,12 @@ function PivotDecisionCard(props: { environmentId: EnvironmentId; decision: Pivo
       <div className="rounded-lg bg-background/60 px-3 py-2 text-sm">
         <div className="font-medium">{escalation?.questions.join(" ") ?? decision.summary}</div>
         <div className="mt-1 text-muted-foreground">
-          You answered: “{decision.userAnswer}”. The Pivot is relaying it.
+          {decision.userApproved === true
+            ? "You approved"
+            : decision.userApproved === false
+              ? "You declined"
+              : "You answered"}
+          : “{decision.userAnswer}”. The Pivot is relaying it.
         </div>
       </div>
     );
@@ -206,27 +216,54 @@ function PivotDecisionCard(props: { environmentId: EnvironmentId; decision: Pivo
           ))}
         </div>
       ) : null}
-      <div className="flex items-end gap-2">
-        <Textarea
-          aria-label="Your answer"
-          placeholder="Answer in your own words"
-          value={answer}
-          onChange={(event) => setAnswer(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-              event.preventDefault();
-              void submit(answer);
-            }
-          }}
-        />
-        <Button
-          size="sm"
-          disabled={answer.trim().length === 0 || sending}
-          onClick={() => void submit(answer)}
-        >
-          Answer
-        </Button>
-      </div>
+      {asksApproval ? (
+        // A yes or no, recorded as such, with the user's own words if they add any.
+        <div className="flex items-end gap-2">
+          <Textarea
+            aria-label="Anything to add"
+            placeholder="Anything to add (optional)"
+            value={answer}
+            onChange={(event) => setAnswer(event.target.value)}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={sending}
+            onClick={() => void submit(answer.trim() || "Declined", false)}
+          >
+            Decline
+          </Button>
+          <Button
+            size="sm"
+            disabled={sending}
+            onClick={() => void submit(answer.trim() || "Approved", true)}
+          >
+            Approve
+          </Button>
+        </div>
+      ) : (
+        <div className="flex items-end gap-2">
+          <Textarea
+            aria-label="Your answer"
+            placeholder="Answer in your own words"
+            value={answer}
+            onChange={(event) => setAnswer(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                void submit(answer);
+              }
+            }}
+          />
+          <Button
+            size="sm"
+            disabled={answer.trim().length === 0 || sending}
+            onClick={() => void submit(answer)}
+          >
+            Answer
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

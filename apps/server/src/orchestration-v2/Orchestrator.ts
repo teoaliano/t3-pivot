@@ -320,6 +320,8 @@ export interface OrchestratorV2Shape {
     readonly eventType?: OrchestrationV2DomainEvent["type"];
   }) => Stream.Stream<OrchestrationV2StoredEvent, OrchestratorV2Error>;
   readonly streamDomainEvents: Stream.Stream<OrchestrationV2DomainEvent, OrchestratorV2Error>;
+  /** The live tail of `streamDomainEvents`, keeping the command each event came from. */
+  readonly streamLiveStoredEvents: Stream.Stream<OrchestrationV2StoredEvent, OrchestratorV2Error>;
 }
 
 export class OrchestratorV2 extends Context.Service<OrchestratorV2, OrchestratorV2Shape>()(
@@ -10616,6 +10618,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     // store from genesis first; domain-event subscribers (the awareness relay)
     // react to new activity, and startup replay made them grind through the
     // entire event history doing per-event work after every boot.
+    streamLiveStoredEvents: Stream.unwrap(
+      eventSink
+        .latestSequence()
+        .pipe(Effect.map((latest) => eventSink.stream({ afterSequence: latest }))),
+    ).pipe(Stream.mapError((cause) => new OrchestratorDomainEventStreamError({ cause }))),
     streamDomainEvents: Stream.unwrap(
       eventSink
         .latestSequence()
@@ -10741,6 +10748,11 @@ const layerUnavailable: Layer.Layer<OrchestratorV2> = Layer.succeed(
         }),
       ),
     streamDomainEvents: Stream.fail(
+      new OrchestratorDomainEventStreamError({
+        cause: "Orchestration V2 live runtime is not configured.",
+      }),
+    ),
+    streamLiveStoredEvents: Stream.fail(
       new OrchestratorDomainEventStreamError({
         cause: "Orchestration V2 live runtime is not configured.",
       }),

@@ -118,6 +118,8 @@ export class PivotService extends Context.Service<
     readonly recordUserAnswer: (input: {
       readonly decisionId: PivotDecisionId;
       readonly answer: string;
+      /** Required for a decision that asks for approval. */
+      readonly approved?: boolean | undefined;
     }) => Effect.Effect<PivotDecision, PivotServiceError>;
 
     // The Pivot's tools. `caller` is the calling thread; only the active Pivot may call.
@@ -377,9 +379,18 @@ export const make = Effect.gen(function* () {
       };
     });
 
-  const recordUserAnswer: PivotService["Service"]["recordUserAnswer"] = ({ decisionId, answer }) =>
+  const recordUserAnswer: PivotService["Service"]["recordUserAnswer"] = ({
+    decisionId,
+    answer,
+    approved,
+  }) =>
     Effect.gen(function* () {
-      yield* store.dispatch({ type: "decision.record-user-answer", decisionId, answer });
+      yield* store.dispatch({
+        type: "decision.record-user-answer",
+        decisionId,
+        answer,
+        approved: approved ?? null,
+      });
       const decision = yield* store.getDecision(decisionId);
       if (decision === null) {
         return yield* refuse(
@@ -868,13 +879,19 @@ export const make = Effect.gen(function* () {
       return decision;
     });
 
-  const unanswered = (what: string) =>
-    `${what} needs the user's recorded word: escalate the decision and wait for their answer.`;
+  /** Why a decision does not carry the user's approval, or null when it does. */
+  const notApproved = (decision: PivotDecision, what: string): string | null => {
+    if (decision.escalation?.asksApproval !== true) {
+      return `${what} needs the user's approval: escalate this decision with asksApproval and wait for their answer.`;
+    }
+    if (decision.userAnswer === null) return `${what} is waiting for the user to approve.`;
+    if (decision.userApproved !== true) {
+      return `The user declined ${what.toLowerCase()}: "${decision.userAnswer}"`;
+    }
+    return null;
+  };
 
-  /**
-   * A decision about this teammate the user answered: their recorded word. What the
-   * answer says is the Pivot's to read; the tool holds it to there being one.
-   */
+  /** A decision about this teammate that the user approved, in their recorded answer. */
   const userApproval = (
     command: string,
     pivot: PivotStore.PivotRow,
@@ -884,7 +901,8 @@ export const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       const decision = yield* teammateDecision(command, pivot, teammate, decisionId);
-      if (decision.userAnswer === null) return yield* refuse(command, unanswered(what));
+      const reason = notApproved(decision, what);
+      if (reason !== null) return yield* refuse(command, reason);
       return decision;
     });
 
@@ -928,7 +946,7 @@ export const make = Effect.gen(function* () {
       const waived = input.waivedChecks ?? [];
       // Every failing condition at once: the approval, each waiver, and live state.
       const reasons = [
-        ...(decision.userAnswer === null ? [unanswered("Merging")] : []),
+        ...[notApproved(decision, "Merging")].filter((reason) => reason !== null),
         ...waived.flatMap((name) =>
           decision.userAnswer !== null && decision.userAnswer.includes(name)
             ? []

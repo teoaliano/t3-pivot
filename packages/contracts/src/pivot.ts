@@ -82,6 +82,11 @@ export const PivotDecisionEscalation = Schema.Struct({
   consequence: TrimmedNonEmptyString,
   options: Schema.Array(TrimmedNonEmptyString),
   recommendation: TrimmedNonEmptyString,
+  /**
+   * Asks the user to approve or decline, as merging, landing or discarding needs; the
+   * answer records which, alongside their words.
+   */
+  asksApproval: Schema.optional(Schema.Boolean),
 });
 export type PivotDecisionEscalation = typeof PivotDecisionEscalation.Type;
 
@@ -110,6 +115,8 @@ export const PivotDecision = Schema.Struct({
   /** The user's answer, verbatim. */
   userAnswer: Schema.NullOr(TrimmedNonEmptyString),
   userAnsweredAt: Schema.NullOr(IsoDateTime),
+  /** For a decision asking for approval: whether the user approved. Null otherwise. */
+  userApproved: Schema.NullOr(Schema.Boolean),
   resolution: Schema.NullOr(PivotDecisionResolution),
 });
 export type PivotDecision = typeof PivotDecision.Type;
@@ -192,6 +199,8 @@ export const PIVOT_USER_ANSWER_MAX_BYTES = 8 * 1024;
 export const PivotAnswerDecisionInput = Schema.Struct({
   decisionId: PivotDecisionId,
   answer: TrimmedNonEmptyString,
+  /** Required for a decision that asks for approval. */
+  approved: Schema.optional(Schema.Boolean),
 });
 export type PivotAnswerDecisionInput = typeof PivotAnswerDecisionInput.Type;
 

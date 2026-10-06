@@ -365,7 +365,12 @@ describe("PivotStore", () => {
           assert.include(answerFirst, "held for the user");
 
           const answer = "  Drop it, but log a warning for a release first.  ";
-          yield* store.dispatch({ type: "decision.record-user-answer", decisionId, answer });
+          yield* store.dispatch({
+            type: "decision.record-user-answer",
+            decisionId,
+            answer,
+            approved: null,
+          });
           assert.strictEqual((yield* store.getDecision(decisionId))?.userAnswer, answer);
           assert.deepStrictEqual(
             (yield* store.pendingWake(pivotA)).map(({ event }) => event.type),
@@ -373,7 +378,12 @@ describe("PivotStore", () => {
           );
           assert.include(
             yield* refusal(
-              store.dispatch({ type: "decision.record-user-answer", decisionId, answer: "no" }),
+              store.dispatch({
+                type: "decision.record-user-answer",
+                decisionId,
+                answer: "no",
+                approved: null,
+              }),
             ),
             "already has your answer",
           );
@@ -421,9 +431,59 @@ describe("PivotStore", () => {
               type: "decision.record-user-answer",
               decisionId: decision!.decisionId,
               answer: "x".repeat(8 * 1024 + 1),
+              approved: null,
             }),
           );
           assert.include(reason, "8 KB");
+        }),
+      ),
+    );
+
+    it.effect("a decision asking for approval records whether the user approved", () =>
+      withStore(
+        Effect.gen(function* () {
+          const store = yield* PivotStore.PivotStore;
+          yield* createPivot(pivotA);
+          yield* store.dispatch({
+            type: "decision.open",
+            pivotThreadId: pivotA,
+            teammateThreadId: null,
+            key: null,
+            summary: "Merge the PR?",
+          });
+          const [decision] = yield* openDecisions(pivotA);
+          const decisionId = decision!.decisionId;
+          yield* store.dispatch({
+            type: "decision.escalate",
+            pivotThreadId: pivotA,
+            decisionId,
+            escalation: {
+              questions: ["Merge the PR?"],
+              evidence: "CI is green.",
+              consequence: "It ships.",
+              options: [],
+              recommendation: "Merge",
+              asksApproval: true,
+            },
+          });
+          const unmarked = yield* refusal(
+            store.dispatch({
+              type: "decision.record-user-answer",
+              decisionId,
+              answer: "Sure",
+              approved: null,
+            }),
+          );
+          assert.include(unmarked, "approve or decline");
+          yield* store.dispatch({
+            type: "decision.record-user-answer",
+            decisionId,
+            answer: "Not yet, the copy needs a pass.",
+            approved: false,
+          });
+          const answered = yield* store.getDecision(decisionId);
+          assert.strictEqual(answered?.userApproved, false);
+          assert.strictEqual(answered?.userAnswer, "Not yet, the copy needs a pass.");
         }),
       ),
     );

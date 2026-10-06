@@ -71,7 +71,7 @@ const OpenDecisionTool = Tool.make("open_decision", {
 
 const EscalateDecisionTool = Tool.make("escalate_decision", {
   ...pivotTool,
-  description: `${PIVOT_ONLY} Hold an open decision for the user, with its questions, evidence, consequence, options and recommendation. It notifies the user.`,
+  description: `${PIVOT_ONLY} Hold an open decision for the user, with its questions, evidence, consequence, options and recommendation. Set asksApproval when it needs the user's yes or no, as merging, landing and discarding do. It notifies the user.`,
   parameters: PivotMcpEscalateDecisionInput,
   success: PivotMcpDecisionResult,
 }).annotate(Tool.Title, "Escalate a decision");
@@ -128,7 +128,7 @@ const RelaunchTeammateTool = Tool.make("relaunch_teammate", {
 
 const MergeTeammateTool = Tool.make("merge_teammate", {
   ...pivotTool,
-  description: `${PIVOT_ONLY} Squash-merge a ship's PR on GitHub or GitLab once the user approved its decision. Reads live state and refuses a closed, draft or unmergeable PR and any check not green, naming every failing condition; waivedChecks only for checks the user waived by name. Pinned to the head it checked.`,
+  description: `${PIVOT_ONLY} Squash-merge a ship's PR on GitHub or GitLab once the user approved its asksApproval decision. Reads live state and refuses a closed, draft or unmergeable PR and any check not green, naming every failing condition; waivedChecks only for checks the user's answer names. Pinned to the head it checked.`,
   parameters: PivotMcpMergeTeammateInput,
   success: PivotMcpMergeTeammateResult,
 })
@@ -137,7 +137,7 @@ const MergeTeammateTool = Tool.make("merge_teammate", {
 
 const LandTeammateTool = Tool.make("land_teammate", {
   ...pivotTool,
-  description: `${PIVOT_ONLY} In a project with no remote, fast-forward the default branch to a ship's ready branch once the user approved its decision. A diverged branch refuses; the teammate rebases.`,
+  description: `${PIVOT_ONLY} In a project with no remote, fast-forward the default branch to a ship's ready branch once the user approved its asksApproval decision. A diverged branch refuses; the teammate rebases.`,
   parameters: PivotMcpLandTeammateInput,
   success: PivotMcpLandTeammateResult,
 })
@@ -146,7 +146,7 @@ const LandTeammateTool = Tool.make("land_teammate", {
 
 const TeardownTeammateTool = Tool.make("teardown_teammate", {
   ...pivotTool,
-  description: `${PIVOT_ONLY} Clean up a teammate whose work landed (merged PR, landed branch, recorded scout report): stop it and its dev servers, remove its worktree, archive its thread. Keeps the branch, history and open decisions. Refuses unlanded work unless discardDecisionId names the user's answer to discard it.`,
+  description: `${PIVOT_ONLY} Clean up a teammate whose work landed (merged PR, landed branch, recorded scout report): stop it and its dev servers, remove its worktree, archive its thread. Keeps the branch, history and open decisions. Refuses unlanded work unless discardDecisionId names an asksApproval decision the user approved.`,
   parameters: PivotMcpTeardownTeammateInput,
   success: PivotMcpTeardownTeammateResult,
 })
