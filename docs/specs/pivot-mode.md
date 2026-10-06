@@ -13,6 +13,11 @@ mode uses it. The spec keeps its own behavior only where V2's would change what 
 is: teammates nest under their Pivot, wake it after every run, and carry on after a
 restart.
 
+T3 Pivot shares its data folder and V2 database with the T3 Code (Nightly) app and tracks
+the same upstream build, so both apps show the same threads. Pivot mode therefore adds
+nothing to the shared database that T3 Code can't read; its own records live in a separate
+database next to it.
+
 ## Problem statement
 
 A user who runs several coding agents at once spends their attention juggling threads:
@@ -38,8 +43,10 @@ steers messages on the server, reads transcripts, and posts notification message
 wake an agent. Pivot mode adds the team on top: who belongs to which Pivot, what each
 teammate reports, when the Pivot wakes, the decisions it escalates, the delivery gate,
 teardown and recovery. The Pivot's instructions carry the judgment, copied from
-firstmate's contract. Everything lives in T3's event store, so every client and every
-connection mode sees the same state, and a restart loses nothing.
+firstmate's contract. Pivot mode's records live on the server in their own event-sourced
+database, so every client and every connection mode sees the same state, and a restart
+loses nothing. In T3 Code, a Pivot reads as an ordinary chat and its teammates as ordinary
+threads.
 
 A project has at most one active Pivot. Starting a new one hands the old Pivot's live
 teammates to it, and the old one is **retired**. The user sees a Pivot either as an
@@ -256,31 +263,42 @@ cards, one teammate's chat, a preview, files, a diff), with an optional wallpape
 
 ### The model
 
-- **Two optional thread fields** on V2's app thread and its shell, stored in the thread's
-  payload the way `pinnedAt` and `autoSettleDisabledAt` are. They are optional on the
-  wire so older clients still decode, and need no migration.
-  - `pivot`: set when a thread is created as a Pivot and never cleared. It records
-    whether the Pivot is retired and, if so, which Pivot took over.
-  - `teammate`: set when a teammate is dispatched, holding the owning Pivot's thread id,
-    the kind (ship or scout) and the latest reported status with the run it was made in.
-- **Set at creation.** The command that creates the thread sets the field: the thread
-  launch's input gains an optional role, carried into `thread.created`. No thread is
-  created first and converted after.
-- **Teammates are not V2 subagents.** A teammate is a top-level V2 thread whose
-  `teammate.pivotThreadId` names its Pivot. It has no `subagent` lineage, so V2's rules
-  for delegated tasks never apply to it: one result and then no more wakes, hidden from
-  the sidebar, silenced as a child. Threads started any other way, including by a
-  teammate through V2's tools, keep V2's rules.
+- **Pivot mode keeps its own database.** `pivot.sqlite` sits in the T3 home's userdata
+  folder next to V2's `statev2.sqlite`, with its own migrations and its own event log, and
+  projections derived from it. T3 Code never opens it. Its records are keyed by V2 thread
+  id: Pivots, teammates, decisions and each Pivot's wake cursor.
+- **Nothing Pivot-specific goes into V2's database,** because T3 Code opens the same file:
+  - no new V2 event types, since V2 decodes stored events strictly and T3 Code would fail
+    on one it doesn't know;
+  - no fields on V2 threads, since T3 Code drops fields it doesn't know when it rewrites a
+    thread;
+  - no migrations, since a fork migration would take an id upstream later uses for its own.
+
+  What Pivot mode puts in V2 is what V2 already models: threads, messages sent with the
+  Pivot as sender, and notification messages whose `teammate` source older builds decode
+  as `background_task`.
+
+- **Records.** A Pivot holds its thread, project, and whether it is retired and which
+  Pivot took over. A teammate holds its thread, its owning Pivot, its kind (ship or scout),
+  its brief, its latest report with the run it was made in, its resume state after a
+  restart, and when it was dispatched.
+- **Teammates are not V2 subagents.** A teammate is a top-level V2 thread that its Pivot
+  mode record ties to a Pivot. It has no `subagent` lineage, so V2's rules for delegated
+  tasks never apply to it: one result and then no more wakes, hidden from the sidebar,
+  silenced as a child. Threads started any other way, including by a teammate through V2's
+  tools, keep V2's rules.
+- **Creating across two databases.** The Pivot service launches the thread through V2's
+  thread launch, then records it, under a lock per project. If recording fails, it archives
+  the new thread, so no Pivot or teammate thread exists without its record.
 - **No new aggregate.** A teammate is 1:1 with its V2 thread and its worktree. A relaunch
   is a new run on the same thread with a new provider session. This mirrors firstmate's
   task (the durable unit) and endpoint (the replaceable agent session).
-- **One active Pivot per project.** The server refuses to create a second Pivot in a
-  project whose active Pivot is not retired, unless the command is a takeover.
+- **One active Pivot per project.** The Pivot service refuses to create a second Pivot in
+  a project whose active Pivot is not retired, unless the command is a takeover.
 - **Takeover.** Creating a Pivot while one is active moves every live teammate, open
-  decision and pending wake from the active Pivot to the new one in one command, and
-  marks the old one retired. Moving a teammate rewrites its `teammate.pivotThreadId`. A
-  retired Pivot is read-only history: its composer is hidden, and its finished teammates
-  stay nested under it.
+  decision and pending wake from the active Pivot to the new one in one Pivot-store
+  transaction, and marks the old one retired. A retired Pivot is read-only history: its
+  composer is hidden, and its finished teammates stay nested under it.
 - **Permanence.** No release, no adoption. A thread is a Pivot or a teammate from
   creation and stays one. Teammates only come from dispatch.
 - **Worktrees are required.** The server refuses a dispatch that does not produce a
@@ -291,10 +309,11 @@ cards, one teammate's chat, a preview, files, a diff), with an optional wallpape
   Pivot. Every thread, the Pivot and its teammates included, keeps V2's thread tools
   (`delegate_task`, `t3_thread_launch`, `t3_thread_send` and the rest) with V2's own
   scoping.
-- **Small shell.** The thread shell gains `pivot` and `teammate: { pivotThreadId, kind,
-status }`. The brief (intent, spec, definition of done) rides the dispatch command and
-  thread detail, never the shell, because the shell goes to every client for every
-  thread.
+- **Clients get a Pivot stream.** V2's thread shell gains nothing. Clients subscribe to a
+  Pivot-state stream (Pivots, teammates with their report and resume state, escalated
+  decision counts) and join it to V2's thread shells by thread id. The brief (intent, spec,
+  definition of done) rides teammate detail only, never the stream, because the stream
+  goes to every client.
 
 ### Teammate status
 
@@ -423,8 +442,10 @@ status }`. The brief (intent, spec, definition of done) rides the dispatch comma
   notification messages. When the wake is for a stuck or `unreported` teammate, the
   supervisor attaches firstmate's stuck-teammate ladder. For a `failed` one, it attaches
   the diagnostic-reasoning guidance.
-- **Acknowledgement.** Each Pivot has a wake cursor, the event sequence its last wake
-  covered. Pending items are the events after it. The cursor advances when a wake goes
+- **Acknowledgement.** The supervisor records each teammate change it sees in V2's events
+  (a status transition, a PR merged or closed) as an event in Pivot mode's own log. Each
+  Pivot has a wake cursor, the Pivot-log sequence its last wake covered. Pending items are
+  the events after it. The cursor advances when a wake goes
   out. The wake is a durable message in the Pivot's conversation, so an interrupted wake
   turn still has it in context. Changes the Pivot causes itself never wake it. Pending
   wakes are derived from events, and the recheck and stuck timers are rebuilt from state
@@ -453,7 +474,7 @@ status }`. The brief (intent, spec, definition of done) rides the dispatch comma
   Pivot marking it moot with evidence, labeled as not the user's words. A `working`,
   `done` or `failed` report never closes one, and neither does teardown.
 - **No "later".** An unanswered decision stays open, and every wake lists it.
-- **Events:** opened, escalated, answered, closed, marked moot.
+- **Events,** in Pivot mode's log: opened, escalated, answered, closed, marked moot.
 
 ### Delivery and merge
 
@@ -517,7 +538,8 @@ status }`. The brief (intent, spec, definition of done) rides the dispatch comma
   existing-worktree strategy pointed at the home. The project's own instructions never
   load into the Pivot, relative paths cannot touch the project, checkpoints keep working,
   and Claude Code, Codex and Cursor all find their instructions without adapter changes.
-  Storage cleanup skips the home, because it is not a worktree of the project.
+  Storage cleanup skips the home. T3 Code's own cleanup cannot remove it either, because
+  it is not a worktree of the project's repository.
 - **"Never write to a project"** is held by the contract, as in firstmate. The Pivot runs
   full-access so it can read teammate worktrees and use `gh`. Where a harness sandboxes
   writes to its working directory, that enforcement comes for free.
@@ -566,7 +588,7 @@ status }`. The brief (intent, spec, definition of done) rides the dispatch comma
 - **Sidebar.** A Pivot sits among the project's threads with a Pivot badge and a count
   of escalated decisions, and expands to its teammates. V2 hides `subagent` threads from
   the sidebar. Teammates are not subagents, so they stay visible, and the sidebar nests
-  them under their Pivot by `teammate.pivotThreadId`. A retired Pivot keeps its finished
+  them under their Pivot using the Pivot stream. A retired Pivot keeps its finished
   teammates nested.
 - **Switch.** The header center shows a Chat / Pivot view switch on a Pivot. A keybinding
   toggles it. Each Pivot remembers its last choice per device. The Pivot view has no
@@ -621,11 +643,12 @@ components to static markup. Tests sit next to their module, the house conventio
 
 Seams, in order of how much they prove:
 
-- **The V2 orchestrator** (existing). Dispatch commands and assert on the projection, as
-  `runtimeLayer.test.ts` and the `Orchestrator.*.test.ts` files do. Covers the `pivot`
-  and `teammate` fields, one active Pivot per project, takeover and retirement,
-  only-a-Pivot-dispatches, the worktree requirement, status report events, the decision
-  lifecycle, and intent appends.
+- **The Pivot store** (new). Run commands against a real temporary `pivot.sqlite` and
+  assert on its projections. Covers Pivot and teammate records, one active Pivot per
+  project, takeover and retirement, only-a-Pivot-dispatches, the worktree requirement,
+  status report events, the decision lifecycle, intent appends, and the archive when
+  recording a launched thread fails. V2's database gains no Pivot event types or thread
+  fields.
 - **Teammate status** (new, pure, shared). Every precedence rule as a table of report
   plus V2 shell inputs to one of eight statuses.
 - **The Pivot and teammate toolkits** (existing MCP toolkit pattern). Every Pivot and
@@ -660,88 +683,91 @@ wallpaper setting) is the last step, verified in one integrated pass in a real c
 
 Tasks marked **Done** landed on `main` before implementation started. Skip them.
 
-1. Create a Pivot through the thread launch in its Pivot home, with auto-settle off, and
-   read it back as a Pivot in the shell. Seam: V2 orchestrator.
-2. Refuse a second Pivot while one is active. Seam: same.
-3. Refuse a Pivot in a project that is not a git repository. Seam: same.
-4. Record a teammate at launch with its owning Pivot and kind, and show
-   `teammate: { pivotThreadId, kind, status }` in the shell. Seam: same.
-5. Refuse a teammate that is not dispatched by the active Pivot of its project. Seam:
+1. Create `pivot.sqlite` with its own migrations, event log and projections, and stream
+   Pivot state to clients, joined to V2 thread shells by thread id. Seam: Pivot store.
+2. Create a Pivot through the thread launch in its Pivot home, with auto-settle off, and
+   read it back from the Pivot stream. Archive the thread if recording it fails. Seam:
+   Pivot store.
+3. Refuse a second Pivot while one is active. Seam: same.
+4. Refuse a Pivot in a project that is not a git repository. Seam: same.
+5. Record a teammate at launch with its owning Pivot and kind, and show
+   `teammate: { pivotThreadId, kind, status }` in the Pivot stream. Seam: same.
+6. Refuse a teammate that is not dispatched by the active Pivot of its project. Seam:
    same.
-6. Take over: a new Pivot receives every live teammate of the active one, and the old one
+7. Take over: a new Pivot receives every live teammate of the active one, and the old one
    reads retired. Seam: same.
-7. **Done.** Combine report and V2 runtime state into the eight teammate statuses, covering every
+8. **Done.** Combine report and V2 runtime state into the eight teammate statuses, covering every
    precedence rule and the run scoping. Seam: teammate status.
-8. **Done.** Read a run interrupted by a restart as `working` while it resumes, and a run stopped
+9. **Done.** Read a run interrupted by a restart as `working` while it resumes, and a run stopped
    by a usage limit as `paused` until the reset. Seam: same.
-9. **Done.** Create the Pivot home with `AGENTS.md`, `CLAUDE.md` and an empty
-   `preferences.md`. Seam: Pivot home.
-10. **Done.** Rewrite `AGENTS.md` on update without touching `preferences.md`, and keep the
+10. **Done.** Create the Pivot home with `AGENTS.md`, `CLAUDE.md` and an empty
+    `preferences.md`. Seam: Pivot home.
+11. **Done.** Rewrite `AGENTS.md` on update without touching `preferences.md`, and keep the
     contract under 3,000 words. Seam: same.
-11. Grant the `pivot` capability only to the active Pivot and the `teammate` capability
+12. Grant the `pivot` capability only to the active Pivot and the `teammate` capability
     only to teammates. Seam: Pivot and teammate toolkits.
-12. Dispatch a ship through the thread launch: the brief as the first message with the
+13. Dispatch a ship through the thread launch: the brief as the first message with the
     Pivot as sender, on a `pivot/<slug>` branch in a fresh worktree, full-access, and
     return once the first run starts. Seam: same.
-13. Read a teammate whose launch failed as `failed` with its recorded worktree kept, and
+14. Read a teammate whose launch failed as `failed` with its recorded worktree kept, and
     retry it with relaunch. Seam: same.
-14. Refuse a dispatch with an empty intent or spec, or an intent that opens with a
+15. Refuse a dispatch with an empty intent or spec, or an intent that opens with a
     speaker label. Seam: same.
-15. Dispatch a scout, and promote it in place with a superseding contract. Seam: same.
-16. Report a status from a teammate and see it in the shell. Seam: same.
-17. Refuse a ship's `done` in PR mode without a linked, pushed PR. Seam: same.
-18. Store a scout report on the teammate. Seam: same.
-19. List teammates and read status history, scoped to the calling Pivot. Seam: same.
-20. Record the user's new words on a teammate's intent and send them through V2's send.
+16. Dispatch a scout, and promote it in place with a superseding contract. Seam: same.
+17. Report a status from a teammate and see it in the Pivot stream. Seam: same.
+18. Refuse a ship's `done` in PR mode without a linked, pushed PR. Seam: same.
+19. Store a scout report on the teammate. Seam: same.
+20. List teammates and read status history, scoped to the calling Pivot. Seam: same.
+21. Record the user's new words on a teammate's intent and send them through V2's send.
     Seam: same.
-21. Stop and relaunch a teammate, report a failed relaunch, and refuse any target that
+22. Stop and relaunch a teammate, report a failed relaunch, and refuse any target that
     is not a live teammate of the caller. Seam: same.
-22. Open a decision from a teammate's `needs-decision` or `blocked` report, and from the
-    Pivot directly. Seam: V2 orchestrator.
-23. Escalate a decision with its fields, record the user's verbatim answer, and close it
+23. Open a decision from a teammate's `needs-decision` or `blocked` report, and from the
+    Pivot directly. Seam: Pivot store.
+24. Escalate a decision with its fields, record the user's verbatim answer, and close it
     when the Pivot sends the answer. Seam: Pivot and teammate toolkits.
-24. Close a decision as moot with evidence, and let a teammate close its own
-    non-escalated blocker. Never close one on a report or at teardown. Seam: V2
-    orchestrator.
-25. Move open decisions with a takeover. Seam: same.
-26. Wake the Pivot on the wake set with a notification message, steered into its running
+25. Close a decision as moot with evidence, and let a teammate close its own
+    non-escalated blocker. Never close one on a report or at teardown. Seam: Pivot store.
+26. Move open decisions with a takeover. Seam: same.
+27. Wake the Pivot on the wake set with a notification message, steered into its running
     turn where its provider allows and queued otherwise. Seam: Pivot supervisor.
-27. Join changes into a wake that is still queued, and advance the wake cursor as each
+28. Join changes into a wake that is still queued, and advance the wake cursor as each
     wake goes out. Seam: same.
-28. Never wake the Pivot for changes it caused itself. Seam: same.
-29. Recheck a `paused` teammate at its `until`, or after four hours. Seam: same.
-30. Wake once per run for a running teammate with no activity for 30 minutes, and attach
+29. Never wake the Pivot for changes it caused itself. Seam: same.
+30. Recheck a `paused` teammate at its `until`, or after four hours. Seam: same.
+31. Wake once per run for a running teammate with no activity for 30 minutes, and attach
     the stuck-teammate ladder. Seam: same.
-31. Wake on the user's answer to an escalated decision and on the user typing into a
+32. Wake on the user's answer to an escalated decision and on the user typing into a
     teammate. Seam: same.
-32. Wake on a PR merged or closed outside the Pivot and on checks going red after
+33. Wake on a PR merged or closed outside the Pivot and on checks going red after
     `done`. Seam: same.
-33. Merge a teammate's PR on recorded approval after live checks, pinned to the verified
+34. Merge a teammate's PR on recorded approval after live checks, pinned to the verified
     head, on GitHub. Seam: Pivot and teammate toolkits, with the GitHub merge path.
-34. The same on GitLab. Seam: same, with the GitLab merge path.
-35. Refuse a merge without approval, on red, or on a closed, draft or unmergeable PR,
+35. The same on GitLab. Seam: same, with the GitLab merge path.
+36. Refuse a merge without approval, on red, or on a closed, draft or unmergeable PR,
     naming every failing condition, and accept a waiver naming one check. Seam: Pivot and
     teammate toolkits.
-36. Land a local-only teammate by fast-forward and refuse a diverged branch. Seam: same.
-37. Tear down a landed teammate: stop the session, stop its managed processes, remove the
+37. Land a local-only teammate by fast-forward and refuse a diverged branch. Seam: same.
+38. Tear down a landed teammate: stop the session, stop its managed processes, remove the
     worktree, release the port block, archive the thread, keep the branch. Seam: same.
-38. Refuse teardown of unlanded work, including a squash-merged PR case that counts as
+39. Refuse teardown of unlanded work, including a squash-merged PR case that counts as
     landed. Seam: same.
-39. Resume Pivot and teammate runs interrupted by a restart and release their held
+40. Resume Pivot and teammate runs interrupted by a restart and release their held
     queues, whatever the continue-after-update setting says, and send the restart digest.
     Seam: V2 restart recovery and Pivot supervisor.
-40. Publish no relay activity for teammate threads, and map an escalated decision to the
+41. Publish no relay activity for teammate threads, and map an escalated decision to the
     Pivot's waiting-for-input phase. Seam: relay.
-41. Skip Pivot homes in storage cleanup. Seam: storage cleanup.
-42. Group teammates under their Pivot in the sidebar, keep a retired Pivot's finished
+42. Skip Pivot homes in storage cleanup. Seam: storage cleanup.
+43. Group teammates under their Pivot in the sidebar, keep a retired Pivot's finished
     teammates, and produce no notifications for teammate threads. Seam: sidebar logic.
-43. **Done.** Build and edit the layout tree: presets, hide, show, move to an edge, resize, and at
+44. **Done.** Build and edit the layout tree: presets, hide, show, move to an edge, resize, and at
     least one pane. Seam: Pivot view logic.
-44. Derive a card's label, attention, order and the finished chip from the shell. Seam:
+45. Derive a card's label, attention, order and the finished chip from the Pivot stream
+    and the thread shell. Seam:
     same.
-45. **Done.** Write the Pivot contract from firstmate's judgment text under the ceiling. Seam:
+46. **Done.** Write the Pivot contract from firstmate's judgment text under the ceiling. Seam:
     Pivot home.
-46. Wire the UI: the New Pivot entry points with the takeover confirmation, the sidebar
+47. Wire the UI: the New Pivot entry points with the takeover confirmation, the sidebar
     rows, the header switch and its keybinding, the Pivot view with its panes and card
     menus, the decisions strip, collapsed wake notices, the read-only Teammate pane with
     approvals, and the wallpaper setting. Verified in one integrated pass in a real client.
@@ -792,8 +818,13 @@ Tasks marked **Done** landed on `main` before implementation started. Skip them.
   release event, and became a permanent thread kind with takeover and retirement;
   decisions moved from the project to the Pivot; teammates' runtime mode moved from the
   project default to always full-access.
-- Performance: the shell grows by two small fields per thread; the brief never rides it.
+- Performance: V2's thread shell gains nothing. The Pivot stream carries one small record
+  per Pivot and teammate; the brief never rides it.
   The layout tree, view choice and wallpaper stay on the client. Cards do not animate.
+- Shared data: T3 Pivot and the T3 Code (Nightly) app share `~/.t3/userdata` and track
+  the same upstream build, so both show the same threads. The user runs one at a time. T3
+  Pivot refuses to start on a database a newer T3 Code migrated. `pivot:sync` follows
+  upstream's nightly tags for the same reason.
 - Remote readiness: every Pivot record lives on the server, so local, remote and tunnel
   clients see the same state. Only per-device view preferences live on the client.
 - Durable decisions and their reasons go into `docs/internals/` as the work lands, as the

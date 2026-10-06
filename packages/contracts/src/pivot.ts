@@ -67,7 +67,7 @@ export type TeammateReport = typeof TeammateReport.Type;
 export const TeammateResumeState = Schema.Literals(["pending", "failed"]);
 export type TeammateResumeState = typeof TeammateResumeState.Type;
 
-/** Shell value of a Pivot thread. Set at creation and never cleared. */
+/** A Pivot's record in Pivot mode's own store, streamed to clients. Never cleared. */
 export const ThreadPivot = Schema.Struct({
   retiredAt: Schema.NullOr(IsoDateTime),
   /** The Pivot that took over when this one was retired. */
@@ -77,7 +77,7 @@ export const ThreadPivot = Schema.Struct({
 });
 export type ThreadPivot = typeof ThreadPivot.Type;
 
-/** Shell value of a teammate thread. Set once by dispatch; the owner moves only on takeover. */
+/** A teammate's record in Pivot mode's own store. The owner moves only on takeover. */
 export const ThreadTeammate = Schema.Struct({
   pivotThreadId: ThreadId,
   kind: TeammateKind,
