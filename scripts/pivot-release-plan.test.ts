@@ -2,41 +2,53 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
-import { planForkVersion, planUpstreamSync } from "./pivot-release-plan.ts";
+import { nightlyBaseVersion, planForkVersion, planUpstreamSync } from "./pivot-release-plan.ts";
 
 describe("planUpstreamSync", () => {
   const upstreamTags = [
-    "v0.0.41",
     "v0.0.42",
-    "v0.0.43-nightly.20260929.2428",
-    "v0.0.43-preview.20260928.2413",
+    "v0.0.46-nightly.20261004.2657",
+    "v0.0.46-nightly.20261005.2667",
+    "v0.0.46-nightly.20261005.2676",
+    "v0.0.46-preview.20261005.2670",
     "v0.0.33-pr.8182.1",
     "nightly-v0.0.21-nightly.20260417.58",
     "desktop-preview",
   ];
 
-  it("ignores nightly, preview and pull request tags", () => {
+  it("follows nightly builds, ignoring stable, preview and pull request tags", () => {
     assert.deepEqual(
-      planUpstreamSync({ upstreamTags, mergedTags: ["v0.0.41"] }),
-      Option.some("v0.0.42"),
+      planUpstreamSync({ upstreamTags, mergedTags: ["v0.0.42", "v0.0.46-nightly.20261004.2657"] }),
+      Option.some("v0.0.46-nightly.20261005.2676"),
     );
   });
 
-  it("has nothing to sync when main already contains the newest stable tag", () => {
+  it("has nothing to sync when main already contains the newest nightly", () => {
     assert.deepEqual(
-      planUpstreamSync({ upstreamTags, mergedTags: ["v0.0.41", "v0.0.42"] }),
+      planUpstreamSync({ upstreamTags, mergedTags: ["v0.0.46-nightly.20261005.2676"] }),
       Option.none(),
     );
   });
 
-  it("picks the newest stable tag when several are unmerged", () => {
+  it("orders nightlies by version, then build", () => {
     assert.deepEqual(
       planUpstreamSync({
-        upstreamTags: ["v0.0.9", "v0.0.43", "v0.0.10", "v0.1.0", "v0.0.44"],
-        mergedTags: ["v0.0.9"],
+        upstreamTags: [
+          "v0.0.47-nightly.20261010.2801",
+          "v0.0.46-nightly.20261011.2899",
+          "v0.0.47-nightly.20261010.2805",
+        ],
+        mergedTags: [],
       }),
-      Option.some("v0.1.0"),
+      Option.some("v0.0.47-nightly.20261010.2805"),
     );
+  });
+});
+
+describe("nightlyBaseVersion", () => {
+  it("reads the X.Y.Z a nightly builds toward", () => {
+    assert.deepEqual(nightlyBaseVersion("v0.0.46-nightly.20261005.2676"), Option.some("0.0.46"));
+    assert.deepEqual(nightlyBaseVersion("v0.0.46"), Option.none());
   });
 });
 

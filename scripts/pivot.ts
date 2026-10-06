@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // Maintainer commands for T3 Pivot, run by hand on the release Mac.
-//   sync     open a PR on the fork that merges upstream's newest stable tag
+//   sync     open a PR on the fork that merges upstream's newest nightly tag
 //   release  build, sign, notarize and publish T3 Pivot from main
 // Both commands act as the fork owner's GitHub account, whatever gh's active
 // account is.
@@ -20,7 +20,8 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   FORK_TAG_PREFIX,
-  newestStableTag,
+  newestNightlyTag,
+  nightlyBaseVersion,
   planForkVersion,
   planUpstreamSync,
 } from "./pivot-release-plan.ts";
@@ -139,7 +140,7 @@ const sync = Effect.gen(function* () {
 
   const next = planUpstreamSync({ upstreamTags, mergedTags });
   if (Option.isNone(next)) {
-    const level = Option.getOrElse(newestStableTag(upstreamTags), () => "upstream");
+    const level = Option.getOrElse(newestNightlyTag(upstreamTags), () => "upstream");
     yield* Console.log(`already level with ${level}`);
     return;
   }
@@ -168,7 +169,7 @@ const sync = Effect.gen(function* () {
       ...[
         "--body",
         [
-          `Merges upstream's stable release ${tag} into T3 Pivot.`,
+          `Merges upstream's nightly build ${tag} into T3 Pivot, so it matches the T3 Code (Nightly) app.`,
           "",
           "Resolve any conflicts on this branch, review upstream's changes, then merge.",
         ].join("\n"),
@@ -199,19 +200,19 @@ const release = Effect.gen(function* () {
   }
 
   yield* run("git", ["fetch", "--quiet", "--tags", UPSTREAM_REMOTE]);
-  const upstreamBaseTag = newestStableTag(
+  const upstreamBaseTag = newestNightlyTag(
     lines(yield* run("git", ["tag", "--merged", "HEAD", "--list", "v*"])),
   );
   if (Option.isNone(upstreamBaseTag)) {
     return yield* new PivotReleaseRefusedError({
-      reason: "main contains no upstream stable tag.",
+      reason: "main contains no upstream nightly tag.",
     });
   }
   const forkTags = lsRemoteTagNames(
     yield* run("git", ["ls-remote", "--tags", "--refs", FORK_REMOTE, `${FORK_TAG_PREFIX}*`], env),
   );
   const version = yield* planForkVersion({
-    upstreamBase: upstreamBaseTag.value.slice(1),
+    upstreamBase: Option.getOrThrow(nightlyBaseVersion(upstreamBaseTag.value)),
     forkTags,
   });
   const tag = `${FORK_TAG_PREFIX}${version}`;
@@ -279,7 +280,7 @@ const pivotCli = Command.make("pivot").pipe(
   Command.withDescription("Keep T3 Pivot level with upstream and publish its releases."),
   Command.withSubcommands([
     Command.make("sync").pipe(
-      Command.withDescription("Open a PR merging upstream's newest stable tag into main."),
+      Command.withDescription("Open a PR merging upstream's newest nightly tag into main."),
       Command.withHandler(() => sync),
     ),
     Command.make("release").pipe(

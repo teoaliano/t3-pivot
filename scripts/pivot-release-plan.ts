@@ -40,29 +40,56 @@ function compareStableVersions(left: StableVersion, right: StableVersion): numbe
   return left.major - right.major || left.minor - right.minor || left.patch - right.patch;
 }
 
-/** The newest upstream stable tag (`vX.Y.Z`), ignoring nightly, preview and PR tags. */
-export function newestStableTag(tags: ReadonlyArray<string>): Option.Option<string> {
-  let newest: { readonly tag: string; readonly version: StableVersion } | undefined;
+// Upstream's nightly builds, the channel the T3 Code app T3 Pivot tracks:
+// `vX.Y.Z-nightly.YYYYMMDD.BUILD`.
+const NIGHTLY_TAG_PATTERN = /^v(\d+\.\d+\.\d+)-nightly\.(\d{8})\.(\d+)$/;
+
+interface NightlyTag {
+  readonly tag: string;
+  readonly version: StableVersion;
+  readonly build: number;
+}
+
+function parseNightlyTag(tag: string): Option.Option<NightlyTag> {
+  const match = NIGHTLY_TAG_PATTERN.exec(tag);
+  if (!match) return Option.none();
+  return parseStableVersion(match[1]!).pipe(
+    Option.map((version) => ({ tag, version, build: Number(match[3]) })),
+  );
+}
+
+/** The newest upstream nightly tag, ignoring stable, preview and PR tags. */
+export function newestNightlyTag(tags: ReadonlyArray<string>): Option.Option<string> {
+  let newest: NightlyTag | undefined;
   for (const tag of tags) {
-    if (!tag.startsWith("v")) continue;
-    const version = parseStableVersion(tag.slice(1));
-    if (Option.isNone(version)) continue;
-    if (!newest || compareStableVersions(version.value, newest.version) > 0) {
-      newest = { tag, version: version.value };
+    const nightly = parseNightlyTag(tag);
+    if (Option.isNone(nightly)) continue;
+    if (
+      !newest ||
+      compareStableVersions(nightly.value.version, newest.version) > 0 ||
+      (compareStableVersions(nightly.value.version, newest.version) === 0 &&
+        nightly.value.build > newest.build)
+    ) {
+      newest = nightly.value;
     }
   }
   return Option.fromNullishOr(newest?.tag);
 }
 
+/** The `X.Y.Z` a nightly tag builds toward, which T3 Pivot versions are based on. */
+export function nightlyBaseVersion(tag: string): Option.Option<string> {
+  return Option.fromNullishOr(NIGHTLY_TAG_PATTERN.exec(tag)?.[1]);
+}
+
 /**
- * The upstream stable tag `sync` should merge into `main`, given every upstream
+ * The upstream nightly tag `sync` should merge into `main`, given every upstream
  * tag and the ones already reachable from `main`. None when `main` is level.
  */
 export function planUpstreamSync(input: {
   readonly upstreamTags: ReadonlyArray<string>;
   readonly mergedTags: ReadonlyArray<string>;
 }): Option.Option<string> {
-  return newestStableTag(input.upstreamTags).pipe(
+  return newestNightlyTag(input.upstreamTags).pipe(
     Option.filter((tag) => !input.mergedTags.includes(tag)),
   );
 }
