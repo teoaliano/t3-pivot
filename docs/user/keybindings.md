@@ -138,6 +138,9 @@ through the pages you have visited, like a browser's back and forward buttons.
 [new-thread defaults](./thread-sidebar.md#start-a-thread). `chat.newWithoutProject`
 (`mod+alt+n`) starts a thread [without a project](./thread-sidebar.md#start-without-a-project).
 
+`pivot.new` (`mod+alt+p`) starts a [Pivot](./pivot-mode.md) in the current thread's project.
+`pivot.toggleView` (`mod+alt+v`) switches a Pivot between its chat and the Pivot view.
+
 ## Reserved shortcuts
 
 In the desktop app, `mod+w` closes the focused terminal or the active right-panel
