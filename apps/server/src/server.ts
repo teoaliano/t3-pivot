@@ -181,6 +181,7 @@ import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
 import * as ServerActivation from "./serverActivation.ts";
+import { ensureDatabaseNotNewer } from "./databaseNewerGuard.ts";
 
 // MCP handoff thread IDs include escaped provenance and can exceed find-my-way's
 // 100-character default for one path segment.
@@ -711,6 +712,8 @@ const makeServerLayer = Layer.unwrap(
       originAnswers: (origin) =>
         serverOriginAnswers(origin).pipe(Effect.provide(FetchHttpClient.layer)),
     }).pipe(Effect.provide(PlatformServicesLive));
+    // T3 Pivot shares its database with the T3 Code app; refuse one a newer T3 Code migrated.
+    yield* ensureDatabaseNotNewer(config.dbPath).pipe(Effect.provide(PlatformServicesLive));
 
     const httpListeningLayer = Layer.effectDiscard(
       Effect.gen(function* () {

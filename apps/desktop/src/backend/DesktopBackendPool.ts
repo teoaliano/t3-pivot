@@ -310,6 +310,21 @@ export const layer = Layer.effect(
       yield* electronApp.quit;
     }, Effect.provide(factoryContext));
 
+    const handlePrimaryDatabaseNewer = Effect.fn("desktop.backendPool.primaryDatabaseNewer")(
+      function* () {
+        const appName = environment.branding.baseName;
+        yield* logBackendPoolWarning("primary backend refused: a newer T3 Code migrated its data", {
+          stateDir: environment.stateDir,
+        });
+        yield* electronDialog.showErrorBox(
+          `${appName} can't start`,
+          `A newer version of T3 Code already upgraded this data. Update ${appName} to the same T3 Code version, then reopen it.`,
+        );
+        yield* electronApp.quit;
+      },
+      Effect.provide(factoryContext),
+    );
+
     const primary = yield* DesktopBackendManager.makeBackendInstance({
       id: DesktopBackendManager.PRIMARY_INSTANCE_ID,
       // Keep this lazy. The pool layer is initialized before startup loads
@@ -335,6 +350,7 @@ export const layer = Layer.effect(
       onShutdown: () => desktopWindow.handleBackendNotReady,
       onPreflightFailed: handlePrimaryPreflightFailure,
       onHomeInUse: handlePrimaryHomeInUse,
+      onDatabaseNewer: handlePrimaryDatabaseNewer,
     });
 
     const instancesRef = yield* SynchronizedRef.make<

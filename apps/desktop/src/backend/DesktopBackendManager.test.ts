@@ -1,4 +1,5 @@
 import {
+  DESKTOP_BACKEND_DATABASE_NEWER_EXIT_CODE,
   DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE,
   DesktopBackendBootstrap,
   type DesktopBackendBootstrap as DesktopBackendBootstrapValue,
@@ -128,6 +129,7 @@ interface MakeInstanceInput {
     failure: DesktopBackendManager.PreflightFailure,
   ) => Effect.Effect<boolean>;
   readonly onHomeInUse?: Effect.Effect<void>;
+  readonly onDatabaseNewer?: Effect.Effect<void>;
   readonly config?: DesktopBackendManager.DesktopBackendStartConfig;
   readonly configResolve?: Effect.Effect<
     DesktopBackendManager.DesktopBackendStartConfig,
@@ -188,6 +190,7 @@ function makeTestInstance(input: MakeInstanceInput) {
     ...(input.onShutdown ? { onShutdown: () => input.onShutdown! } : {}),
     ...(input.onPreflightFailed ? { onPreflightFailed: input.onPreflightFailed } : {}),
     ...(input.onHomeInUse ? { onHomeInUse: () => input.onHomeInUse! } : {}),
+    ...(input.onDatabaseNewer ? { onDatabaseNewer: () => input.onDatabaseNewer! } : {}),
   });
 
   return instance.pipe(Effect.provide(servicesLayer));
@@ -1231,6 +1234,44 @@ describe("DesktopBackendManager", () => {
           spawnerLayer,
           httpClientLayer: httpClientLayer(() => Effect.never),
           onHomeInUse: Deferred.succeed(reported, undefined).pipe(Effect.asVoid),
+        });
+
+        yield* instance.start;
+        yield* Deferred.await(reported);
+        yield* TestClock.adjust(Duration.seconds(30));
+
+        const snapshot = yield* instance.snapshot;
+        assert.equal(startCount, 1);
+        assert.isFalse(snapshot.desiredRunning);
+        assert.isFalse(snapshot.restartScheduled);
+      }).pipe(Effect.provide(TestClock.layer())),
+    ),
+  );
+
+  it.effect("stops restarting and reports when a newer T3 Code migrated the database", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const reported = yield* Deferred.make<void>();
+        let startCount = 0;
+
+        const spawnerLayer = Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() =>
+            Effect.sync(() => {
+              startCount += 1;
+              return makeProcess({
+                exitCode: Effect.succeed(
+                  ChildProcessSpawner.ExitCode(DESKTOP_BACKEND_DATABASE_NEWER_EXIT_CODE),
+                ),
+              });
+            }),
+          ),
+        );
+
+        const instance = yield* makeTestInstance({
+          spawnerLayer,
+          httpClientLayer: httpClientLayer(() => Effect.never),
+          onDatabaseNewer: Deferred.succeed(reported, undefined).pipe(Effect.asVoid),
         });
 
         yield* instance.start;

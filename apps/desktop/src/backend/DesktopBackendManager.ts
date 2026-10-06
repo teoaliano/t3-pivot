@@ -42,6 +42,7 @@ import { HttpClient } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
+  DESKTOP_BACKEND_DATABASE_NEWER_EXIT_CODE,
   DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE,
   DesktopBackendBootstrap,
   type DesktopBackendBootstrap as DesktopBackendBootstrapValue,
@@ -303,6 +304,9 @@ export interface BackendInstanceSpec {
   // Fired when the backend exits because another live server owns its T3
   // home. The instance stops instead of restarting into the same refusal.
   readonly onHomeInUse?: () => Effect.Effect<void>;
+  // Fired when the backend exits because a newer T3 Code migrated the
+  // database it shares. The instance stops, since a restart cannot fix it.
+  readonly onDatabaseNewer?: () => Effect.Effect<void>;
 }
 
 interface ActiveBackendRun {
@@ -975,13 +979,21 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
           Scope.provide(runScope),
           Effect.matchEffect({
             onFailure: (error) => finalizeRun(error.message),
-            onSuccess: (exit) =>
-              Option.getOrUndefined(exit.code) === DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE
-                ? Ref.update(state, (latest) => ({ ...latest, desiredRunning: false })).pipe(
+            onSuccess: (exit) => {
+              const code = Option.getOrUndefined(exit.code);
+              const onRefused =
+                code === DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE
+                  ? (spec.onHomeInUse ?? (() => Effect.void))
+                  : code === DESKTOP_BACKEND_DATABASE_NEWER_EXIT_CODE
+                    ? (spec.onDatabaseNewer ?? (() => Effect.void))
+                    : undefined;
+              return onRefused === undefined
+                ? finalizeRun(exit.reason)
+                : Ref.update(state, (latest) => ({ ...latest, desiredRunning: false })).pipe(
                     Effect.andThen(finalizeRun(exit.reason)),
-                    Effect.andThen(spec.onHomeInUse?.() ?? Effect.void),
-                  )
-                : finalizeRun(exit.reason),
+                    Effect.andThen(onRefused()),
+                  );
+            },
           }),
           Effect.ensuring(Scope.close(runScope, Exit.void).pipe(Effect.ignore)),
         );
