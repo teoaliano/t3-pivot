@@ -860,6 +860,11 @@ export const PullRequestDetail = Schema.Struct({
   reviewers: Schema.Array(PullRequestActor),
   labels: Schema.Array(PullRequestLabel),
   checks: Schema.Array(PullRequestCheck),
+  /**
+   * The check names the base branch requires to merge. Absent where the host does not say. A
+   * required check that has never reported is missing from `checks`, and only this names it.
+   */
+  requiredChecks: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   mergeCapabilities: PullRequestMergeCapabilities,
   /**
    * Who the host says the reader is, which is the one thing a conversation cannot be read without

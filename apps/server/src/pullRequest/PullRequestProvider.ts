@@ -227,6 +227,8 @@ export interface ProviderChangeRequestDetail extends ProviderChangeRequest {
   readonly closedAt: string | null;
   readonly reviewers: ReadonlyArray<PullRequestActor>;
   readonly checks: ReadonlyArray<PullRequestCheck>;
+  /** The check names the base branch requires, from a host that says. */
+  readonly requiredChecks?: ReadonlyArray<string>;
   readonly mergeCapabilities: PullRequestMergeCapabilities;
   readonly viewerPermissions: PullRequestViewerPermissions;
   /** Absent from a host that cannot compare the branch with its base, which is most of them. */

@@ -11,12 +11,16 @@ const GREEN: ReadonlySet<PullRequestCheck["status"]> = new Set(["success", "skip
 
 /**
  * Every reason the PR may not merge now, empty when it may. A check is green only
- * when it passed or was skipped at the current head; a pending one, including a
- * required check that has not reported, is not. `waivedChecks` names checks the
- * user explicitly let through.
+ * when it passed or was skipped at the current head; a pending one is not, and
+ * neither is a check in `requiredChecks` that has not reported at all, which the
+ * forge leaves out of `checks`. `waivedChecks` names checks the user explicitly
+ * let through, reported or required.
  */
 export const mergeRefusals = (
-  detail: Pick<PullRequestDetail, "state" | "isDraft" | "mergeability" | "headSha" | "checks">,
+  detail: Pick<
+    PullRequestDetail,
+    "state" | "isDraft" | "mergeability" | "headSha" | "checks" | "requiredChecks"
+  >,
   waivedChecks: ReadonlyArray<string>,
 ): ReadonlyArray<string> => {
   const reasons: Array<string> = [];
@@ -39,8 +43,14 @@ export const mergeRefusals = (
       `Check "${check.name}"${check.required === true ? " (required)" : ""} is ${check.status}.`,
     );
   }
+  const reported = new Set(detail.checks.map((check) => check.name));
+  const required = detail.requiredChecks ?? [];
+  for (const name of required) {
+    if (reported.has(name) || waived.has(name)) continue;
+    reasons.push(`Required check "${name}" has not reported.`);
+  }
   for (const name of waived) {
-    if (!detail.checks.some((check) => check.name === name)) {
+    if (!reported.has(name) && !required.includes(name)) {
       reasons.push(`No check named "${name}" to waive.`);
     }
   }
