@@ -5,6 +5,8 @@ import {
 } from "@t3tools/client-runtime/pivot-state";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 
+import type { SidebarThreadStatus } from "../Sidebar.logic";
+
 import {
   type TeammateCard,
   type TeammateCardShell,
@@ -124,9 +126,16 @@ export function sidebarPivotGroup(
 }
 
 /**
- * Teammates send no desktop notification, sound, badge or push of their own: their
- * news reaches the user through their Pivot.
+ * Whether a thread entering `status` notifies the user. A teammate does only while a
+ * question or approval holds it for the user; the rest of its news reaches the user
+ * through its Pivot.
  */
-export function threadNotifiesUser(threadId: ThreadId, pivotState: PivotState | null): boolean {
-  return pivotState?.teammates[threadId] === undefined;
+export function threadNotifiesUser(
+  threadId: ThreadId,
+  pivotState: PivotState | null,
+  status: SidebarThreadStatus,
+): boolean {
+  return (
+    pivotState?.teammates[threadId] === undefined || status === "input" || status === "approval"
+  );
 }

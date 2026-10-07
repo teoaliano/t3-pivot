@@ -11,6 +11,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   RunId,
+  RuntimeRequestId,
   ThreadId,
   TurnItemId,
 } from "@t3tools/contracts";
@@ -707,6 +708,37 @@ describe("AgentAwarenessRelay", () => {
       yield* TestClock.adjust("5 seconds");
       yield* relay.drain;
       assert.equal(publications.length, 0);
+    }),
+  );
+
+  it.effect("publishes a T3 Pivot teammate while a question holds it for the user", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay({
+        pivotAwareness: {
+          roleOf: () => Effect.succeed({ kind: "teammate" }),
+          changes: Stream.empty,
+        },
+      });
+      yield* Ref.set(
+        currentShell,
+        shell({
+          status: "waiting",
+          pendingRuntimeRequest: {
+            id: RuntimeRequestId.make("request-1"),
+            kind: "user_input",
+            createdAt: yield* DateTime.now,
+          },
+        }),
+      );
+      yield* relay.publishThread(THREAD_ID);
+      assert.equal(publications[0]?.state?.phase, "waiting_for_input");
+      // Answered: the teammate goes back to its Pivot, and the alert clears.
+      yield* Ref.set(currentShell, shell({ status: "running" }));
+      yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      assert.equal(publications.length, 2);
+      assert.equal(publications[1]?.state, null);
     }),
   );
 

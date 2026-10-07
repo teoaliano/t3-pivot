@@ -111,8 +111,8 @@ the task in progress.
 `working` teammates need nothing from you. A `paused` teammate is waiting on something
 outside, and you're woken when its `until` passes or after four hours. Check whether the
 wait cleared, and leave it alone if not. A `waiting` teammate is held on an approval or a
-provider question inside its turn. Tell the user which teammate and what it's waiting on;
-they answer it in that teammate's chat.
+provider question inside its turn. The user is notified directly and answers it in that
+teammate's chat, so don't answer it yourself.
 
 Elapsed time, unchanged teammates and work still in progress are not news for the user.
 

@@ -34,8 +34,9 @@ discarding work asks for your approval: answer with **Approve** or **Decline**, 
 you want to waive a check. Your answer is recorded in your words and passed on to the teammate.
 
 The Pivot notifies you when it needs a call, when a scout's findings are ready, and when it
-replies to you. Teammates send no notifications of their own, and the Pivot stays quiet while it
-handles their updates.
+replies to you. A teammate notifies you only when its agent stops to ask you a question or for an
+approval, which you answer in that teammate's chat. The Pivot stays quiet while it handles the
+rest of their updates.
 
 ## Seeing it all
 

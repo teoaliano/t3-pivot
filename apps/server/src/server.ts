@@ -624,7 +624,8 @@ const RuntimeCoreDependenciesBaseLive = Layer.mergeAll(
   // Core Services
   Layer.provideMerge(OrchestrationApplicationLayerLive),
   // Pivot mode: a Pivot and its teammates carry on after a restart, and the
-  // relay publishes nothing for teammates and a Pivot's decisions as input needed.
+  // relay publishes teammates only when held for the user, and a Pivot's decisions as
+  // input needed.
   Layer.provideMerge(
     Layer.mergeAll(PivotCarryOn.layer, PivotRelayAwareness.layer, PivotToolRestrictions.layer),
   ),

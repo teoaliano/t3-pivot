@@ -1,6 +1,6 @@
 /**
- * Tells the agent-awareness relay which threads are teammates (they publish
- * nothing) and how many decisions each Pivot holds for the user (a Pivot with
+ * Tells the agent-awareness relay which threads are teammates (they publish only
+ * while a question or approval holds them) and how many decisions each Pivot holds for the user (a Pivot with
  * any reads as waiting for input, so mobile pushes it), and when that changes.
  *
  * @module PivotRelayAwareness

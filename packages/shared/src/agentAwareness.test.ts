@@ -77,15 +77,37 @@ describe("projectThreadAwarenessV2", () => {
     },
   );
 
-  it("publishes nothing for a T3 Pivot teammate", () => {
-    expect(
+  it.each(["running", "completed", "failed"] as const)(
+    "publishes nothing for a %s T3 Pivot teammate",
+    (status) => {
+      expect(
+        projectThreadAwarenessV2({
+          environmentId: "env-1" as EnvironmentId,
+          project,
+          thread: v2Thread({ status }),
+          pivotRole: { kind: "teammate" },
+        }),
+      ).toBeNull();
+    },
+  );
+
+  it("publishes a T3 Pivot teammate held on the user's answer", () => {
+    const teammate = (kind: "user_input" | "command") =>
       projectThreadAwarenessV2({
         environmentId: "env-1" as EnvironmentId,
         project,
-        thread: v2Thread({ status: "completed" }),
+        thread: v2Thread({
+          status: "waiting",
+          pendingRuntimeRequest: {
+            id: RuntimeRequestId.make("request-1"),
+            kind,
+            createdAt: updatedAt,
+          },
+        }),
         pivotRole: { kind: "teammate" },
-      }),
-    ).toBeNull();
+      });
+    expect(teammate("user_input")).toMatchObject({ phase: "waiting_for_input" });
+    expect(teammate("command")).toMatchObject({ phase: "waiting_for_approval" });
   });
 
   it("reads a Pivot holding decisions for the user as waiting for input", () => {

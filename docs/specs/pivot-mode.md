@@ -242,11 +242,12 @@ cards, one teammate's chat, a preview, files, a diff), with an optional wallpape
 
 ### Notifications
 
-80. As a user, I want to be notified only by the Pivot and only for decisions, ready PRs,
+80. As a user, I want to be notified by the Pivot only for decisions, ready PRs,
     finished findings and the Pivot's replies to me, so that notifications mean
     something.
-81. As a user, I want teammate threads to stop sending their own notifications and
-    pushes, so that ten teammates do not mean ten pings.
+81. As a user, I want teammate threads to notify me and push only when their agent asks
+    me a question or for an approval, so that ten teammates do not mean ten pings but a
+    question only I can answer still reaches me.
 82. As a user on my phone, I want an escalated decision to reach me as a push, so that I
     can unblock work while away.
 
@@ -573,13 +574,15 @@ cards, one teammate's chat, a preview, files, a diff), with an optional wallpape
 
 ### Notifications
 
-- In Pivot mode the user hears only from the Pivot: an escalated decision (which covers
+- In Pivot mode the user hears from the Pivot about: an escalated decision (which covers
   PR ready, destructive or irreversible asks, credential needs, and blockers the Pivot
   cannot clear), finished scout findings, and the Pivot's reply when the user was
   talking to it.
-- Teammate threads fire no desktop notifications, sound, badge or mobile push. Their
-  events go to the Pivot. V2 already skips `subagent` threads in the web notifier and the
-  relay. Teammates are not subagents, so those same checks gain a teammate test.
+- Teammate threads fire desktop notifications, sound and mobile push only for a pending
+  question or approval, which only the user can answer, in the teammate's chat. Their
+  other events go to the Pivot. V2 already skips `subagent` threads in the web notifier
+  and the relay. Teammates are not subagents, so those same checks gain a teammate test
+  that lets a pending runtime request through.
 - An escalated decision maps to the relay's existing waiting-for-input phase on the Pivot
   thread, so mobile push needs no new phase.
 
@@ -668,13 +671,13 @@ Seams, in order of how much they prove:
   and the contract stays under 3,000 words.
 - **Existing seams, extended.** V2's restart recovery resumes Pivot and teammate runs and
   releases their held queues whatever the setting says. The GitHub and GitLab merge paths
-  pin the head. The relay publishes no activity for teammate threads. Storage cleanup
-  skips Pivot homes.
+  pin the head. The relay publishes a teammate thread's activity only while a question
+  or approval holds it. Storage cleanup skips Pivot homes.
 - **Pivot view logic** (new, pure, client). Layout tree operations (presets, hide, show,
   move to an edge, resize, at least one pane) and the card view model (label, attention,
   dispatch order, the finished chip).
 - **Sidebar logic** (existing). A Pivot groups its teammates, a retired Pivot keeps its
-  finished ones, and teammate threads produce no notifications.
+  finished ones, and teammate threads notify only for a question or approval.
 
 The UI wiring (the Pivot view, the sidebar rows, the header switch, the card menus, the
 wallpaper setting) is the last step, verified in one integrated pass in a real client.
@@ -759,7 +762,8 @@ Tasks marked **Done** landed on `main` before implementation started. Skip them.
     Pivot's waiting-for-input phase. Seam: relay.
 42. Skip Pivot homes in storage cleanup. Seam: storage cleanup.
 43. Group teammates under their Pivot in the sidebar, keep a retired Pivot's finished
-    teammates, and produce no notifications for teammate threads. Seam: sidebar logic.
+    teammates, and notify for teammate threads only on a question or approval. Seam:
+    sidebar logic.
 44. **Done.** Build and edit the layout tree: presets, hide, show, move to an edge, resize, and at
     least one pane. Seam: Pivot view logic.
 45. Derive a card's label, attention, order and the finished chip from the Pivot stream
@@ -817,7 +821,8 @@ Tasks marked **Done** landed on `main` before implementation started. Skip them.
   amendments: a Pivot started as a project pointer with a pointer-swap handover and a
   release event, and became a permanent thread kind with takeover and retirement;
   decisions moved from the project to the Pivot; teammates' runtime mode moved from the
-  project default to always full-access.
+  project default to always full-access; teammates moved from never notifying to
+  notifying for a question or approval, the one thing only the user can answer.
 - Performance: V2's thread shell gains nothing. The Pivot stream carries one small record
   per Pivot and teammate; the brief never rides it.
   The layout tree, view choice and wallpaper stay on the client. Cards do not animate.

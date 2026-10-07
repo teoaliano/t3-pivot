@@ -205,8 +205,6 @@ function EnvironmentNotifications({
     const next = new Map<ThreadId, NotificationState>();
     for (const rawThread of threads) {
       if (rawThread.lineage.relationshipToParent === "subagent") continue;
-      // A teammate's news reaches the user through its Pivot.
-      if (!threadNotifiesUser(rawThread.id, pivotState)) continue;
       const prior = previous.current.get(rawThread.id);
       // The same object cannot produce a new notification.
       if (prior?.raw === rawThread) {
@@ -238,6 +236,9 @@ function EnvironmentNotifications({
             ? "completion"
             : null;
       if (!kind) continue;
+      // A teammate's news reaches the user through its Pivot, unless it holds for them.
+      if (!threadNotifiesUser(thread.id, pivotState, kind === "completion" ? "ready" : status))
+        continue;
       // A Pivot finishing a turn the user did not start (a teammate wake) is not news.
       if (kind === "completion" && isPivot && !pivotTurnAnswersUser(rawThread)) continue;
       const title =
@@ -272,7 +273,7 @@ function EnvironmentNotifications({
   }, [emit, environmentId, pivotState, threads]);
 
   // A Pivot also speaks up when it holds a decision for the user or a scout's
-  // findings are in; its teammates never notify on their own.
+  // findings are in.
   const previousPivotState = useRef<PivotState | null>(null);
   useEffect(() => {
     if (pivotState === null) {

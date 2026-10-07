@@ -531,8 +531,9 @@ export const make = Effect.gen(function* () {
     const pivotRole = yield* (yield* PivotAwareness.PivotAwareness).roleOf(threadId);
     if (
       (threadShell?.lineage.relationshipToParent === "subagent" ||
-        // T3 Pivot: a teammate's news reaches the user through its Pivot.
-        pivotRole?.kind === "teammate") &&
+        // T3 Pivot: a teammate's news reaches the user through its Pivot, unless a
+        // question or approval holds it for the user.
+        (pivotRole?.kind === "teammate" && threadShell?.pendingRuntimeRequest == null)) &&
       !(yield* Ref.get(publishedStateByThreadRef)).has(threadId)
     ) {
       // Subagents never project activity, so the relay holds no row to clear.

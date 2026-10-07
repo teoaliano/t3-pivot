@@ -39,9 +39,9 @@ function buildAgentAwarenessDeepLink(input: {
 }
 
 /**
- * A thread's role in T3 Pivot's Pivot mode. Teammates publish nothing: their news
- * reaches the user through their Pivot. A Pivot holding decisions for the user is
- * waiting for their input.
+ * A thread's role in T3 Pivot's Pivot mode. A teammate publishes only while a question
+ * or approval holds it for the user; the rest of its news reaches the user through its
+ * Pivot. A Pivot holding decisions for the user is waiting for their input.
  */
 export type ThreadAwarenessPivotRole =
   | { readonly kind: "teammate" }
@@ -73,12 +73,18 @@ export function projectThreadAwarenessV2(
 ): AgentAwarenessState | null {
   const { environmentId, project, thread } = input;
   if (thread.lineage.relationshipToParent === "subagent") return null;
-  if (input.pivotRole?.kind === "teammate") return null;
   const phase = resolveThreadAwarenessPhaseV2(
     thread,
     input.pivotRole?.kind === "pivot" && input.pivotRole.escalatedDecisions > 0,
   );
   if (phase === null) {
+    return null;
+  }
+  if (
+    input.pivotRole?.kind === "teammate" &&
+    phase !== "waiting_for_input" &&
+    phase !== "waiting_for_approval"
+  ) {
     return null;
   }
   // A Pivot reports finishing only a turn that answered the user, not one spent on

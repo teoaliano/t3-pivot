@@ -167,10 +167,14 @@ describe("Pivot nesting in the sidebar", () => {
     expect(sidebarPivotGroup(state, ThreadId.make("first"), () => null)).toBeNull();
   });
 
-  it("teammate threads produce no notifications", () => {
-    expect(threadNotifiesUser(ThreadId.make("first"), state)).toBe(false);
-    expect(threadNotifiesUser(ThreadId.make("active"), state)).toBe(true);
-    expect(threadNotifiesUser(ThreadId.make("plain"), state)).toBe(true);
-    expect(threadNotifiesUser(ThreadId.make("first"), null)).toBe(true);
+  it("teammate threads notify only when a question or approval holds them", () => {
+    const first = ThreadId.make("first");
+    expect(threadNotifiesUser(first, state, "ready")).toBe(false);
+    expect(threadNotifiesUser(first, state, "failed")).toBe(false);
+    expect(threadNotifiesUser(first, state, "input")).toBe(true);
+    expect(threadNotifiesUser(first, state, "approval")).toBe(true);
+    expect(threadNotifiesUser(ThreadId.make("active"), state, "ready")).toBe(true);
+    expect(threadNotifiesUser(ThreadId.make("plain"), state, "failed")).toBe(true);
+    expect(threadNotifiesUser(first, null, "ready")).toBe(true);
   });
 });
