@@ -32,6 +32,8 @@ your default branch by fast-forward.
 Calls that need you appear above the Pivot's composer until you answer. A merge, a landing or
 discarding work asks for your approval: answer with **Approve** or **Decline**, adding a note if
 you want to waive a check. Your answer is recorded in your words and passed on to the teammate.
+To check the Pivot's judgment, show the **Decisions** pane in the Pivot view: it lists every
+decision, with the answers the Pivot gave on its own labeled as its own.
 
 The Pivot notifies you when it needs a call, when a scout's findings are ready, and when it
 replies to you. A teammate notifies you only when its agent stops to ask you a question or for an

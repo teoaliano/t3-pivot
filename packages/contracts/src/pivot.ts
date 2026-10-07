@@ -210,6 +210,13 @@ export type PivotAnswerDecisionInput = typeof PivotAnswerDecisionInput.Type;
 export const PivotAnswerDecisionResult = Schema.Struct({ decision: PivotDecision });
 export type PivotAnswerDecisionResult = typeof PivotAnswerDecisionResult.Type;
 
+export const PivotDecisionLogInput = Schema.Struct({ pivotThreadId: ThreadId });
+export type PivotDecisionLogInput = typeof PivotDecisionLogInput.Type;
+
+/** Every decision a Pivot owns, newest first, so the user can audit its own answers. */
+export const PivotDecisionLog = Schema.Struct({ decisions: Schema.Array(PivotDecision) });
+export type PivotDecisionLog = typeof PivotDecisionLog.Type;
+
 export const PivotTeammateDetailInput = Schema.Struct({ threadId: ThreadId });
 export type PivotTeammateDetailInput = typeof PivotTeammateDetailInput.Type;
 

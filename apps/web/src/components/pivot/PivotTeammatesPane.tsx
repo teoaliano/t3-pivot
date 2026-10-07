@@ -9,6 +9,7 @@ import { useThreadShells } from "../../state/entities";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useEnvironmentQuery } from "../../state/query";
 import { vcsEnvironment } from "../../state/vcs";
 import {
@@ -104,9 +105,12 @@ function TeammateSetupLine(props: { environmentId: EnvironmentId; threadId: Thre
   );
   const line = setupProgressLine(setup.data ?? null);
   return line === null ? null : (
-    <div className="truncate text-xs text-muted-foreground" title={line}>
-      {line}
-    </div>
+    <Tooltip>
+      <TooltipTrigger
+        render={<div className="truncate text-xs text-muted-foreground">{line}</div>}
+      />
+      <TooltipPopup side="bottom">{line}</TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -123,7 +127,7 @@ const PivotTeammateCard = memo(function PivotTeammateCard(props: {
     card.providerInstanceId === null
       ? null
       : (props.providerEntries.get(card.providerInstanceId) ?? null);
-  return (
+  const element = (
     <div
       role="button"
       tabIndex={0}
@@ -140,7 +144,6 @@ const PivotTeammateCard = memo(function PivotTeammateCard(props: {
         "flex w-60 cursor-pointer flex-col gap-2 rounded-xl border bg-background p-3 text-left",
         card.attention ? "border-warning" : "border-border",
       )}
-      title={card.detail ?? undefined}
     >
       <div className="flex items-center justify-between gap-2 text-xs">
         <span className="flex min-w-0 items-center gap-1.5">
@@ -210,5 +213,14 @@ const PivotTeammateCard = memo(function PivotTeammateCard(props: {
         ) : null}
       </div>
     </div>
+  );
+  // The latest report or error, which the card has no room for.
+  return card.detail === null ? (
+    element
+  ) : (
+    <Tooltip>
+      <TooltipTrigger render={element} />
+      <TooltipPopup side="bottom">{card.detail}</TooltipPopup>
+    </Tooltip>
   );
 });

@@ -93,6 +93,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.pivotCreate]: AuthOrchestrationOperateScope,
   [WS_METHODS.pivotAnswerDecision]: AuthOrchestrationOperateScope,
   [WS_METHODS.pivotTeammateDetail]: AuthOrchestrationReadScope,
+  [WS_METHODS.pivotDecisionLog]: AuthOrchestrationReadScope,
   [WS_METHODS.scheduledTasksList]: AuthOrchestrationReadScope,
   [WS_METHODS.scheduledTasksSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.scheduledTasksUpsert]: AuthOrchestrationOperateScope,

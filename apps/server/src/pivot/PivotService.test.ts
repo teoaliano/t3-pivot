@@ -123,3 +123,41 @@ describe("PivotService.refreshHomes", () => {
     }).pipe(Effect.provide(layer));
   });
 });
+
+describe("PivotService.decisionLog", () => {
+  it.effect("lists a Pivot's decisions newest first, with how each closed", () => {
+    const { layer } = setup();
+    return Effect.gen(function* () {
+      const pivots = yield* PivotService.PivotService;
+      const pivot = (yield* pivots.create({ projectId, modelSelection, takeover: false })).threadId;
+      const answered = (yield* pivots.openDecision(pivot, { key: "naming", question: "Name?" }))
+        .decision;
+      yield* pivots.answerDecision(pivot, {
+        decisionId: answered.decisionId,
+        answer: "Use the existing name.",
+      });
+      const moot = (yield* pivots.openDecision(pivot, { key: "port", question: "Which port?" }))
+        .decision;
+      yield* pivots.markDecisionMoot(pivot, {
+        decisionId: moot.decisionId,
+        evidence: "The port is configured.",
+      });
+      yield* pivots.openDecision(pivot, { key: "deploy", question: "Deploy today?" });
+
+      const log = yield* pivots.decisionLog(pivot);
+      assert.deepStrictEqual(
+        log.map((decision) => [decision.summary, decision.resolution?.kind ?? null]),
+        [
+          ["Deploy today?", null],
+          ["Which port?", "moot"],
+          ["Name?", "answered"],
+        ],
+      );
+      assert.strictEqual(log[2]?.resolution?.text, "Use the existing name.");
+      assert.isNull(log[2]?.userAnswer);
+
+      const notAPivot = yield* refusal(pivots.decisionLog(ThreadId.make("plain-thread")));
+      assert.include(notAPivot, "not a Pivot");
+    }).pipe(Effect.provide(layer));
+  });
+});

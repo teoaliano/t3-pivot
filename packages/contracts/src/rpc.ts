@@ -335,6 +335,8 @@ import {
   PivotAnswerDecisionResult,
   PivotCreateInput,
   PivotCreateResult,
+  PivotDecisionLog,
+  PivotDecisionLogInput,
   PivotError,
   PivotStreamEvent,
   PivotSubscribeInput,
@@ -499,6 +501,7 @@ export const WS_METHODS = {
   pivotCreate: "pivot.create",
   pivotAnswerDecision: "pivot.answerDecision",
   pivotTeammateDetail: "pivot.teammateDetail",
+  pivotDecisionLog: "pivot.decisionLog",
   scheduledTasksList: "scheduledTasks.list",
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
   scheduledTasksUpsert: "scheduledTasks.upsert",
@@ -1726,6 +1729,12 @@ const WsPivotTeammateDetailRpc = Rpc.make(WS_METHODS.pivotTeammateDetail, {
   error: Schema.Union([PivotError, EnvironmentAuthorizationError]),
 });
 
+const WsPivotDecisionLogRpc = Rpc.make(WS_METHODS.pivotDecisionLog, {
+  payload: PivotDecisionLogInput,
+  success: PivotDecisionLog,
+  error: Schema.Union([PivotError, EnvironmentAuthorizationError]),
+});
+
 const WsScheduledTasksListRpc = Rpc.make(WS_METHODS.scheduledTasksList, {
   payload: ScheduledTaskListInput,
   success: ScheduledTaskListResult,
@@ -1881,6 +1890,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsPivotCreateRpc,
   WsPivotAnswerDecisionRpc,
   WsPivotTeammateDetailRpc,
+  WsPivotDecisionLogRpc,
   WsScheduledTasksUpsertRpc,
   WsScheduledTasksSetEnabledRpc,
   WsScheduledTasksDeleteRpc,

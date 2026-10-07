@@ -2107,6 +2107,15 @@ const makeWsRpcLayer = (
             pivots.teammateDetail(input.threadId).pipe(Effect.mapError(toPivotError)),
             { "rpc.aggregate": "pivot" },
           ),
+        [WS_METHODS.pivotDecisionLog]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pivotDecisionLog,
+            pivots.decisionLog(input.pivotThreadId).pipe(
+              Effect.map((decisions) => ({ decisions })),
+              Effect.mapError(toPivotError),
+            ),
+            { "rpc.aggregate": "pivot" },
+          ),
         [WS_METHODS.scheduledTasksSubscribe]: (_input) =>
           observeRpcStream(
             WS_METHODS.scheduledTasksSubscribe,

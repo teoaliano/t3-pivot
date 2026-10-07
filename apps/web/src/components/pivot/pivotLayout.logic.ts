@@ -16,7 +16,14 @@ import * as Schema from "effect/Schema";
  * Each function returns its input (same reference) when it has nothing to change.
  */
 
-export type PaneKind = "pivot-chat" | "teammates" | "teammate" | "preview" | "files" | "diff";
+export type PaneKind =
+  | "pivot-chat"
+  | "teammates"
+  | "decisions"
+  | "teammate"
+  | "preview"
+  | "files"
+  | "diff";
 
 export type LayoutNode =
   | { type: "pane"; kind: PaneKind; teammate?: ThreadId }
@@ -33,6 +40,7 @@ export type TeammatePaneKind = "teammate" | "preview" | "files" | "diff";
 const PANE_KINDS: readonly PaneKind[] = [
   "pivot-chat",
   "teammates",
+  "decisions",
   "teammate",
   "preview",
   "files",

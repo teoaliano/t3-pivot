@@ -120,6 +120,10 @@ export class PivotService extends Context.Service<
     readonly teammateDetail: (
       threadId: ThreadId,
     ) => Effect.Effect<PivotTeammateDetail, PivotServiceError>;
+    /** Every decision the Pivot owns, newest first, open and closed. */
+    readonly decisionLog: (
+      pivotThreadId: ThreadId,
+    ) => Effect.Effect<ReadonlyArray<PivotDecision>, PivotServiceError>;
     /** Records the user's answer to an escalated decision, verbatim, and wakes the Pivot. */
     readonly recordUserAnswer: (input: {
       readonly decisionId: PivotDecisionId;
@@ -402,6 +406,15 @@ export const make = Effect.gen(function* () {
         deliveryMode: teammate.deliveryMode,
         scoutReport: teammate.scoutReport,
       };
+    });
+
+  const decisionLog: PivotService["Service"]["decisionLog"] = (pivotThreadId) =>
+    Effect.gen(function* () {
+      if ((yield* store.getPivot(pivotThreadId)) === null) {
+        return yield* refuse("decision.log", `Thread ${pivotThreadId} is not a Pivot.`);
+      }
+      const decisions = yield* store.listDecisions({ pivotThreadId, openOnly: false });
+      return decisions.toReversed();
     });
 
   const recordUserAnswer: PivotService["Service"]["recordUserAnswer"] = ({
@@ -1186,6 +1199,7 @@ export const make = Effect.gen(function* () {
     refreshHomes,
     stream: store.stream,
     teammateDetail,
+    decisionLog,
     recordUserAnswer,
     dispatchTeammate,
     promoteScout,

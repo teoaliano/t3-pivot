@@ -66,6 +66,7 @@ import {
   showPane,
   type TeammatePaneKind,
 } from "./pivotLayout.logic";
+import { PivotDecisionsPane } from "./PivotDecisionsPane";
 import { PivotTeammatesPane } from "./PivotTeammatesPane";
 import { InPivotViewContext } from "./pivotViewContext";
 import { usePivotLayout, usePivotViewStore } from "./pivotViewStore";
@@ -85,6 +86,7 @@ const FilePreviewPanel = lazy(() => import("../files/FilePreviewPanel"));
 const PANE_TITLES: Record<PaneKind, string> = {
   "pivot-chat": "Pivot",
   teammates: "Teammates",
+  decisions: "Decisions",
   teammate: "Teammate",
   preview: "Preview",
   files: "Files",
@@ -174,6 +176,15 @@ export function PivotView(props: { pivot: ScopedThreadRef }) {
             teammates={teammates}
             providerEntries={providerEntries}
             onOpen={openPane}
+          />
+        );
+      case "decisions":
+        return (
+          <PivotDecisionsPane
+            environmentId={pivot.environmentId}
+            pivotThreadId={pivot.threadId}
+            changeKey={`${record?.openDecisionCount ?? 0}:${record?.escalatedDecisionCount ?? 0}`}
+            teammateTitle={(threadId) => state?.teammates[threadId]?.title ?? null}
           />
         );
       default:
@@ -348,7 +359,7 @@ export function PivotView(props: { pivot: ScopedThreadRef }) {
 }
 
 function TeammatePaneBody(props: {
-  kind: Exclude<PaneKind, "pivot-chat" | "teammates">;
+  kind: TeammatePaneKind;
   teammateRef: ScopedThreadRef;
   hasScoutReport: boolean;
 }) {

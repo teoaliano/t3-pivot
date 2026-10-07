@@ -1097,6 +1097,11 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:pivot:teammate-detail",
       tag: WS_METHODS.pivotTeammateDetail,
     }),
+    /** Every decision a Pivot owns, newest first, for auditing its own answers. */
+    pivotDecisionLog: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:pivot:decision-log",
+      tag: WS_METHODS.pivotDecisionLog,
+    }),
     /** Live scheduled-task list: snapshot on subscribe, fresh list after every server-side change. */
     scheduledTasksLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:scheduled-tasks:live",
