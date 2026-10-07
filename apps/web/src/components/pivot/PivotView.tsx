@@ -1,8 +1,8 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { teammatesOfPivot } from "@t3tools/client-runtime/pivot-state";
 import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { EllipsisIcon, LayoutDashboardIcon } from "lucide-react";
+import { EllipsisIcon } from "lucide-react";
 import {
   type PointerEvent as ReactPointerEvent,
   lazy,
@@ -18,7 +18,7 @@ import {
   deriveProviderEntriesByEnvironment,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
-import { useServerConfigs, useThreadShell } from "../../state/entities";
+import { useProject, useServerConfigs, useThreadShell } from "../../state/entities";
 import { usePivotState } from "../../state/pivot";
 import { useEnvironmentQuery } from "../../state/query";
 import {
@@ -27,6 +27,13 @@ import {
   serverEnvironment,
 } from "../../state/server";
 import ChatView from "../ChatView";
+import { ProjectFavicon } from "../ProjectFavicon";
+import {
+  WorkspaceBreadcrumb,
+  WorkspaceBreadcrumbItem,
+  WorkspaceBreadcrumbSeparator,
+  WorkspaceBreadcrumbText,
+} from "../WorkspaceBreadcrumb";
 import { Button } from "../ui/button";
 import {
   Menu,
@@ -107,6 +114,9 @@ const DIM_LEVELS = [0, 0.2, 0.4, 0.6, 0.8] as const;
 export function PivotView(props: { pivot: ScopedThreadRef }) {
   const { pivot } = props;
   const pivotShell = useThreadShell(pivot);
+  const project = useProject(
+    pivotShell === null ? null : scopeProjectRef(pivot.environmentId, pivotShell.projectId),
+  );
   const state = usePivotState(pivot.environmentId);
   const record = state?.pivots[pivot.threadId] ?? null;
   const teammates = useMemo(
@@ -203,11 +213,28 @@ export function PivotView(props: { pivot: ScopedThreadRef }) {
           </>
         ) : null}
         <header className="relative flex h-[var(--workspace-topbar-height)] shrink-0 items-center gap-3 bg-background px-3">
-          <LayoutDashboardIcon className="size-4 text-muted-foreground" />
-          <span className="min-w-0 truncate text-sm font-medium">
-            {pivotShell?.title ?? "Pivot"}
-            {record?.retiredAt != null ? " (retired)" : ""}
-          </span>
+          {/* The same project / title breadcrumb as Chat mode, so the project stays in view. */}
+          <WorkspaceBreadcrumb ariaLabel="Pivot breadcrumb" className="flex-1">
+            {project ? (
+              <>
+                <WorkspaceBreadcrumbItem className="shrink gap-1.5">
+                  <ProjectFavicon project={project} className="size-3.5" />
+                  <WorkspaceBreadcrumbText className="max-w-40">
+                    {project.title}
+                  </WorkspaceBreadcrumbText>
+                </WorkspaceBreadcrumbItem>
+                <WorkspaceBreadcrumbSeparator>
+                  <WorkspaceBreadcrumbText>/</WorkspaceBreadcrumbText>
+                </WorkspaceBreadcrumbSeparator>
+              </>
+            ) : null}
+            <WorkspaceBreadcrumbItem current className="min-w-10 flex-1">
+              <WorkspaceBreadcrumbText>
+                {pivotShell?.title ?? "Pivot"}
+                {record?.retiredAt != null ? " (retired)" : ""}
+              </WorkspaceBreadcrumbText>
+            </WorkspaceBreadcrumbItem>
+          </WorkspaceBreadcrumb>
           <div className="ml-auto flex items-center gap-2">
             <PivotViewSwitch environmentId={pivot.environmentId} threadId={pivot.threadId} force />
             <Menu>
