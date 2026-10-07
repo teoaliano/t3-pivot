@@ -1038,7 +1038,7 @@ describe("delivery and teardown", () => {
   });
 
   it.effect("a scout's worktree goes once its report is recorded", () => {
-    const { fake, layer } = setup();
+    const { layer } = setup();
     return Effect.gen(function* () {
       const pivot = yield* createPivot;
       const scout = yield* dispatch(pivot, { title: "Investigate", kind: "scout" });
@@ -1050,6 +1050,42 @@ describe("delivery and teardown", () => {
       expectOk(yield* call(pivot, "teardown_teammate", { threadId: scout.threadId }));
       const pivots = yield* PivotService.PivotService;
       assert.strictEqual((yield* pivots.teammateDetail(scout.threadId)).scoutReport, "Found it.");
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("keeps a scout's uncommitted files until the user says to discard them", () => {
+    const { fake, workspaceRoot, layer } = setup();
+    return Effect.gen(function* () {
+      const pivot = yield* createPivot;
+      const scout = yield* dispatch(pivot, { title: "Investigate", kind: "scout" });
+      addWorktree(workspaceRoot, scout.worktreePath, scout.branch);
+      NodeFS.writeFileSync(NodePath.join(scout.worktreePath, "notes.md"), "draft\n");
+      expectOk(yield* call(scout.threadId, "record_scout_report", { report: "Found it." }));
+
+      expectRefused(
+        yield* call(pivot, "teardown_teammate", { threadId: scout.threadId }),
+        "invalid_request",
+        "uncommitted",
+      );
+      assert.deepStrictEqual(fake.removedWorktrees, []);
+      assert.strictEqual(fake.threads.get(scout.threadId)?.archived, false);
+
+      const pivots = yield* PivotService.PivotService;
+      const { decision } = yield* pivots.openDecision(pivot, {
+        teammateThreadId: scout.threadId,
+        question: "Discard the scout's notes?",
+      });
+      yield* approve(pivot, decision.decisionId, "Yes, discard them.");
+      const torn = expectOk(
+        yield* call(pivot, "teardown_teammate", {
+          threadId: scout.threadId,
+          discardDecisionId: decision.decisionId,
+        }),
+      );
+      assert.include(torn.reason, "Discarded on the user's word");
+      assert.deepStrictEqual(fake.removedWorktrees, [
+        { worktreePath: scout.worktreePath, force: true },
+      ]);
     }).pipe(Effect.provide(layer));
   });
 });

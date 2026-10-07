@@ -193,7 +193,10 @@ export type PivotMcpLandTeammateResult = typeof PivotMcpLandTeammateResult.Type;
 
 export const PivotMcpTeardownTeammateInput = Schema.Struct({
   threadId: ThreadId,
-  /** For unlanded work only: the decision whose user answer says to discard it. */
+  /**
+   * For unlanded work, or a scout's uncommitted files: the decision whose user answer says
+   * to discard it.
+   */
   discardDecisionId: Schema.optional(PivotDecisionId),
 });
 export type PivotMcpTeardownTeammateInput = typeof PivotMcpTeardownTeammateInput.Type;

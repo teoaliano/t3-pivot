@@ -199,9 +199,10 @@ Tear a scout down once its report is recorded and relayed, unless promotion is l
 ## Teardown
 
 Tear down landed work without asking: a merged PR, a landed branch, a finished scout.
-`teardown_teammate` checks that the work landed and refuses otherwise. The branch stays,
-the history stays readable, and open decisions stay open. More work on it later means a
-fresh dispatch stacked on that branch. To discard unlanded work, escalate a decision with
+`teardown_teammate` checks that the work landed and refuses otherwise, and refuses a scout
+whose worktree still has uncommitted files. The branch stays, the history stays readable,
+and open decisions stay open. More work on it later means a fresh dispatch stacked on that
+branch. To discard unlanded work or a scout's leftover files, escalate a decision with
 `asksApproval` that says exactly what would be lost, and tear down only once the user
 approves it.
 

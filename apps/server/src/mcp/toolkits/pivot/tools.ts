@@ -146,7 +146,7 @@ const LandTeammateTool = Tool.make("land_teammate", {
 
 const TeardownTeammateTool = Tool.make("teardown_teammate", {
   ...pivotTool,
-  description: `${PIVOT_ONLY} Clean up a teammate whose work landed (merged PR, landed branch, recorded scout report): stop it and its dev servers, remove its worktree, archive its thread. Keeps the branch, history and open decisions. Refuses unlanded work unless discardDecisionId names an asksApproval decision the user approved.`,
+  description: `${PIVOT_ONLY} Clean up a teammate whose work landed (merged PR, landed branch, recorded scout report): stop it and its dev servers, remove its worktree, archive its thread. Keeps the branch, history and open decisions. Refuses unlanded work, and a scout's uncommitted files, unless discardDecisionId names an asksApproval decision the user approved.`,
   parameters: PivotMcpTeardownTeammateInput,
   success: PivotMcpTeardownTeammateResult,
 })

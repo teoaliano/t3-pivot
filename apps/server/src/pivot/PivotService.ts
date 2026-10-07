@@ -1067,6 +1067,18 @@ export const make = Effect.gen(function* () {
       let reason: string;
       if (teammate.kind === "scout" && teammate.scoutReport !== null) {
         reason = "Its scout report is recorded.";
+        // The report is the deliverable, but files it left uncommitted are still the user's.
+        if (worktreeExists && !(yield* git.isClean(teammate.worktreePath))) {
+          if (input.discardDecisionId === undefined) {
+            return yield* refuse(
+              command,
+              "Not torn down: the scout's worktree has uncommitted files. Its report is recorded; discarding the files needs the user's word.",
+            );
+          }
+          yield* userApproval(command, pivot, teammate, input.discardDecisionId, "Discarding work");
+          reason =
+            "Discarded on the user's word: the scout's uncommitted files. Its scout report is recorded.";
+        }
       } else {
         const link = yield* linkedPullRequest(teammate);
         let mergedHead: string | null = null;
@@ -1109,7 +1121,7 @@ export const make = Effect.gen(function* () {
         yield* threads.removeWorktree({
           projectRoot: project.workspaceRoot,
           worktreePath: teammate.worktreePath,
-          force: discarding || teammate.kind === "scout",
+          force: discarding,
         });
       }
       yield* threads.archive(teammate.threadId);
