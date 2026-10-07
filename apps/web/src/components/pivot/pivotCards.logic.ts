@@ -29,7 +29,7 @@ export interface TeammateCard {
   readonly threadId: ThreadId;
   readonly title: string;
   readonly status: TeammateStatus;
-  /** An escalated decision outranks the status: the card asks for the user. */
+  /** A held decision or a waiting approval outranks the status: the card asks for the user. */
   readonly needsYou: boolean;
   readonly label: string;
   /** Accent border: something here needs someone's action. */
@@ -75,11 +75,16 @@ export function teammateCard(
   teammate: TeammateRecord,
   shell: TeammateCardShell | null,
 ): TeammateCard {
+  // A cleaned-up teammate is finished: its archived thread no longer says anything.
   const derived =
-    shell === null
-      ? { status: "unreported" as const, detail: teammate.report?.summary ?? null }
-      : deriveTeammateStatus({ ...shell, teammate });
-  const needsYou = teammate.hasEscalatedDecision;
+    teammate.tornDownAt !== null
+      ? { status: "done" as const, detail: teammate.report?.summary ?? null }
+      : shell === null
+        ? { status: "unreported" as const, detail: teammate.report?.summary ?? null }
+        : deriveTeammateStatus({ ...shell, teammate });
+  // Anything waiting on the user: a decision the Pivot holds for them, or an approval
+  // the teammate is waiting on.
+  const needsYou = teammate.hasEscalatedDecision || derived.status === "waiting";
   const reportInLatestRun =
     teammate.report !== null && shell !== null && teammate.report.runId === shell.latestRunId
       ? teammate.report.reportedAt

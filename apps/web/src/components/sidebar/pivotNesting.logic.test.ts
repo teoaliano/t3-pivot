@@ -8,10 +8,12 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
+import type { TeammateCardShell } from "../pivot/pivotCards.logic";
+
 import {
   interleavePivotTeammates,
   nestPivotTeammates,
-  sidebarPivotBadge,
+  sidebarPivotGroup,
   threadNotifiesUser,
 } from "./pivotNesting.logic";
 
@@ -104,14 +106,65 @@ describe("Pivot nesting in the sidebar", () => {
     expect(nestPivotTeammates(threads, () => EMPTY_PIVOT_STATE).topLevel).toHaveLength(2);
   });
 
-  it("badges Pivots with their escalated decisions", () => {
-    expect(sidebarPivotBadge(row("active"), state, 2)).toEqual({
-      retired: false,
-      escalatedDecisions: 1,
-      teammateCount: 2,
-    });
-    expect(sidebarPivotBadge(row("retired"), state, 1)?.retired).toBe(true);
-    expect(sidebarPivotBadge(row("first"), state, 0)).toBeNull();
+  it("sums a Pivot up as its teammates and how many need the user", () => {
+    const running: TeammateCardShell = {
+      title: "",
+      providerInstanceId: "codex",
+      status: "running",
+      latestRunId: null,
+      pendingRuntimeRequest: null,
+      pendingBackgroundTasks: [],
+      lastError: null,
+      usageLimitResetAt: null,
+      latestRunStartedAt: null,
+      latestRunCompletedAt: null,
+      pullRequest: null,
+    };
+    const withNeeds: PivotState = {
+      ...state,
+      teammates: {
+        ...state.teammates,
+        // A decision held for the user, an approval waiting on the user, and a running one.
+        first: { ...state.teammates.first!, hasEscalatedDecision: true },
+        third: teammate("third", "active", "2026-10-06T03:00:00.000Z"),
+        cleaned: {
+          ...teammate("cleaned", "active", "2026-10-05T00:00:00.000Z"),
+          tornDownAt: "2026-10-05T01:00:00.000Z",
+        },
+      },
+      decisions: {
+        own: {
+          decisionId: "own",
+          pivotThreadId: ThreadId.make("active"),
+          teammateThreadId: null,
+        } as never,
+      },
+    };
+    const shellOf = (threadId: ThreadId) =>
+      threadId === "second"
+        ? { ...running, pendingRuntimeRequest: { kind: "approval" } as never }
+        : threadId === "cleaned"
+          ? null
+          : running;
+    const group = sidebarPivotGroup(withNeeds, ThreadId.make("active"), shellOf);
+    expect(group?.live.map((card) => card.threadId)).toEqual(["first", "second", "third"]);
+    expect(group?.finished.map((card) => card.threadId)).toEqual(["cleaned"]);
+    // Two teammates need the user, plus the Pivot's own held decision.
+    expect(group?.needYou).toBe(3);
+    expect(group?.retired).toBe(false);
+    // A retired Pivot keeps its finished teammates, read from the records.
+    // A takeover moves every live teammate, so a retired Pivot only has cleaned-up ones.
+    const afterTakeover: PivotState = {
+      ...state,
+      teammates: {
+        ...state.teammates,
+        finished: { ...state.teammates.finished!, tornDownAt: "2026-10-05T00:00:00.000Z" },
+      },
+    };
+    const retired = sidebarPivotGroup(afterTakeover, ThreadId.make("retired"), () => null);
+    expect(retired).toMatchObject({ retired: true, live: [], needYou: 0 });
+    expect(retired?.finished.map((card) => card.threadId)).toEqual(["finished"]);
+    expect(sidebarPivotGroup(state, ThreadId.make("first"), () => null)).toBeNull();
   });
 
   it("teammate threads produce no notifications", () => {

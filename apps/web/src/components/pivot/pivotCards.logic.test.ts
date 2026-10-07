@@ -76,9 +76,10 @@ describe("teammate cards", () => {
       label: "Stopped",
       attention: true,
     });
+    // Waiting on an approval is the user's to answer, so it reads as needs you.
     expect(
       teammateCard(teammate(), shell({ pendingRuntimeRequest: { kind: "approval" } as never })),
-    ).toMatchObject({ label: "Waiting on approval", attention: true });
+    ).toMatchObject({ status: "waiting", label: "Needs you", needsYou: true, attention: true });
     expect(teammateCard(teammate({ hasEscalatedDecision: true }), shell())).toMatchObject({
       status: "working",
       label: "Needs you",
@@ -87,6 +88,15 @@ describe("teammate cards", () => {
     expect(teammateCard(teammate({ report: report("working", "x") }), shell()).attention).toBe(
       false,
     );
+  });
+
+  it("reads a cleaned-up teammate as done, whatever its thread says", () => {
+    expect(teammateCard(teammate({ tornDownAt: "2026-10-06T12:00:00.000Z" }), null)).toMatchObject({
+      status: "done",
+      label: "Done",
+      attention: false,
+      needsYou: false,
+    });
   });
 
   it("shows the PR number for a ship and Scout for a scout", () => {

@@ -1,5 +1,15 @@
-import type { PivotState } from "@t3tools/client-runtime/pivot-state";
+import {
+  decisionsHeldBy,
+  type PivotState,
+  teammatesOfPivot,
+} from "@t3tools/client-runtime/pivot-state";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+
+import {
+  type TeammateCard,
+  type TeammateCardShell,
+  teammateCards,
+} from "../pivot/pivotCards.logic";
 
 /**
  * Pivot mode in the sidebar. A Pivot's teammates leave the shelves and sit under
@@ -83,25 +93,33 @@ export function interleavePivotTeammates<T extends ThreadRef>(
   return result;
 }
 
-export interface SidebarPivotBadge {
+export interface SidebarPivotGroup {
   readonly retired: boolean;
-  /** Decisions the Pivot holds for the user. */
-  readonly escalatedDecisions: number;
-  readonly teammateCount: number;
+  /** In dispatch order, as the Pivot view's cards. */
+  readonly live: ReadonlyArray<TeammateCard>;
+  /** Done or cleaned up, behind "N finished". Read from the records, so archived ones stay. */
+  readonly finished: ReadonlyArray<TeammateCard>;
+  /** Teammates waiting on the user, plus decisions the Pivot holds about its own work. */
+  readonly needYou: number;
 }
 
-/** The badge a Pivot's row shows; null for any other thread. */
-export function sidebarPivotBadge(
-  thread: ThreadRef,
+/** What a Pivot's sidebar row sums up and lists; null for any other thread. */
+export function sidebarPivotGroup(
   pivotState: PivotState | null,
-  teammateCount: number,
-): SidebarPivotBadge | null {
-  const pivot = pivotState?.pivots[thread.id];
-  if (pivot === undefined) return null;
+  pivotThreadId: ThreadId,
+  shellOf: (threadId: ThreadId) => TeammateCardShell | null,
+): SidebarPivotGroup | null {
+  const pivot = pivotState?.pivots[pivotThreadId];
+  if (pivotState == null || pivot === undefined) return null;
+  const cards = teammateCards(teammatesOfPivot(pivotState, pivotThreadId), shellOf);
+  const ownDecisions = decisionsHeldBy(pivotState, pivotThreadId).filter(
+    (decision) => decision.teammateThreadId === null,
+  ).length;
   return {
     retired: pivot.retiredAt !== null,
-    escalatedDecisions: pivot.escalatedDecisionCount,
-    teammateCount,
+    live: cards.live,
+    finished: cards.finished,
+    needYou: cards.live.filter((card) => card.needsYou).length + ownDecisions,
   };
 }
 

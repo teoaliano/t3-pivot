@@ -1,10 +1,12 @@
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
 import { usePivotStatesStore } from "./pivot/pivotStatesStore";
-import { SidebarPivotStrip } from "./pivot/SidebarPivotStrip";
+import { teammateCardShellOf } from "./pivot/pivotCards.logic";
+import { SidebarPivotSummary, SidebarTeammateList } from "./pivot/SidebarPivotStrip";
 import {
   nestPivotTeammates,
   pivotNestingKey,
-  sidebarPivotBadge,
+  type SidebarPivotGroup,
+  sidebarPivotGroup,
 } from "./sidebar/pivotNesting.logic";
 import { SidebarNewPivotButton } from "./pivot/SidebarNewPivotButton";
 import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
@@ -1116,6 +1118,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   wokeAt: string | null;
   isActive: boolean;
   openPullRequestsInRightPanel: boolean;
+  // T3 Pivot: a Pivot's teammate count, needs-you count and fold toggle, in its last line.
+  pivotSummary: ReactNode;
   jumpLabel: string | null;
   currentEnvironmentId: string | null;
   environmentLabel: string | null;
@@ -2120,7 +2124,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               {/* Always the branch. The plan step used to take this slot while
                   working, but it truncated to a half-sentence and dropped the
                   branch, so the row lost its most stable identifier. */}
-              {thread.branch ? (
+              {props.pivotSummary ? (
+                props.pivotSummary
+              ) : thread.branch ? (
                 <>
                   <ThreadWorktreeIndicator thread={thread} />
                   <span className="flex min-w-0 flex-1 text-muted-foreground/40">
@@ -2422,6 +2428,24 @@ export default function Sidebar() {
   const [collapsedPivotKeys, setCollapsedPivotKeys] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  // T3 Pivot: each Pivot's row sums up its teammates, read from the Pivot records so
+  // cleaned-up (archived) teammates stay listed under it.
+  const pivotGroupsByKey = useMemo(() => {
+    const shellByKey = new Map(threads.map((shell) => [pivotNestingKey(shell), shell] as const));
+    const groups = new Map<string, SidebarPivotGroup>();
+    for (const [environmentId, pivotState] of Object.entries(pivotStatesByEnvironment)) {
+      if (pivotState == null) continue;
+      for (const pivot of Object.values(pivotState.pivots)) {
+        const key = `${environmentId}:${pivot.threadId}`;
+        const group = sidebarPivotGroup(pivotState, pivot.threadId, (threadId) => {
+          const shell = shellByKey.get(`${environmentId}:${threadId}`);
+          return shell === undefined ? null : teammateCardShellOf(shell.source, shell.pullRequests);
+        });
+        if (group !== null) groups.set(key, group);
+      }
+    }
+    return groups;
+  }, [pivotStatesByEnvironment, threads]);
   const togglePivotExpanded = useCallback((pivotKey: string) => {
     setCollapsedPivotKeys((current) => {
       const next = new Set(current);
@@ -5143,6 +5167,17 @@ export default function Sidebar() {
                     )}
                   >
                     {(() => {
+                      const renderPivotSummary = (thread: EnvironmentThreadShell) => {
+                        const pivotKey = pivotNestingKey(thread);
+                        const group = pivotGroupsByKey.get(pivotKey);
+                        return group === undefined ? null : (
+                          <SidebarPivotSummary
+                            group={group}
+                            expanded={!collapsedPivotKeys.has(pivotKey)}
+                            onToggle={() => togglePivotExpanded(pivotKey)}
+                          />
+                        );
+                      };
                       const renderThreadRowInner = (
                         thread: EnvironmentThreadShell,
                         section: SidebarSection,
@@ -5213,6 +5248,7 @@ export default function Sidebar() {
                             wokeAt={threadWokeAt(thread, { now: snoozeNow })}
                             isActive={routeThreadKey === threadKey}
                             openPullRequestsInRightPanel={routeThreadRef !== null}
+                            pivotSummary={renderPivotSummary(thread)}
                             jumpLabel={
                               showJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null
                             }
@@ -5300,37 +5336,22 @@ export default function Sidebar() {
                         if (item.kind === "thread") {
                           const thread = threadByKey.get(item.key)!;
                           items.push(renderThreadRow(thread, item.section));
-                          // T3 Pivot: the Pivot strip, then its teammates when expanded.
+                          // T3 Pivot: an expanded Pivot's teammates, right under its row.
                           const pivotKey = pivotNestingKey(thread);
-                          const teammates = pivotTeammatesByKey.get(pivotKey) ?? [];
-                          const badge = sidebarPivotBadge(
-                            thread,
-                            pivotStatesByEnvironment[thread.environmentId] ?? null,
-                            teammates.length,
-                          );
-                          if (badge !== null) {
-                            const expanded = !collapsedPivotKeys.has(pivotKey);
-                            items.push(
-                              <SidebarPivotStrip
-                                key={`${item.key}:pivot`}
-                                badge={badge}
-                                expanded={expanded}
-                                onToggle={() => togglePivotExpanded(pivotKey)}
-                              />,
-                            );
-                            if (expanded && teammates.length > 0) {
+                          const pivotGroup = pivotGroupsByKey.get(pivotKey);
+                          if (pivotGroup !== undefined && !collapsedPivotKeys.has(pivotKey)) {
+                            if (pivotGroup.live.length + pivotGroup.finished.length > 0) {
                               items.push(
-                                <li key={`${item.key}:teammates`} role="presentation">
-                                  <ul
-                                    role="presentation"
-                                    aria-label="Teammates"
-                                    className="ml-3 flex flex-col gap-px border-l border-sidebar-border pl-1"
-                                  >
-                                    {teammates.map((teammate) =>
-                                      renderThreadRowInner(teammate, item.section),
-                                    )}
-                                  </ul>
-                                </li>,
+                                <SidebarTeammateList
+                                  key={`${item.key}:teammates`}
+                                  environmentId={thread.environmentId}
+                                  group={pivotGroup}
+                                  activeThreadId={
+                                    routeThreadRef?.environmentId === thread.environmentId
+                                      ? routeThreadRef.threadId
+                                      : null
+                                  }
+                                />,
                               );
                             }
                           }
