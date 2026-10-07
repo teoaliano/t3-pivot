@@ -42,7 +42,7 @@ import * as Stream from "effect/Stream";
 
 import { randomUuidV4 } from "../orchestration-v2/RandomUuid.ts";
 import * as PivotDatabase from "./PivotDatabase.ts";
-import { type DeliveryChange, PivotEvent, type StoredPivotEvent } from "./PivotEvents.ts";
+import { PivotEvent, SeenPullRequest, type StoredPivotEvent } from "./PivotEvents.ts";
 
 export class PivotRefusedError extends Schema.TaggedError<PivotRefusedError>()(
   "PivotRefusedError",
@@ -175,10 +175,13 @@ export type PivotCommand =
       readonly answer: string;
     }
   | {
-      readonly type: "teammate.record-delivery";
+      /**
+       * Compares the teammate's PRs against the last sighting, which outlives a restart,
+       * and records a PR merged or closed outside the Pivot, or checks gone red after done.
+       */
+      readonly type: "teammate.observe-pull-requests";
       readonly threadId: ThreadId;
-      readonly url: string;
-      readonly change: DeliveryChange;
+      readonly pullRequests: ReadonlyArray<SeenPullRequest>;
     }
   | {
       readonly type: "teammate.record-merge";
@@ -379,6 +382,9 @@ const encodeIntent = Schema.encodeSync(IntentJson);
 const encodeReport = Schema.encodeSync(Schema.fromJsonString(TeammateReport));
 const encodeEscalation = Schema.encodeSync(Schema.fromJsonString(PivotDecisionEscalationSchema));
 const encodeResolution = Schema.encodeSync(Schema.fromJsonString(PivotDecisionResolution));
+const SeenPullRequestsJson = Schema.fromJsonString(Schema.Array(SeenPullRequest));
+const decodeSeenPullRequests = Schema.decodeUnknownSync(SeenPullRequestsJson);
+const encodeSeenPullRequests = Schema.encodeSync(SeenPullRequestsJson);
 
 // Rows are written only through this module, so ids read back carry their brands.
 const toPivot = (row: PivotSqlRow): PivotRow => ({
@@ -823,17 +829,44 @@ export const make = Effect.gen(function* () {
         );
         break;
       }
-      case "teammate.record-delivery": {
-        yield* anyTeammate(command.threadId);
-        emit(
-          {
-            type: "teammate.delivery-changed",
-            threadId: command.threadId,
-            url: command.url,
-            change: command.change,
-          },
-          true,
-        );
+      case "teammate.observe-pull-requests": {
+        const teammate = yield* anyTeammate(command.threadId);
+        if (teammate.tornDownAt !== null) break;
+        const seen = yield* sql<{ readonly pull_requests_json: string | null }>`
+          SELECT pull_requests_json FROM pivot_teammates WHERE thread_id = ${command.threadId}
+        `.pipe(Effect.map((rows) => rows[0]?.pull_requests_json ?? null));
+        // The first sighting is the baseline: what came before it is not news.
+        const previous = seen === null ? null : decodeSeenPullRequests(seen);
+        for (const next of previous === null ? [] : command.pullRequests) {
+          const before = previous?.find((pullRequest) => pullRequest.url === next.url);
+          if (before === undefined) continue;
+          const mergedByPivot = next.state === "merged" && teammate.mergeRequestedUrl === next.url;
+          const change =
+            before.state === "open" &&
+            (next.state === "merged" || next.state === "closed") &&
+            !mergedByPivot
+              ? next.state
+              : !before.checksFailing && next.checksFailing && teammate.observedStatus === "done"
+                ? "checks-failed"
+                : null;
+          if (change === null) continue;
+          emit(
+            {
+              type: "teammate.delivery-changed",
+              threadId: command.threadId,
+              url: next.url,
+              change,
+            },
+            true,
+          );
+        }
+        const encoded = encodeSeenPullRequests(command.pullRequests);
+        if (encoded === seen) break;
+        emit({
+          type: "teammate.pull-requests-seen",
+          threadId: command.threadId,
+          pullRequests: command.pullRequests,
+        });
         break;
       }
       case "teammate.record-merge": {
@@ -1071,6 +1104,13 @@ export const make = Effect.gen(function* () {
       case "teammate.user-message":
       case "teammate.request-answered":
       case "teammate.delivery-changed":
+        return;
+      case "teammate.pull-requests-seen":
+        yield* sql`
+          UPDATE pivot_teammates
+          SET pull_requests_json = ${encodeSeenPullRequests(event.pullRequests)}
+          WHERE thread_id = ${event.threadId}
+        `;
         return;
       case "teammate.merge-requested":
         yield* sql`

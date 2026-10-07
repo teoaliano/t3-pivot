@@ -269,6 +269,12 @@ export const historyLine = (event: PivotEvent): string => {
         : event.change === "closed"
           ? `Its PR closed without merging: ${event.url}`
           : `Checks went red on its PR: ${event.url}`;
+    case "teammate.pull-requests-seen":
+      return event.pullRequests.length === 0
+        ? "No PRs linked."
+        : `PRs: ${event.pullRequests
+            .map((pr) => `${pr.url} ${pr.state}${pr.checksFailing ? ", checks failing" : ""}`)
+            .join("; ")}`;
     case "teammate.merge-requested":
       return event.url === null
         ? "The Pivot's merge was refused by the forge."

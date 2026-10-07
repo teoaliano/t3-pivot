@@ -336,7 +336,6 @@ describe("PivotSupervisor", () => {
     () => {
       const { fake } = setup();
       return Effect.gen(function* () {
-        const supervisor = yield* PivotSupervisor.PivotSupervisor;
         const { pivot, teammate } = yield* running(fake);
         const link = (state: string, checksState: string | null) => ({
           host: "github.com",
@@ -358,11 +357,7 @@ describe("PivotSupervisor", () => {
           stack: null,
         });
         const sync = (state: string, checksState: string | null) =>
-          supervisor.handleEvent({
-            type: "pull-requests",
-            threadId: teammate,
-            links: [link(state, checksState) as never],
-          });
+          shell(fake, teammate, { pullRequests: [link(state, checksState)] });
 
         yield* sync("open", "passing");
         yield* finish(fake, teammate, "done");
@@ -386,10 +381,56 @@ describe("PivotSupervisor", () => {
     },
   );
 
+  it.effect("a PR merged while the server was down is news after the restart", () => {
+    const { fake } = setup();
+    const records = harness(fake);
+    const link = (state: string) =>
+      ({
+        host: "github.com",
+        repository: "o/r",
+        number: 7,
+        url: "https://github.com/o/r/pull/7",
+        source: "agent",
+        linkedAt: "2026-10-06T00:00:00.000Z",
+        snapshot: {
+          state,
+          title: "Fix",
+          headBranch: "pivot/fix-the-login-bug",
+          baseBranch: "main",
+          isDraft: false,
+          updatedAt: null,
+          syncedAt: "2026-10-06T00:00:00.000Z",
+          checksState: "passing",
+        },
+        stack: null,
+      }) as never;
+    return Effect.gen(function* () {
+      const { pivot, teammate } = yield* Effect.gen(function* () {
+        const started = yield* running(fake);
+        yield* shell(fake, started.teammate, { pullRequests: [link("open")] });
+        yield* finish(fake, started.teammate, "done");
+        yield* tick;
+        return started;
+      }).pipe(Effect.provide(PivotSupervisor.layer));
+      const before = wakesFor(fake, pivot).length;
+
+      // While the server is down, the PR merges; V2's next sync lands before any event.
+      fake.threads.get(teammate)!.shell = {
+        ...fake.threads.get(teammate)!.shell,
+        pullRequests: [link("merged")],
+      };
+      yield* TestClock.adjust("1 minute");
+      yield* tick.pipe(Effect.provide(PivotSupervisor.layer));
+      assert.include(
+        wakesFor(fake, pivot)[before]?.text,
+        "Its PR merged outside T3: https://github.com/o/r/pull/7",
+      );
+    }).pipe(Effect.provide(records));
+  });
+
   it.effect("a PR the Pivot merged itself is not news", () => {
     const { fake } = setup({ remote: true });
     return Effect.gen(function* () {
-      const supervisor = yield* PivotSupervisor.PivotSupervisor;
       const pivots = yield* PivotService.PivotService;
       const { pivot, teammate } = yield* running(fake);
       const link = (state: string) =>
@@ -411,11 +452,6 @@ describe("PivotSupervisor", () => {
           },
           stack: null,
         }) as never;
-      yield* supervisor.handleEvent({
-        type: "pull-requests",
-        threadId: teammate,
-        links: [link("open")],
-      });
       yield* shell(fake, teammate, { pullRequests: [link("open")] });
       const { decision } = yield* pivots.openDecision(pivot, {
         teammateThreadId: teammate,
@@ -446,11 +482,7 @@ describe("PivotSupervisor", () => {
         checks: [],
       });
       yield* pivots.mergeTeammate(pivot, { threadId: teammate, decisionId: decision.decisionId });
-      yield* supervisor.handleEvent({
-        type: "pull-requests",
-        threadId: teammate,
-        links: [link("merged")],
-      });
+      yield* shell(fake, teammate, { pullRequests: [link("merged")] });
       yield* tick;
       assert.strictEqual(wakesFor(fake, pivot).length, before);
     }).pipe(Effect.provide(withSupervisor(fake)));
@@ -483,11 +515,52 @@ describe("PivotSupervisor", () => {
       const store = yield* PivotStore.PivotStore;
       yield* store.dispatch({ type: "teammate.set-resume", threadId: teammate, resume: "failed" });
 
+      yield* TestClock.adjust("1 minute");
       yield* tick.pipe(Effect.provide(PivotSupervisor.layer));
       const [digest] = wakesFor(fake, pivot);
       assert.strictEqual(digest?.summary, "Restart: 1 teammate");
-      assert.include(digest!.text, "The server restarted.");
+      assert.include(digest!.text, "The server restarted");
       assert.include(digest!.text, "(did not survive the restart)");
+    }).pipe(Effect.provide(records));
+  });
+
+  it.effect("the first wake after a quiet restart is still a digest", () => {
+    const { fake } = setup();
+    const records = harness(fake);
+    return Effect.gen(function* () {
+      // Before the restart: one teammate blocked on a decision, one still running.
+      const { pivot, teammate } = yield* running(fake, "First task").pipe(
+        Effect.provide(PivotSupervisor.layer),
+      );
+      const other = yield* running(fake, "Second task").pipe(Effect.provide(PivotSupervisor.layer));
+      yield* Effect.gen(function* () {
+        yield* finish(fake, teammate, "blocked");
+        yield* tick;
+      }).pipe(Effect.provide(PivotSupervisor.layer));
+      const before = wakesFor(fake, pivot).length;
+
+      yield* TestClock.adjust("1 minute");
+      yield* Effect.gen(function* () {
+        // Nothing is pending when the server comes back, so nothing wakes the Pivot yet.
+        yield* tick;
+        assert.strictEqual(wakesFor(fake, pivot).length, before);
+        // Later, one teammate finishes: the Pivot hears about every teammate, not just it.
+        yield* finish(fake, other.teammate, "done");
+        yield* tick;
+        const digest = wakesFor(fake, pivot)[before];
+        assert.strictEqual(digest?.summary, "Restart: 2 teammates · 1 decision open");
+        assert.include(digest!.text, "The server restarted");
+        assert.include(digest!.text, '"First task"');
+        assert.include(digest!.text, '"Second task"');
+        // A digest is sent once.
+        const third = yield* running(fake, "Third task");
+        yield* finish(fake, third.teammate, "done");
+        yield* tick;
+        assert.strictEqual(
+          wakesFor(fake, pivot).at(-1)?.summary,
+          "1 teammate changed · 1 decision open",
+        );
+      }).pipe(Effect.provide(PivotSupervisor.layer));
     }).pipe(Effect.provide(records));
   });
 
@@ -543,6 +616,7 @@ describe("PivotSupervisor", () => {
           thread.shell = { ...thread.shell, status: "idle", activeRunId: null };
         }
 
+        yield* TestClock.adjust("1 minute");
         yield* Effect.gen(function* () {
           yield* tick;
           assert.includeMembers(fake.releasedQueues, [

@@ -135,7 +135,7 @@ export const composeWake = (input: WakeInput): Wake => {
 
   const lines: Array<string> = [];
   if (input.digest?.kind === "restart") {
-    lines.push("The server restarted. Where every teammate stands now:");
+    lines.push("The server restarted since your last wake. Where every teammate stands now:");
   } else if (input.digest?.kind === "takeover") {
     lines.push(
       `You took over from the retired Pivot in thread ${input.digest.predecessorThreadId}. Read its transcript with t3_thread_read before acting: plans the user only mentioned there are yours now.`,

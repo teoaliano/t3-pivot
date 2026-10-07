@@ -2,12 +2,12 @@
  * PivotSupervisor - everything in Pivot mode that happens without a caller.
  *
  * It listens to V2's events, records each teammate change it sees (a status
- * transition, a direct message from the user, a PR merged or closed, checks gone
- * red) as an event in Pivot mode's own log, runs the `paused` recheck and the
+ * transition, a direct message from the user, and from the thread's PR links, a PR
+ * merged or closed or checks gone red) as an event in Pivot mode's own log, runs the `paused` recheck and the
  * 30-minute stuck bound, and wakes each Pivot with a notification message listing
  * what changed since its last wake. Wakes are derived from the log after each
- * Pivot's wake cursor, so a restart loses none; the timers read their deadlines
- * from the records.
+ * Pivot's wake cursor, so a restart loses none; the timers read their deadlines,
+ * and PR changes their last sighting, from the records.
  *
  * @module PivotSupervisor
  */
@@ -34,6 +34,7 @@ import * as ServerActivation from "../serverActivation.ts";
 import { loadPivotText } from "./pivotTexts.ts";
 import * as PivotStore from "./PivotStore.ts";
 import * as PivotThreads from "./PivotThreads.ts";
+import type { SeenPullRequest } from "./PivotEvents.ts";
 import { composeWake, type WakeDigest, type WakeTeammate } from "./pivotWake.ts";
 
 /** A teammate still resuming this long after the supervisor started did not survive the restart. */
@@ -69,22 +70,18 @@ const RESUMED: ReadonlySet<string> = new Set([
 
 const FAILING_CHECKS = new Set(["failing", "failure", "failed", "error"]);
 
-interface LinkState {
-  readonly state: string;
-  readonly checksFailing: boolean;
-}
-
-const linkStates = (links: ReadonlyArray<ThreadPullRequestLink>) => {
-  const states = new Map<string, LinkState>();
-  for (const link of links) {
-    if (link.source === "stack-dismissed" || link.snapshot === null) continue;
-    states.set(link.url, {
-      state: link.snapshot.state,
-      checksFailing: FAILING_CHECKS.has(String(link.snapshot.checksState ?? "")),
-    });
-  }
-  return states;
-};
+const seenPullRequests = (links: ReadonlyArray<ThreadPullRequestLink>): Array<SeenPullRequest> =>
+  links.flatMap((link) =>
+    link.source === "stack-dismissed" || link.snapshot === null
+      ? []
+      : [
+          {
+            url: link.url,
+            state: link.snapshot.state,
+            checksFailing: FAILING_CHECKS.has(String(link.snapshot.checksState ?? "")),
+          },
+        ],
+  );
 
 const toMillis = (value: unknown): number | null => {
   if (value === null || value === undefined) return null;
@@ -117,7 +114,6 @@ export const make = Effect.gen(function* () {
   const liveTeammates = new Map<string, ThreadId>();
   const dirty = new Set<string>();
   const lastActivity = new Map<string, number>();
-  const pullRequests = new Map<string, Map<string, LinkState>>();
   const seenUserMessages = new Set<string>();
   // A new report can change a teammate's status with no V2 event, so reports mark it too.
   const seenReports = new Map<string, string | null>();
@@ -179,44 +175,6 @@ export const make = Effect.gen(function* () {
             answer: event.answer,
           });
           return;
-        case "pull-requests": {
-          const next = linkStates(event.links);
-          const previous = pullRequests.get(event.threadId);
-          pullRequests.set(event.threadId, next);
-          if (previous === undefined) return;
-          const teammate = yield* store
-            .getTeammate(event.threadId)
-            .pipe(Effect.orElseSucceed(() => null));
-          for (const [url, state] of next) {
-            const before = previous.get(url);
-            if (before === undefined) continue;
-            const mergedByPivot = state.state === "merged" && teammate?.mergeRequestedUrl === url;
-            if (
-              before.state === "open" &&
-              (state.state === "merged" || state.state === "closed") &&
-              !mergedByPivot
-            ) {
-              yield* record({
-                type: "teammate.record-delivery",
-                threadId: event.threadId,
-                url,
-                change: state.state === "merged" ? "merged" : "closed",
-              });
-            } else if (
-              !before.checksFailing &&
-              state.checksFailing &&
-              teammate?.observedStatus === "done"
-            ) {
-              yield* record({
-                type: "teammate.record-delivery",
-                threadId: event.threadId,
-                url,
-                change: "checks-failed",
-              });
-            }
-          }
-          return;
-        }
       }
     });
 
@@ -226,8 +184,6 @@ export const make = Effect.gen(function* () {
       if (teammate === null || teammate.tornDownAt !== null) return;
       const shell = yield* threads.shell(threadId);
       if (shell === null) return;
-      if (!pullRequests.has(threadId))
-        pullRequests.set(threadId, linkStates(shell.pullRequests ?? []));
       if (teammate.resume === "pending") {
         // Resumed once its run is going again; did not survive if it failed or never came back.
         const now = yield* Clock.currentTimeMillis;
@@ -262,6 +218,13 @@ export const make = Effect.gen(function* () {
         detail: derived.detail,
         pausedUntil:
           derived.status === "paused" ? (reportUntil ?? shell.usageLimitResetAt ?? null) : null,
+      });
+      // After the status, so checks gone red read against a `done` seen in the same pass.
+      // V2 commits a PR sync to the shell before its event goes out, so the shell is current.
+      yield* record({
+        type: "teammate.observe-pull-requests",
+        threadId,
+        pullRequests: seenPullRequests(shell.pullRequests ?? []),
       });
     }).pipe(Effect.catchCause(logFailure("observe")));
 
@@ -355,19 +318,18 @@ export const make = Effect.gen(function* () {
     }).pipe(Effect.catchCause(logFailure("wake")));
 
   /**
-   * A Pivot with wakes pending at the first tick opens with a restart digest; a takeover
-   * created later opens with its own.
+   * A Pivot that existed before this server started opens its next wake, whenever it
+   * comes, with a restart digest; a takeover created later opens with its own.
    */
   const notePivots = (pivots: ReadonlyArray<PivotStore.PivotRow>) =>
     Effect.gen(function* () {
       for (const pivot of pivots) {
         if (knownPivots.has(pivot.threadId)) continue;
         if (!started) {
-          // Only a Pivot something happened to while the server was down opens with one.
-          const pending = yield* store
-            .pendingWake(pivot.threadId)
-            .pipe(Effect.orElseSucceed(() => []));
-          if (pending.length > 0) digests.set(pivot.threadId, { kind: "restart" });
+          const createdAt = toMillis(pivot.createdAt);
+          if (createdAt !== null && startedAtMs !== null && createdAt < startedAtMs) {
+            digests.set(pivot.threadId, { kind: "restart" });
+          }
         } else {
           const predecessor = yield* findPredecessor(pivot.threadId);
           if (predecessor !== null) {

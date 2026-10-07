@@ -20,7 +20,6 @@ import {
   type PullRequestRef,
   type RunId,
   ThreadId,
-  type ThreadPullRequestLink,
   type WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -111,12 +110,7 @@ export type PivotThreadEvent =
       readonly text: string;
     }
   /** The user answered an approval or question the thread's run was held on. */
-  | { readonly type: "request-answered"; readonly threadId: ThreadId; readonly answer: string }
-  | {
-      readonly type: "pull-requests";
-      readonly threadId: ThreadId;
-      readonly links: ReadonlyArray<ThreadPullRequestLink>;
-    };
+  | { readonly type: "request-answered"; readonly threadId: ThreadId; readonly answer: string };
 
 export class PivotThreads extends Context.Service<
   PivotThreads,
@@ -568,15 +562,6 @@ export const toPivotThreadEvents = ({
             },
           ]
         : [activity];
-    case "thread.pull-request-synced":
-      return [
-        activity,
-        {
-          type: "pull-requests",
-          threadId: event.threadId,
-          links: event.payload.pullRequests ?? [],
-        },
-      ];
     default:
       return [activity];
   }

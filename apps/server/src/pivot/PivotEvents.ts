@@ -28,6 +28,14 @@ const event = <const Type extends string, const Fields extends Schema.Struct.Fie
 export const DeliveryChange = Schema.Literals(["merged", "closed", "checks-failed"]);
 export type DeliveryChange = typeof DeliveryChange.Type;
 
+/** A teammate's PR as the supervisor last saw it. */
+export const SeenPullRequest = Schema.Struct({
+  url: Schema.String,
+  state: Schema.String,
+  checksFailing: Schema.Boolean,
+});
+export type SeenPullRequest = typeof SeenPullRequest.Type;
+
 export const PivotEvent = Schema.Union([
   event("pivot.created", {
     threadId: ThreadId,
@@ -87,6 +95,11 @@ export const PivotEvent = Schema.Union([
     threadId: ThreadId,
     url: Schema.String,
     change: DeliveryChange,
+  }),
+  /** What the teammate's PRs look like now, to compare the next sighting against. */
+  event("teammate.pull-requests-seen", {
+    threadId: ThreadId,
+    pullRequests: Schema.Array(SeenPullRequest),
   }),
   /** The Pivot merged the teammate's PR, so its sync reading merged is not news. */
   event("teammate.merge-requested", { threadId: ThreadId, url: Schema.NullOr(Schema.String) }),
