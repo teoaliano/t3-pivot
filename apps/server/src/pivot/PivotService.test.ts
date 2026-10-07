@@ -9,6 +9,7 @@ import * as ServerConfig from "../config.ts";
 import * as PivotService from "./PivotService.ts";
 import { modelSelection, projectId, setup } from "./PivotService.testkit.ts";
 import * as PivotStore from "./PivotStore.ts";
+import { loadPivotText } from "./pivotTexts.ts";
 
 const refusal = <A, R>(effect: Effect.Effect<A, PivotService.PivotServiceError, R>) =>
   effect.pipe(
@@ -93,6 +94,32 @@ describe("PivotService.create", () => {
       assert.strictEqual(second.predecessorThreadId, first.threadId);
       assert.isNotNull((yield* store.getPivot(first.threadId))?.retiredAt);
       assert.strictEqual((yield* store.getActivePivot(projectId))?.threadId, second.threadId);
+    }).pipe(Effect.provide(layer));
+  });
+});
+
+describe("PivotService.refreshHomes", () => {
+  it.effect("brings an active Pivot's contract up to this release and keeps preferences", () => {
+    const { layer } = setup();
+    return Effect.gen(function* () {
+      const pivots = yield* PivotService.PivotService;
+      const store = yield* PivotStore.PivotStore;
+      const created = yield* pivots.create({ projectId, modelSelection, takeover: false });
+      const home = (yield* store.getPivot(created.threadId))!.homePath;
+      // What an older release left behind, plus rules the user wrote themselves.
+      NodeFS.writeFileSync(NodePath.join(home, "AGENTS.md"), "# Old contract\n");
+      NodeFS.writeFileSync(NodePath.join(home, "preferences.md"), "Never merge on Fridays.\n");
+
+      yield* pivots.refreshHomes;
+
+      assert.strictEqual(
+        NodeFS.readFileSync(NodePath.join(home, "AGENTS.md"), "utf8"),
+        yield* loadPivotText("AGENTS"),
+      );
+      assert.strictEqual(
+        NodeFS.readFileSync(NodePath.join(home, "preferences.md"), "utf8"),
+        "Never merge on Fridays.\n",
+      );
     }).pipe(Effect.provide(layer));
   });
 });

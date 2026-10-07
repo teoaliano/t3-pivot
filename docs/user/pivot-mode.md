@@ -47,8 +47,8 @@ layout with no sidebar. Start from a layout preset in the view's menu, then show
 and move panes. The panes are the Pivot's chat, a card per teammate, one teammate's chat, and
 that teammate's preview, files and diff. Open them from a card's menu. A teammate's chat is
 read-only in the Pivot view except for approvals; steer it through the Pivot, or type to it from
-the sidebar. The view, the layout and an optional wallpaper are remembered per Pivot on each
-device.
+the sidebar. The view and the layout are remembered per Pivot on each device. An optional
+wallpaper sits behind the Pivot view; it is set once per device and shared by every Pivot.
 
 ## Your standing rules
 

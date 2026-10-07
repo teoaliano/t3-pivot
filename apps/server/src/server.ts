@@ -590,9 +590,11 @@ const RuntimeCoreDependenciesBaseLive = Layer.mergeAll(
     Layer.provide(PullRequestServiceLive),
     Layer.provide(ProjectionStoreV2.layer),
   ),
-  // Pivot mode: records teammate changes from V2's events and wakes each Pivot.
+  // Pivot mode: brings each active Pivot's home contract up to this release before
+  // any Pivot runs, then records teammate changes from V2's events and wakes each Pivot.
   Layer.effectDiscard(
     Effect.gen(function* () {
+      yield* (yield* PivotService.PivotService).refreshHomes;
       const supervisor = yield* PivotSupervisor.PivotSupervisor;
       yield* supervisor.start;
     }),

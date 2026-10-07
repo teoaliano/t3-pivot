@@ -5014,12 +5014,7 @@ export default function Sidebar() {
               newPivot={
                 <SidebarNewPivotButton
                   projectRef={
-                    newThreadContext.activeThread
-                      ? scopeProjectRef(
-                          newThreadContext.activeThread.environmentId,
-                          newThreadContext.activeThread.projectId,
-                        )
-                      : (newThreadContext.defaultProjectRef ?? null)
+                    newThreadContext.routeProjectRef ?? newThreadContext.defaultProjectRef
                   }
                 />
               }

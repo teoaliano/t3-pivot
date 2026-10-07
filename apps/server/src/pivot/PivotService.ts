@@ -109,6 +109,12 @@ export class PivotService extends Context.Service<
       readonly modelSelection: ModelSelection;
       readonly takeover: boolean;
     }) => Effect.Effect<PivotCreateResult, PivotServiceError>;
+    /**
+     * Rewrites every active Pivot's home contract to this release's, leaving
+     * `preferences.md` alone. Runs at server start, so an update reaches existing Pivots.
+     * A home that fails is logged and skipped.
+     */
+    readonly refreshHomes: Effect.Effect<void>;
     readonly stream: Stream.Stream<PivotStreamEvent, PivotServiceError>;
     /** A teammate's brief and scout report, which never ride the stream. */
     readonly teammateDetail: (
@@ -361,6 +367,19 @@ export const make = Effect.gen(function* () {
         return { threadId, predecessorThreadId: active?.threadId ?? null };
       }),
     );
+
+  const refreshHomes: PivotService["Service"]["refreshHomes"] = Effect.gen(function* () {
+    const active = yield* store.listActivePivots;
+    for (const pivot of active) {
+      yield* home
+        .ensure(pivot.projectId)
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Pivot home refresh failed", { projectId: pivot.projectId, cause }),
+          ),
+        );
+    }
+  }).pipe(Effect.catchCause((cause) => Effect.logWarning("Pivot home refresh failed", { cause })));
 
   const teammateDetail: PivotService["Service"]["teammateDetail"] = (threadId) =>
     Effect.gen(function* () {
@@ -748,7 +767,7 @@ export const make = Effect.gen(function* () {
               pendingRuntimeRequest: shell.pendingRuntimeRequest,
               pendingBackgroundTasks: shell.pendingBackgroundTasks ?? [],
               lastError: shell.lastError ?? null,
-              lastErrorClass: shell.lastErrorClass ?? null,
+              usageLimitResetAt: shell.usageLimitResetAt ?? null,
               teammate,
             });
       const [latest] = yield* store.teammateHistory({ threadId: teammate.threadId, limit: 1 });
@@ -1158,6 +1177,7 @@ export const make = Effect.gen(function* () {
 
   return PivotService.of({
     create,
+    refreshHomes,
     stream: store.stream,
     teammateDetail,
     recordUserAnswer,

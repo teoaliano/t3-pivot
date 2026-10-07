@@ -33,7 +33,7 @@ const shell = (overrides: Partial<TeammateCardShell> = {}): TeammateCardShell =>
   pendingRuntimeRequest: null,
   pendingBackgroundTasks: [],
   lastError: null,
-  lastErrorClass: null,
+  usageLimitResetAt: null,
   latestRunStartedAt: "2026-10-06T10:01:00.000Z",
   latestRunCompletedAt: null,
   pullRequest: null,

@@ -19,7 +19,7 @@ import {
   deriveProviderInstanceEntries,
   sortProviderInstanceEntries,
 } from "../../providerInstances";
-import { useProject } from "../../state/entities";
+import { useProject, waitForThreadShell } from "../../state/entities";
 import { usePivotState } from "../../state/pivot";
 import { useEnvironmentQuery } from "../../state/query";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
@@ -143,8 +143,8 @@ function NewPivotDialog(props: { target: NewPivotTarget; onClose: () => void }) 
         takeover: takeover !== null,
       },
     });
-    setCreating(false);
     if (result._tag !== "Success") {
+      setCreating(false);
       const failure = result._tag === "Failure" ? squashAtomCommandFailure(result) : null;
       toastManager.add({
         type: "error",
@@ -154,6 +154,19 @@ function NewPivotDialog(props: { target: NewPivotTarget; onClose: () => void }) 
       return;
     }
     const ref = scopeThreadRef(environmentId, result.value.threadId);
+    // The route treats a thread missing from the shell as gone and redirects
+    // home, so land only once the new Pivot has reached this client.
+    const arrived = await waitForThreadShell(ref);
+    setCreating(false);
+    if (!arrived) {
+      toastManager.add({
+        type: "error",
+        title: "The Pivot was created, but has not reached this client yet.",
+        description: "Reconnect and open it from the sidebar.",
+      });
+      props.onClose();
+      return;
+    }
     setMode(ref, "chat");
     props.onClose();
     void navigate({ to: "/$environmentId/$threadId", params: buildThreadRouteParams(ref) });
@@ -169,30 +182,33 @@ function NewPivotDialog(props: { target: NewPivotTarget; onClose: () => void }) 
             back only outcomes and the calls that need you.
           </DialogDescription>
         </DialogHeader>
-        <DialogPanel className="flex flex-col gap-4">
-          {!readiness.ready ? (
-            <p className="text-sm text-destructive-foreground" role="alert">
-              {readiness.reason}
-            </p>
-          ) : null}
-          {takeover !== null ? (
-            <p className="text-sm" role="status">
-              This takes over {takeover.liveTeammates} live{" "}
-              {takeover.liveTeammates === 1 ? "teammate" : "teammates"} and {takeover.openDecisions}{" "}
-              open {takeover.openDecisions === 1 ? "decision" : "decisions"} from the active Pivot,
-              which stays as read-only history.
-            </p>
-          ) : null}
-          <ProviderModelPicker
-            disabled={creating}
-            activeInstanceId={activeInstanceId}
-            model={activeModel}
-            lockedProvider={null}
-            instanceEntries={instanceEntries}
-            modelOptionsByInstance={modelOptionsByInstance}
-            isComposerOwned={false}
-            onInstanceModelChange={(instanceId, model) => setSelection({ instanceId, model })}
-          />
+        <DialogPanel>
+          <div className="flex flex-col gap-4">
+            {!readiness.ready ? (
+              <p className="text-sm text-destructive-foreground" role="alert">
+                {readiness.reason}
+              </p>
+            ) : null}
+            {takeover !== null ? (
+              <p className="text-sm" role="status">
+                This takes over {takeover.liveTeammates} live{" "}
+                {takeover.liveTeammates === 1 ? "teammate" : "teammates"} and{" "}
+                {takeover.openDecisions} open{" "}
+                {takeover.openDecisions === 1 ? "decision" : "decisions"} from the active Pivot,
+                which stays as read-only history.
+              </p>
+            ) : null}
+            <ProviderModelPicker
+              disabled={creating}
+              activeInstanceId={activeInstanceId}
+              model={activeModel}
+              lockedProvider={null}
+              instanceEntries={instanceEntries}
+              modelOptionsByInstance={modelOptionsByInstance}
+              isComposerOwned={false}
+              onInstanceModelChange={(instanceId, model) => setSelection({ instanceId, model })}
+            />
+          </div>
         </DialogPanel>
         <DialogFooter>
           <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>

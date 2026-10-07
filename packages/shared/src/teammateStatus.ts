@@ -27,7 +27,7 @@ export interface TeammateStatusInput extends Pick<
   | "pendingRuntimeRequest"
   | "pendingBackgroundTasks"
   | "lastError"
-  | "lastErrorClass"
+  | "usageLimitResetAt"
 > {
   readonly teammate: Pick<TeammateRecord, "report" | "resume">;
 }
@@ -71,13 +71,14 @@ export function deriveTeammateStatus(input: TeammateStatusInput): TeammateStatus
   const failed = resume === "failed" || input.status === "failed";
   const error = failed ? (input.lastError ?? null) : null;
 
+  // V2's limit recovery resumes the run at the reset, so it is a wait, whatever was reported.
+  // A limit with no known reset has nothing to resume it and stays a failure.
+  if (resume !== "failed" && input.status === "failed" && input.usageLimitResetAt) {
+    return { status: "paused", detail: error };
+  }
   // A terminal report stands over a later failure in the same run; the error is the detail.
   if (report && TERMINAL.has(report.status)) {
     return { status: report.status, detail: error ?? report.summary };
-  }
-  // V2's limit recovery resumes the run once the limit resets, so it is a wait.
-  if (resume !== "failed" && input.status === "failed" && input.lastErrorClass === "usage_limit") {
-    return { status: "paused", detail: error };
   }
   if (failed) {
     return { status: "failed", detail: error };

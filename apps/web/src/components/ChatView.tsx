@@ -429,12 +429,8 @@ import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
 import { MessagesTimeline, type MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
 import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
-import {
-  PivotComposerBar,
-  PivotDecisionsStrip,
-  PivotViewSwitch,
-  usePivotChatRole,
-} from "./pivot/PivotChatChrome";
+import { PivotComposerBar, PivotDecisionsStrip, usePivotChatRole } from "./pivot/PivotChatChrome";
+import { useInPivotView } from "./pivot/pivotViewContext";
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveTimelineIsAtEnd, worktreeSetupAgentStarted } from "./chat/MessagesTimeline.logic";
 import {
@@ -2296,7 +2292,10 @@ export default function ChatView(props: ChatViewProps) {
     [activeKnownTerminalIds, panelTerminalIds],
   );
   const previewPanelOpen = activeRightPanelKind === "preview" && isPreviewSupportedInRuntime();
-  const rightPanelOpen = rightPanelState.isOpen;
+  // The Pivot view lays out its own panes. The window-level right panel, terminal drawer, and
+  // their titlebar controls belong to Chat mode, so a chat embedded in a pane renders none of them.
+  const inPivotView = useInPivotView();
+  const rightPanelOpen = rightPanelState.isOpen && !inPivotView;
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   const activeTerminalDrawerPresence = usePanelPresence(
@@ -10959,7 +10958,9 @@ export default function ChatView(props: ChatViewProps) {
               className="pointer-events-none fixed top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)] h-[var(--workspace-topbar-height)] w-28 [-webkit-app-region:no-drag]"
             />
           ) : null}
-          {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
+          {!inPivotView && !rightPanelControlsAtRoot && !rightPanelControlsInPanel
+            ? panelLayoutControls
+            : null}
           {inlineRightPanelOwnsTitleBar ? threadPanelHeaderControl : null}
           <ChatHeader
             activeThreadEnvironmentId={activeThread.environmentId}
@@ -10973,9 +10974,6 @@ export default function ChatView(props: ChatViewProps) {
               ? { onOpenProjectSettings: handleOpenDraftProjectSettings }
               : {})}
           />
-          {isServerThread ? (
-            <PivotViewSwitch environmentId={environmentId} threadId={threadId} />
-          ) : null}
         </header>
 
         {/* Main content area with optional plan sidebar */}
@@ -11543,24 +11541,26 @@ export default function ChatView(props: ChatViewProps) {
         </div>
         {/* end horizontal flex container */}
 
-        {mountedTerminalThreadRefs.map(({ key: mountedThreadKey, threadRef: mountedThreadRef }) => (
-          <PersistentThreadTerminalDrawer
-            key={mountedThreadKey}
-            threadRef={mountedThreadRef}
-            threadId={mountedThreadRef.threadId}
-            active={mountedThreadKey === activeThreadKey}
-            launchContext={
-              mountedThreadKey === activeThreadKey ? (activeTerminalLaunchContext ?? null) : null
-            }
-            focusRequestId={mountedThreadKey === activeThreadKey ? terminalFocusRequestId : 0}
-            splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
-            splitVerticalShortcutLabel={splitTerminalVerticalShortcutLabel ?? undefined}
-            newShortcutLabel={newTerminalShortcutLabel ?? undefined}
-            closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
-            keybindings={keybindings}
-            onAddTerminalContext={addTerminalContextToDraft}
-          />
-        ))}
+        {(inPivotView ? [] : mountedTerminalThreadRefs).map(
+          ({ key: mountedThreadKey, threadRef: mountedThreadRef }) => (
+            <PersistentThreadTerminalDrawer
+              key={mountedThreadKey}
+              threadRef={mountedThreadRef}
+              threadId={mountedThreadRef.threadId}
+              active={mountedThreadKey === activeThreadKey}
+              launchContext={
+                mountedThreadKey === activeThreadKey ? (activeTerminalLaunchContext ?? null) : null
+              }
+              focusRequestId={mountedThreadKey === activeThreadKey ? terminalFocusRequestId : 0}
+              splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
+              splitVerticalShortcutLabel={splitTerminalVerticalShortcutLabel ?? undefined}
+              newShortcutLabel={newTerminalShortcutLabel ?? undefined}
+              closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
+              keybindings={keybindings}
+              onAddTerminalContext={addTerminalContextToDraft}
+            />
+          ),
+        )}
       </div>
 
       {rightPanelPresent && !shouldUsePlanSidebarSheet && activeThreadRef ? (

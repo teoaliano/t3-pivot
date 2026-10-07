@@ -90,6 +90,9 @@ export const PivotDecisionEscalation = Schema.Struct({
 });
 export type PivotDecisionEscalation = typeof PivotDecisionEscalation.Type;
 
+/** The user's words, kept exactly as typed: never trimmed, never only whitespace. */
+const VerbatimText = Schema.String.check(Schema.isPattern(/\S/));
+
 /** How a closed decision was closed. Only the Pivot's answer carries the user's words. */
 export const PivotDecisionResolution = Schema.Struct({
   kind: Schema.Literals(["answered", "cleared", "moot"]),
@@ -113,7 +116,7 @@ export const PivotDecision = Schema.Struct({
   escalation: Schema.NullOr(PivotDecisionEscalation),
   escalatedAt: Schema.NullOr(IsoDateTime),
   /** The user's answer, verbatim. */
-  userAnswer: Schema.NullOr(TrimmedNonEmptyString),
+  userAnswer: Schema.NullOr(VerbatimText),
   userAnsweredAt: Schema.NullOr(IsoDateTime),
   /** For a decision asking for approval: whether the user approved. Null otherwise. */
   userApproved: Schema.NullOr(Schema.Boolean),
@@ -198,7 +201,7 @@ export const PIVOT_USER_ANSWER_MAX_BYTES = 8 * 1024;
 
 export const PivotAnswerDecisionInput = Schema.Struct({
   decisionId: PivotDecisionId,
-  answer: TrimmedNonEmptyString,
+  answer: VerbatimText,
   /** Required for a decision that asks for approval. */
   approved: Schema.optional(Schema.Boolean),
 });

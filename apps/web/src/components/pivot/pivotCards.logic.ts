@@ -152,7 +152,7 @@ export function teammateCardShellOf(
     pendingRuntimeRequest: source.pendingRuntimeRequest,
     pendingBackgroundTasks: source.pendingBackgroundTasks ?? [],
     lastError: source.lastError ?? null,
-    lastErrorClass: source.lastErrorClass ?? null,
+    usageLimitResetAt: source.usageLimitResetAt ?? null,
     latestRunStartedAt: isoOrNull(source.latestRunStartedAt),
     latestRunCompletedAt: isoOrNull(source.latestRunCompletedAt),
     pullRequest: link === null ? null : { number: link.number, url: link.url },

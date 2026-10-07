@@ -49,14 +49,17 @@ const input = (
     pendingRuntimeRequest: null,
     pendingBackgroundTasks: [],
     lastError: null,
-    lastErrorClass: null,
+    usageLimitResetAt: null,
     ...shell,
     teammate: { report: reported, resume },
   };
 };
 
-const failedRun = (lastError: string | null, lastErrorClass: "provider_error" | "usage_limit") =>
-  ({ status: "failed", lastError, lastErrorClass }) as const;
+const failedRun = (lastError: string | null) => ({ status: "failed", lastError }) as const;
+
+/** A run stopped by a usage limit that V2 will resume at the reset. */
+const limitedRun = (lastError: string | null) =>
+  ({ status: "failed", lastError, usageLimitResetAt: "2026-10-01T15:00:00.000Z" }) as const;
 
 type Row = readonly [
   name: string,
@@ -139,7 +142,7 @@ describe("deriveTeammateStatus", () => {
     [
       "background work over a failed run",
       input({
-        ...failedRun("boom", "provider_error"),
+        ...failedRun("boom"),
         pendingBackgroundTasks: background("subagent"),
       }),
       "working",
@@ -158,7 +161,7 @@ describe("deriveTeammateStatus", () => {
     // Never ran yet: dispatch is about to start the first run.
     ["no run yet", input({ status: "idle", latestRunId: null }), "working", null],
 
-    // 3. Idle: the terminal report from the latest run counts.
+    // 4. Idle: the terminal report from the latest run counts.
     [
       "done in the latest run",
       input({ report: report("done", "run-2", "PR opened") }),
@@ -200,30 +203,20 @@ describe("deriveTeammateStatus", () => {
     [
       "working report once idle after a failure",
       input({
-        ...failedRun("crashed", "provider_error"),
+        ...failedRun("crashed"),
         report: report("working", "run-2", "Running tests"),
       }),
       "failed",
       "crashed",
     ],
 
-    // 4. Idle with no terminal report in the latest run.
+    // 5. Idle with no terminal report in the latest run.
     ["no report at all", input(), "unreported", null],
-    [
-      "run failed, no report",
-      input(failedRun("provider crashed", "provider_error")),
-      "failed",
-      "provider crashed",
-    ],
-    [
-      "run failed without error text",
-      input({ status: "failed", lastError: null, lastErrorClass: null }),
-      "failed",
-      null,
-    ],
+    ["run failed, no report", input(failedRun("provider crashed")), "failed", "provider crashed"],
+    ["run failed without error text", input({ status: "failed", lastError: null }), "failed", null],
     [
       "launch failed while preparing the worktree",
-      input({ ...failedRun("setup failed", "provider_error"), latestRunId: RunId.make("run-1") }),
+      input({ ...failedRun("setup failed"), latestRunId: RunId.make("run-1") }),
       "failed",
       "setup failed",
     ],
@@ -232,32 +225,47 @@ describe("deriveTeammateStatus", () => {
     [
       "paused report with a later failure",
       input({
-        ...failedRun("crashed", "provider_error"),
+        ...failedRun("crashed"),
         report: report("paused", "run-2", "Waiting on CI"),
       }),
       "failed",
       "crashed",
     ],
 
-    // A usage limit is a wait: V2's limit recovery resumes the run.
+    // 3. A run stopped by a usage limit is paused until the reset, over any report.
     [
       "run stopped by a usage limit",
-      input(failedRun("Usage limit reached", "usage_limit")),
+      input(limitedRun("Usage limit reached")),
       "paused",
       "Usage limit reached",
     ],
     [
-      "done before a usage limit in the same run",
+      "usage limit after a done in the same run",
       input({
-        ...failedRun("Usage limit reached", "usage_limit"),
+        ...limitedRun("Usage limit reached"),
         report: report("done", "run-2", "PR opened"),
       }),
-      "done",
+      "paused",
+      "Usage limit reached",
+    ],
+    [
+      "usage limit after a blocked in the same run",
+      input({
+        ...limitedRun("Usage limit reached"),
+        report: report("blocked", "run-2", "No credentials"),
+      }),
+      "paused",
+      "Usage limit reached",
+    ],
+    [
+      "usage limit with no reset time is a failure",
+      input(failedRun("Usage limit reached")),
+      "failed",
       "Usage limit reached",
     ],
     [
       "usage limit after a failed resume",
-      input({ ...failedRun("Usage limit reached", "usage_limit"), resume: "failed" }),
+      input({ ...limitedRun("Usage limit reached"), resume: "failed" }),
       "failed",
       "Usage limit reached",
     ],
@@ -272,7 +280,7 @@ describe("deriveTeammateStatus", () => {
     [
       "stale done from an earlier run, then a failure",
       input({
-        ...failedRun("crashed", "provider_error"),
+        ...failedRun("crashed"),
         report: report("done", "run-1", "shipped"),
       }),
       "failed",
@@ -286,11 +294,11 @@ describe("deriveTeammateStatus", () => {
     ],
     ["report with no run", input({ report: report("done", null, "shipped") }), "unreported", null],
 
-    // 5. A terminal report stands over a later failure; the error is the detail.
+    // 6. A terminal report stands over a later failure; the error is the detail.
     [
       "done over a failed run",
       input({
-        ...failedRun("provider crashed", "provider_error"),
+        ...failedRun("provider crashed"),
         report: report("done", "run-2", "PR opened"),
       }),
       "done",
@@ -299,7 +307,7 @@ describe("deriveTeammateStatus", () => {
     [
       "blocked over a failed run",
       input({
-        ...failedRun("provider crashed", "provider_error"),
+        ...failedRun("provider crashed"),
         report: report("blocked", "run-2", "No credentials"),
       }),
       "blocked",
@@ -310,7 +318,6 @@ describe("deriveTeammateStatus", () => {
       input({
         status: "failed",
         lastError: null,
-        lastErrorClass: null,
         report: report("done", "run-2", "PR opened"),
       }),
       "done",

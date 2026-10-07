@@ -104,6 +104,18 @@ const dispatch = (
     ...params,
   }).pipe(Effect.map((outcome) => expectOk(outcome) as PivotMcpDispatchTeammateResult));
 
+/**
+ * Chat renders a single newline as a line break, so a text sent into a thread must not be
+ * hard-wrapped: a line that follows another line has to start a heading or a list item.
+ */
+const assertNoHardWraps = (text: string) => {
+  const lines = text.split("\n");
+  lines.forEach((line, index) => {
+    if (index === 0 || line.trim() === "" || lines[index - 1]!.trim() === "") return;
+    assert.match(line, /^(#|\s*(-|\d+\.) )/, `hard-wrapped line: ${JSON.stringify(line)}`);
+  });
+};
+
 const firstMessage = (fake: FakeV2, threadId: ThreadId) => fake.threads.get(threadId)?.messages[0];
 const lastMessage = (fake: FakeV2, threadId: ThreadId) =>
   fake.threads.get(threadId)?.messages.at(-1);
@@ -172,6 +184,8 @@ describe("Pivot and teammate tools", () => {
         assert.include(brief.text, `Your worktree is \`${result.worktreePath}\``);
         assert.notInclude(brief.text, "{{");
         assert.notInclude(brief.text, "<!--");
+        assert.include(brief.text, "the agent that dispatched you and supervises your work");
+        assertNoHardWraps(brief.text);
 
         const second = yield* dispatch(pivot);
         assert.strictEqual(second.branch, "pivot/fix-the-login-bug-2");
@@ -288,6 +302,7 @@ describe("Pivot and teammate tools", () => {
       const pivot = yield* createPivot;
       const scout = yield* dispatch(pivot, { title: "Why is login slow", kind: "scout" });
       assert.include(firstMessage(fake, scout.threadId)!.text, "This task delivers a report");
+      assertNoHardWraps(firstMessage(fake, scout.threadId)!.text);
 
       expectOk(
         yield* call(scout.threadId, "record_scout_report", {
@@ -311,6 +326,7 @@ describe("Pivot and teammate tools", () => {
       assert.include(message.text, "The login button does nothing on Safari. Make it work.");
       assert.include(message.text, "Add the index.");
       assert.include(message.text, "This task delivers a pull request.");
+      assertNoHardWraps(message.text);
       expectRefused(
         yield* call(pivot, "promote_scout", { threadId: scout.threadId, spec: "again" }),
         "invalid_request",

@@ -247,7 +247,7 @@ export const make = Effect.gen(function* () {
         pendingRuntimeRequest: shell.pendingRuntimeRequest,
         pendingBackgroundTasks: shell.pendingBackgroundTasks ?? [],
         lastError: shell.lastError ?? null,
-        lastErrorClass: shell.lastErrorClass ?? null,
+        usageLimitResetAt: shell.usageLimitResetAt ?? null,
         teammate,
       });
       const reportUntil =
@@ -298,7 +298,7 @@ export const make = Effect.gen(function* () {
               pendingRuntimeRequest: shell.pendingRuntimeRequest,
               pendingBackgroundTasks: shell.pendingBackgroundTasks ?? [],
               lastError: shell.lastError ?? null,
-              lastErrorClass: shell.lastErrorClass ?? null,
+              usageLimitResetAt: shell.usageLimitResetAt ?? null,
               teammate: row,
             });
       return {

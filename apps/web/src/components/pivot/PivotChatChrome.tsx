@@ -9,6 +9,7 @@ import { usePivotState } from "../../state/pivot";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
+import { useChatCanvas } from "../chat/ChatCanvasContext";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
@@ -119,20 +120,30 @@ export function PivotDecisionsStrip(props: {
   pivotThreadId: ThreadId;
 }) {
   const state = usePivotState(props.environmentId);
+  // A short Pivot view pane still needs room for the timeline and composer around the strip.
+  const canvasHeight = useChatCanvas()?.container.height ?? 0;
   const decisions = state === null ? [] : decisionsHeldBy(state, props.pivotThreadId);
   if (decisions.length === 0) return null;
   return (
+    // Opaque: the strip floats over the timeline with the composer.
     <div
       data-pivot-decisions-strip="true"
-      className="mb-2 flex max-h-72 flex-col gap-2 overflow-y-auto rounded-xl border border-warning/32 bg-warning-surface p-2"
+      className="mb-2 flex max-h-72 flex-col overflow-hidden rounded-xl border border-warning/32 bg-background"
+      style={
+        canvasHeight > 0
+          ? { maxHeight: `min(18rem, ${Math.round(Math.max(180, canvasHeight * 0.45))}px)` }
+          : undefined
+      }
     >
-      {decisions.map((decision) => (
-        <PivotDecisionCard
-          key={decision.decisionId}
-          environmentId={props.environmentId}
-          decision={decision}
-        />
-      ))}
+      <div className="flex min-h-0 flex-col gap-2 overflow-y-auto bg-warning-surface p-2">
+        {decisions.map((decision) => (
+          <PivotDecisionCard
+            key={decision.decisionId}
+            environmentId={props.environmentId}
+            decision={decision}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -181,44 +192,48 @@ function PivotDecisionCard(props: { environmentId: EnvironmentId; decision: Pivo
     );
   }
   return (
-    <div className="flex flex-col gap-2 rounded-lg bg-background/60 px-3 py-2 text-sm">
-      <div className="font-medium">
-        {escalation?.questions.map((question) => <p key={question}>{question}</p>) ??
-          decision.summary}
-      </div>
-      {escalation !== null ? (
-        <dl className="grid gap-1 text-muted-foreground">
-          <div>
-            <dt className="inline font-medium text-foreground">Evidence: </dt>
-            <dd className="inline">{escalation.evidence}</dd>
-          </div>
-          <div>
-            <dt className="inline font-medium text-foreground">Consequence: </dt>
-            <dd className="inline">{escalation.consequence}</dd>
-          </div>
-          <div>
-            <dt className="inline font-medium text-foreground">Recommended: </dt>
-            <dd className="inline">{escalation.recommendation}</dd>
-          </div>
-        </dl>
-      ) : null}
-      {escalation !== null && escalation.options.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5">
-          {escalation.options.map((option) => (
-            <Button
-              key={option}
-              size="xs"
-              variant={answer === option ? "default" : "outline"}
-              onClick={() => setAnswer(option)}
-            >
-              {option}
-            </Button>
-          ))}
+    // The question scrolls when space is short; the answer controls below it always show.
+    <div className="flex min-h-0 flex-col gap-2 rounded-lg bg-background/60 px-3 py-2 text-sm">
+      <div className="flex min-h-12 shrink flex-col gap-2 overflow-y-auto">
+        <div className="font-medium">
+          {escalation?.questions.map((question) => <p key={question}>{question}</p>) ??
+            decision.summary}
         </div>
-      ) : null}
+        {escalation !== null ? (
+          <dl className="grid gap-1 text-muted-foreground">
+            <div>
+              <dt className="inline font-medium text-foreground">Evidence: </dt>
+              <dd className="inline">{escalation.evidence}</dd>
+            </div>
+            <div>
+              <dt className="inline font-medium text-foreground">Consequence: </dt>
+              <dd className="inline">{escalation.consequence}</dd>
+            </div>
+            <div>
+              <dt className="inline font-medium text-foreground">Recommended: </dt>
+              <dd className="inline">{escalation.recommendation}</dd>
+            </div>
+          </dl>
+        ) : null}
+        {/* An approval is answered by Approve or Decline; option chips would only duplicate them. */}
+        {escalation !== null && !asksApproval && escalation.options.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {escalation.options.map((option) => (
+              <Button
+                key={option}
+                size="xs"
+                variant={answer === option ? "default" : "outline"}
+                onClick={() => setAnswer(option)}
+              >
+                {option}
+              </Button>
+            ))}
+          </div>
+        ) : null}
+      </div>
       {asksApproval ? (
         // A yes or no, recorded as such, with the user's own words if they add any.
-        <div className="flex items-end gap-2">
+        <div className="flex shrink-0 items-end gap-2">
           <Textarea
             aria-label="Anything to add"
             placeholder="Anything to add (optional)"
@@ -242,7 +257,7 @@ function PivotDecisionCard(props: { environmentId: EnvironmentId; decision: Pivo
           </Button>
         </div>
       ) : (
-        <div className="flex items-end gap-2">
+        <div className="flex shrink-0 items-end gap-2">
           <Textarea
             aria-label="Your answer"
             placeholder="Answer in your own words"

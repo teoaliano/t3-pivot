@@ -740,7 +740,7 @@ function OpenCommandPaletteDialog(props: {
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
+  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeProjectRef } =
     useHandleNewThread();
   const projects = useProjects();
   const referenceThreadRef =
@@ -1136,9 +1136,8 @@ function OpenCommandPaletteDialog(props: {
   );
 
   const activeThreadId = activeThread?.id;
-  const currentProjectEnvironmentId =
-    activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
-  const currentProjectId = activeThread?.projectId ?? activeDraftThread?.projectId ?? null;
+  const currentProjectEnvironmentId = routeProjectRef?.environmentId ?? null;
+  const currentProjectId = routeProjectRef?.projectId ?? null;
   // Where "without a project" threads start: the current environment when it
   // offers them, otherwise the first connected one that does.
   const scratchTargetEnvironmentId = scratchEnvironmentId(

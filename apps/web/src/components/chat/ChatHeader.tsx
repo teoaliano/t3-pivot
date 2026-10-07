@@ -24,6 +24,7 @@ import { readLocalApi } from "~/localApi";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { PivotViewSwitch } from "../pivot/PivotChatChrome";
 import {
   WorkspaceBreadcrumb,
   WorkspaceBreadcrumbItem,
@@ -332,6 +333,10 @@ export const ChatHeader = memo(function ChatHeader({
           )}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
+      {/* Inside the padding reserved for the titlebar panel controls, so they never cover it. */}
+      {isServerThread ? (
+        <PivotViewSwitch environmentId={activeThreadEnvironmentId} threadId={activeThreadId} />
+      ) : null}
     </div>
   );
 });

@@ -3,8 +3,8 @@ import type { ScopedThreadRef } from "@t3tools/contracts";
 import { useParams } from "@tanstack/react-router";
 import { useEffect } from "react";
 
+import { useRouteThreadContext } from "../../hooks/useHandleNewThread";
 import { isNewPivotShortcut, isPivotToggleViewShortcut } from "../../keybindings";
-import { useThreadShell } from "../../state/entities";
 import { usePivotState } from "../../state/pivot";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { resolveThreadRouteRef } from "../../threadRoutes";
@@ -29,18 +29,19 @@ export function useRoutePivot(): {
 /**
  * App-wide Pivot mode wiring: the New Pivot dialog and the two Pivot shortcuts,
  * toggling the routed Pivot's view and starting a Pivot in the routed thread's
- * project.
+ * or draft's project.
  */
 export function PivotAppChrome() {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const environmentIds = useEnvironmentIds();
   const route = useRoutePivot();
-  const shell = useThreadShell(route.ref);
   const setMode = usePivotViewStore((store) => store.setMode);
   const routeRef = route.ref;
   const isPivot = route.isPivot;
   const inPivotView = route.inPivotView;
-  const projectId = shell?.projectId ?? null;
+  const { routeProjectRef } = useRouteThreadContext();
+  const projectEnvironmentId = routeProjectRef?.environmentId ?? null;
+  const projectId = routeProjectRef?.projectId ?? null;
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -49,14 +50,18 @@ export function PivotAppChrome() {
         setMode(routeRef, inPivotView ? "chat" : "pivot");
         return;
       }
-      if (routeRef !== null && projectId !== null && isNewPivotShortcut(event, keybindings)) {
+      if (
+        projectEnvironmentId !== null &&
+        projectId !== null &&
+        isNewPivotShortcut(event, keybindings)
+      ) {
         event.preventDefault();
-        openNewPivotDialog({ environmentId: routeRef.environmentId, projectId });
+        openNewPivotDialog({ environmentId: projectEnvironmentId, projectId });
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [inPivotView, isPivot, keybindings, projectId, routeRef, setMode]);
+  }, [inPivotView, isPivot, keybindings, projectEnvironmentId, projectId, routeRef, setMode]);
 
   return (
     <>

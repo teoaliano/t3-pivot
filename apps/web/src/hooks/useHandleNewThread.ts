@@ -434,8 +434,11 @@ export function useNewThreadHandler() {
   );
 }
 
-export function useHandleNewThread() {
-  const projectOrder = useUiStateStore((store) => store.projectOrder);
+/**
+ * The routed server thread or draft, and the project they belong to: the
+ * project every "in this project" action (new thread, New Pivot) targets.
+ */
+export function useRouteThreadContext() {
   const routeTarget = useParams({
     strict: false,
     select: (params) => resolveThreadRouteTarget(params),
@@ -451,6 +454,17 @@ export function useHandleNewThread() {
         : useComposerDraftStore.getState().getDraftSession(routeTarget.draftId)
       : null,
   );
+  const routeProjectRef = activeThread
+    ? scopeProjectRef(activeThread.environmentId, activeThread.projectId)
+    : activeDraftThread
+      ? scopeProjectRef(activeDraftThread.environmentId, activeDraftThread.projectId)
+      : null;
+  return { activeDraftThread, activeThread, routeDraftId, routeProjectRef, routeThreadRef };
+}
+
+export function useHandleNewThread() {
+  const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const routeContext = useRouteThreadContext();
   const projects = useProjects();
   const orderedProjects = useMemo(() => {
     return orderItemsByPreferredIds({
@@ -466,13 +480,10 @@ export function useHandleNewThread() {
   const handleNewThread = useNewThreadHandler();
 
   return {
-    activeDraftThread,
-    activeThread,
+    ...routeContext,
     defaultProjectRef: orderedProjects[0]
       ? scopeProjectRef(orderedProjects[0].environmentId, orderedProjects[0].id)
       : null,
     handleNewThread,
-    routeDraftId,
-    routeThreadRef,
   };
 }
