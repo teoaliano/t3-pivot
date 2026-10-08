@@ -6,9 +6,10 @@ supervises teammates, each a thread in its own worktree. Vocabulary is in
 
 ## Its records live in their own database
 
-T3 Pivot shares `~/.t3/userdata` and `statev2.sqlite` with the T3 Code (Nightly) app,
-which decodes V2's stored events strictly and rewrites thread rows without fields it
-does not know. So Pivot mode writes nothing Pivot-specific into V2's database: no event
+T3 Pivot tracks upstream's V2 schema, and upstream builds decode V2's stored events
+strictly and rewrite thread rows without fields they do not know. Keeping `statev2.sqlite`
+upstream-shaped keeps every upstream merge and any T3 Code pointed at the same home
+working. So Pivot mode writes nothing Pivot-specific into V2's database: no event
 types, no thread fields, no migrations. Its records (Pivots, teammates, decisions, wake
 cursors) are event-sourced in `pivot.sqlite`, behind their own `PivotSql` tag so its
 client never shadows V2's `SqlClient` (`PivotDatabase.ts`). T3 Code never opens it.

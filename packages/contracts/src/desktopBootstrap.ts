@@ -37,8 +37,8 @@ export type DesktopBackendBootstrap = typeof DesktopBackendBootstrap.Type;
 // T3 home. The desktop stops restarting the backend and tells the user.
 export const DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE = 75;
 
-// The server exits with this code when a newer T3 Code already migrated the
-// database T3 Pivot shares with it. The desktop stops and tells the user.
+// The server exits with this code when a newer build already migrated its
+// database. The desktop stops and tells the user.
 export const DESKTOP_BACKEND_DATABASE_NEWER_EXIT_CODE = 76;
 
 /** Written to `<t3Home>/runtime` just before the desktop app stops its

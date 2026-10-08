@@ -250,7 +250,7 @@ describe("DesktopBackendPool", () => {
         const labelRef = yield* Ref.make("Local");
         const shown = yield* Deferred.make<{ readonly title: string; readonly content: string }>();
         const quit = yield* Deferred.make<void>();
-        const runtimeStatePath = "/Users/alice/.t3/userdata/server-runtime.json";
+        const runtimeStatePath = "/Users/alice/.t3-pivot/userdata/server-runtime.json";
 
         const poolLayer = layerPool(labelRef, {
           fileSystem: FileSystem.layerNoop({
@@ -315,7 +315,7 @@ describe("DesktopBackendPool", () => {
           assert.deepEqual(yield* Deferred.await(shown), {
             title: "T3 Pivot can't start",
             content:
-              "Another T3 Code server is already using this data (pid 88438, origin http://127.0.0.1:3773). Quit it and reopen T3 Pivot.",
+              "Another server is already using this data (pid 88438, origin http://127.0.0.1:3773). Quit it and reopen T3 Pivot.",
           });
           yield* Deferred.await(quit);
         }).pipe(Effect.provide(poolLayer));

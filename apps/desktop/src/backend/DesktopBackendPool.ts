@@ -307,7 +307,7 @@ export const layer = Layer.effect(
       });
       yield* electronDialog.showErrorBox(
         `${appName} can't start`,
-        `Another T3 Code server is already using this data${holder}. Quit it and reopen ${appName}.`,
+        `Another server is already using this data${holder}. Quit it and reopen ${appName}.`,
       );
       yield* electronApp.quit;
     }, Effect.provide(factoryContext));
@@ -315,12 +315,12 @@ export const layer = Layer.effect(
     const handlePrimaryDatabaseNewer = Effect.fn("desktop.backendPool.primaryDatabaseNewer")(
       function* () {
         const appName = environment.branding.baseName;
-        yield* logBackendPoolWarning("primary backend refused: a newer T3 Code migrated its data", {
+        yield* logBackendPoolWarning("primary backend refused: a newer build migrated its data", {
           stateDir: environment.stateDir,
         });
         yield* electronDialog.showErrorBox(
           `${appName} can't start`,
-          `A newer version of T3 Code already upgraded this data. Update ${appName} to the same T3 Code version, then reopen it.`,
+          `A newer version already upgraded this data. Update ${appName}, then reopen it.`,
         );
         yield* electronApp.quit;
       },

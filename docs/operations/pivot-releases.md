@@ -4,8 +4,7 @@
 > [Release](./release.md).
 
 T3 Pivot installs as its own Mac app next to T3 Code (Nightly) and updates itself from the
-fork's GitHub releases. It tracks the same upstream build as that app, so both read the same
-threads. Two commands keep it current, and both run by hand on the release Mac.
+fork's GitHub releases. Two commands keep it current, and both run by hand on the release Mac.
 GitHub Actions stays off on the fork, so upstream's release workflow never runs.
 
 ## One-time setup
@@ -85,13 +84,12 @@ still needs `pivot:release`.
 
 - The iOS app is rebuilt by hand after merges (`vp run ios:release` with the personal-team
   variables). Its OTA updates are off.
-- On the Mac, T3 Pivot and T3 Code (Nightly) share `~/.t3/userdata`, so both show the same threads. Run
-  one at a time: T3 Pivot refuses to start while another live server owns that data, but
-  T3 Code has no such check, so quit T3 Pivot before opening T3 Code.
-- T3 Code updates itself; T3 Pivot doesn't. After T3 Code updates, run `pivot:sync` and
-  `pivot:release` before opening T3 Pivot again. If T3 Code has already migrated the database
-  past what T3 Pivot knows, T3 Pivot refuses to start and says so. To warn before that, a
-  release records the upstream nightly it was built on, and each update check compares it
-  with the newest nightly on upstream's release feed. When upstream is ahead, the sidebar
-  says so next to the update button.
-- Pivot mode's own records live in `~/.t3/userdata/pivot.sqlite`, which T3 Code never opens.
+- Every machine keeps the two apps separate, so both can run at the same time. T3 Code
+  keeps `~/.t3` and Tailscale HTTPS 443. T3 Pivot has its own data in `~/.t3-pivot` and
+  defaults to Tailscale HTTPS port 8444, so on the Mac it is
+  `https://mbp-aliano.<tailnet>.ts.net:8444`. Projects are added to each app separately.
+- T3 Code updates itself; T3 Pivot doesn't. A release records the upstream nightly it was
+  built on, and each update check compares it with the newest nightly on upstream's release
+  feed. When upstream is ahead, the sidebar says so next to the update button; run
+  `pivot:sync` and `pivot:release` to catch up.
+- Pivot mode's own records live in `~/.t3-pivot/userdata/pivot.sqlite`.

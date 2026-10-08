@@ -1250,7 +1250,7 @@ describe("DesktopBackendManager", () => {
     ),
   );
 
-  it.effect("stops restarting and reports when a newer T3 Code migrated the database", () =>
+  it.effect("stops restarting and reports when a newer build migrated the database", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const reported = yield* Deferred.make<void>();

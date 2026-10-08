@@ -18,10 +18,10 @@ update button, if it worked, would pull Alpha from upstream and replace the fork
 
 ## Solution
 
-T3 Pivot installs as its own Mac app, "T3 Pivot", next to Alpha. It reads the same T3 home
-(`~/.t3/userdata`), so every project and thread is in both apps. Only one of them may run at
-a time: T3 Pivot refuses to start its server while another live server owns that data, and
-says which one.
+T3 Pivot installs as its own Mac app, "T3 Pivot", next to Alpha. It keeps its own T3 home
+(`~/.t3-pivot`) and its own Tailscale HTTPS port (8444), so both apps can run at the same
+time. T3 Pivot still refuses to start its server while another live server owns its data,
+and says which one.
 
 Two commands on this Mac keep it current:
 
@@ -42,10 +42,10 @@ follow the same feed.
    installing it never removes or overwrites Alpha.
 2. As the user, I want T3 Pivot and Alpha to show different names in the Dock, the app
    switcher and the menu bar, so that I always know which one I'm in.
-3. As the user, I want T3 Pivot to open my existing projects and threads, so that switching
-   to it does not mean starting over.
-4. As the user, I want T3 Pivot to refuse to start while Alpha's server is running on the
-   same data, so that the two can never write to the database at the same time.
+3. As the user, I want T3 Pivot and Alpha to keep separate data and Tailscale ports, so
+   that I can run both at the same time.
+4. As the user, I want T3 Pivot to refuse to start while another server is running on its
+   data, so that two servers can never write to the database at the same time.
 5. As the user, I want that refusal to tell me which app is holding the data and what to do,
    so that I can quit it and reopen T3 Pivot without guessing.
 6. As the user, I want T3 Pivot to start normally after Alpha crashed and left its runtime
@@ -106,10 +106,12 @@ learns about the fork.
 **Nightly builds.** The fork has no nightly channel. The nightly product name and nightly
 branding stay upstream's and are never produced by a fork release.
 
-**Shared T3 home.** T3 Pivot keeps upstream's state-directory resolution, so it reads and
-writes `~/.t3/userdata`. The user chose this over a separate copy, knowing Alpha does not
-have the guard below: starting Alpha while T3 Pivot runs is still unsafe, and only habit
-prevents it.
+**Separate T3 home.** Every machine keeps the two apps separate (own data, own Tailscale
+port), so both can run at the same time. The packaged desktop app defaults its T3 home to
+`~/.t3-pivot` instead of `~/.t3`, and its Tailscale HTTPS port to 8444 instead of 443, so
+it never takes T3 Code's address. An explicit `T3CODE_HOME` still wins, and development runs
+keep upstream's `~/.t3/dev`. Server hosts run the same split by flags. T3 Pivot starts with
+no projects; nothing is copied from `~/.t3`.
 
 **Single-server guard.** Before a server records itself in the T3 home's runtime state file,
 it reads the file. If the file names another process that is still alive and whose recorded
@@ -117,7 +119,7 @@ origin still answers, startup fails with a typed error that carries that process
 origin. A missing file, a dead pid, or an origin that does not answer means the file is
 stale, and startup continues and overwrites it. The guard lives in the server's
 runtime-state module next to the existing read, write and liveness helpers. The desktop app
-shows the error in its existing backend-start failure path, with the text "Another T3 Code
+shows the error in its existing backend-start failure path, with the text "Another
 server is already using this data (pid N, origin O). Quit it and reopen T3 Pivot." Both
 checks are needed because a pid alone can be reused after a crash.
 
@@ -248,8 +250,6 @@ test should have.
 
 ## Out of scope
 
-- **A separate T3 home for T3 Pivot.** Considered and rejected by the user in favour of
-  shared data.
 - **Guarding Alpha.** Alpha is upstream's build; only T3 Pivot checks for another server.
 - **GitHub Actions releases.** Rejected: it needs Actions on, signing secrets in the repo,
   and upstream's release workflow disabled first.
