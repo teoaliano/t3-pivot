@@ -58,11 +58,34 @@ the first `0.0.47` nightly restarts at `0.0.4700`. After 100 releases on one bas
 refuses until you merge a newer upstream nightly. Release tags are `pivot-vX.Y.Z` and live only on `origin`, so they never
 clash with upstream's `v*` tags.
 
+## Run it on a server host
+
+Homebox runs T3 Pivot as a headless server next to its npm `t3` service. They share nothing:
+T3 Pivot has its own T3 home (`~/.t3-pivot`), port 3774 and Tailscale HTTPS port 8444, so
+T3 Code keeps `https://homebox.<tailnet>.ts.net/` and its own threads. Pair the phone and
+the Mac to `https://homebox.<tailnet>.ts.net:8444` as a second environment. A database
+T3 Code migrates never touches T3 Pivot here.
+
+The host runs a dedicated clone at `~/.t3-pivot/app`, never a working checkout, with an
+`upstream` remote and `gh` logged in as `teoaliano`. Two systemd user units drive it:
+`t3-pivot.service` runs `apps/server/dist/bin.mjs serve --base-dir ~/.t3-pivot --port 3774
+--tailscale-serve --tailscale-serve-port 8444 --no-browser`, and `t3-pivot-update.timer` runs
+`node scripts/pivot.ts host-update` in the clone every night.
+
+`host-update` fast-forwards to `origin/main` and tries a local merge of the newest upstream
+nightly. A merge that is clean and builds is pushed to `main`, so it replaces running
+`pivot:sync` by hand. A conflict, or a merge that doesn't build, becomes the usual `sync/<tag>`
+PR and the host keeps its deployed build. Then it rebuilds and restarts the service when `main`
+moved, which ends any running turn in T3 Pivot. Run it on demand with
+`systemctl --user start t3-pivot-update.service` and read the result with
+`journalctl --user -u t3-pivot-update`. Merged PRs reach the host on the next run. The Mac app
+still needs `pivot:release`.
+
 ## Things that stay manual
 
 - The iOS app is rebuilt by hand after merges (`vp run ios:release` with the personal-team
   variables). Its OTA updates are off.
-- T3 Pivot and T3 Code (Nightly) share `~/.t3/userdata`, so both show the same threads. Run
+- On the Mac, T3 Pivot and T3 Code (Nightly) share `~/.t3/userdata`, so both show the same threads. Run
   one at a time: T3 Pivot refuses to start while another live server owns that data, but
   T3 Code has no such check, so quit T3 Pivot before opening T3 Code.
 - T3 Code updates itself; T3 Pivot doesn't. After T3 Code updates, run `pivot:sync` and

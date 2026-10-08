@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
-// Maintainer commands for T3 Pivot, run by hand on the release Mac.
-//   sync     open a PR on the fork that merges upstream's newest nightly tag
-//   release  build, sign, notarize and publish T3 Pivot from main
-// Both commands act as the fork owner's GitHub account, whatever gh's active
+// Maintainer commands for T3 Pivot.
+//   sync         open a PR on the fork that merges upstream's newest nightly tag
+//   release      build, sign, notarize and publish T3 Pivot from main (release Mac)
+//   host-update  keep a server host's checkout level with upstream and running it
+// All commands act as the fork owner's GitHub account, whatever gh's active
 // account is.
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
@@ -34,6 +35,10 @@ const FORK_REMOTE = "origin";
 const APPLE_TEAM_ID = "N2X3SV5FDD";
 // Created once with `xcrun notarytool store-credentials t3-pivot`.
 const NOTARY_KEYCHAIN_PROFILE = "t3-pivot";
+// The systemd user unit that runs a server host's build, and the local ref
+// marking the commit that unit last started on.
+const HOST_SERVICE = "t3-pivot.service";
+const HOST_DEPLOYED_REF = "refs/pivot/deployed";
 
 export class PivotCommandError extends Schema.TaggedError<PivotCommandError>()(
   "PivotCommandError",
@@ -49,14 +54,15 @@ export class PivotCommandError extends Schema.TaggedError<PivotCommandError>()(
   }
 }
 
-export class PivotReleaseRefusedError extends Schema.TaggedError<PivotReleaseRefusedError>()(
-  "PivotReleaseRefusedError",
+export class PivotRefusedError extends Schema.TaggedError<PivotRefusedError>()(
+  "PivotRefusedError",
   {
+    action: Schema.String,
     reason: Schema.String,
   },
 ) {
   override get message(): string {
-    return `Refusing to release: ${this.reason}`;
+    return `Refusing to ${this.action}: ${this.reason}`;
   }
 }
 
@@ -128,25 +134,26 @@ const forkAccountEnv = run("gh", ["auth", "token", "--user", FORK_ACCOUNT]).pipe
   Effect.map((token) => ({ GH_TOKEN: token })),
 );
 
-const sync = Effect.gen(function* () {
-  const env = yield* forkAccountEnv;
-  yield* run("git", ["fetch", "--quiet", FORK_REMOTE, "main"], env);
+/** Fetches upstream's tags and plans the nightly tag `ref` should merge next. */
+const nextUpstreamTag = Effect.fn("pivot.nextUpstreamTag")(function* (ref: string) {
   yield* run("git", ["fetch", "--quiet", "--tags", UPSTREAM_REMOTE]);
   const upstreamTags = lsRemoteTagNames(
     yield* run("git", ["ls-remote", "--tags", "--refs", UPSTREAM_REMOTE]),
   );
-  const mergedTags = lines(
-    yield* run("git", ["tag", "--merged", `${FORK_REMOTE}/main`, "--list", "v*"]),
-  );
-
+  const mergedTags = lines(yield* run("git", ["tag", "--merged", ref, "--list", "v*"]));
   const next = planUpstreamSync({ upstreamTags, mergedTags });
   if (Option.isNone(next)) {
     const level = Option.getOrElse(newestNightlyTag(upstreamTags), () => "upstream");
     yield* Console.log(`already level with ${level}`);
-    return;
   }
+  return next;
+});
 
-  const tag = next.value;
+/** Opens the PR merging `tag` into the fork's main, or prints the one already open. */
+const openSyncPr = Effect.fn("pivot.openSyncPr")(function* (
+  tag: string,
+  env: Record<string, string>,
+) {
   const branch = `sync/${tag}`;
   const openPr = yield* run(
     "gh",
@@ -181,21 +188,32 @@ const sync = Effect.gen(function* () {
   yield* Console.log(prUrl);
 });
 
+const sync = Effect.gen(function* () {
+  const env = yield* forkAccountEnv;
+  yield* run("git", ["fetch", "--quiet", FORK_REMOTE, "main"], env);
+  const next = yield* nextUpstreamTag(`${FORK_REMOTE}/main`);
+  if (Option.isSome(next)) yield* openSyncPr(next.value, env);
+});
+
 const release = Effect.gen(function* () {
   const env = yield* forkAccountEnv;
 
   const branch = yield* run("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
   if (branch !== "main") {
-    return yield* new PivotReleaseRefusedError({ reason: `on ${branch}, not main.` });
+    return yield* new PivotRefusedError({ action: "release", reason: `on ${branch}, not main.` });
   }
   const changes = yield* run("git", ["status", "--porcelain", "--untracked-files=no"]);
   if (changes.length > 0) {
-    return yield* new PivotReleaseRefusedError({ reason: "main has uncommitted changes." });
+    return yield* new PivotRefusedError({
+      action: "release",
+      reason: "main has uncommitted changes.",
+    });
   }
   yield* run("git", ["fetch", "--quiet", FORK_REMOTE, "main"], env);
   const head = yield* run("git", ["rev-parse", "HEAD"]);
   if (head !== (yield* run("git", ["rev-parse", `${FORK_REMOTE}/main`]))) {
-    return yield* new PivotReleaseRefusedError({
+    return yield* new PivotRefusedError({
+      action: "release",
       reason: `main differs from ${FORK_REMOTE}/main.`,
     });
   }
@@ -205,7 +223,8 @@ const release = Effect.gen(function* () {
     lines(yield* run("git", ["tag", "--merged", "HEAD", "--list", "v*"])),
   );
   if (Option.isNone(upstreamBaseTag)) {
-    return yield* new PivotReleaseRefusedError({
+    return yield* new PivotRefusedError({
+      action: "release",
       reason: "main contains no upstream nightly tag.",
     });
   }
@@ -222,7 +241,8 @@ const release = Effect.gen(function* () {
     .map((line) => /"Developer ID Application: (.+)"/u.exec(line)?.[1])
     .find((name) => name?.endsWith(`(${APPLE_TEAM_ID})`));
   if (identity === undefined) {
-    return yield* new PivotReleaseRefusedError({
+    return yield* new PivotRefusedError({
+      action: "release",
       reason: `no Developer ID Application identity for team ${APPLE_TEAM_ID} in the keychain.`,
     });
   }
@@ -279,6 +299,95 @@ const release = Effect.gen(function* () {
   yield* Console.log(releaseUrl);
 });
 
+export class PivotBuildFailedError extends Schema.TaggedError<PivotBuildFailedError>()(
+  "PivotBuildFailedError",
+  {
+    commit: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `T3 Pivot ${this.commit} failed to build. ${HOST_SERVICE} keeps running its deployed build.`;
+  }
+}
+
+/** Whether a command succeeds, for steps whose failure picks a fallback. */
+const succeeds = <E, R>(effect: Effect.Effect<unknown, E | PivotCommandError, R>) =>
+  effect.pipe(
+    Effect.as(true),
+    Effect.catchTag("PivotCommandError", () => Effect.succeed(false)),
+  );
+
+/** Builds the `t3` server bundle, web client included, into apps/server/dist. */
+const buildServer = Effect.gen(function* () {
+  yield* runVisible("pnpm", ["install", "--frozen-lockfile"]);
+  yield* runVisible("node_modules/.bin/vp", ["run", "--filter", "t3", "build"]);
+});
+
+// Runs from the host's dedicated checkout, never a working one. An upstream tag
+// that merges cleanly and builds is pushed to main; one that conflicts or breaks
+// the build becomes a sync PR instead, and the host keeps its deployed build.
+const hostUpdate = Effect.gen(function* () {
+  const env = yield* forkAccountEnv;
+
+  const branch = yield* run("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+  if (branch !== "main") {
+    return yield* new PivotRefusedError({ action: "update", reason: `on ${branch}, not main.` });
+  }
+  const changes = yield* run("git", ["status", "--porcelain", "--untracked-files=no"]);
+  if (changes.length > 0) {
+    return yield* new PivotRefusedError({
+      action: "update",
+      reason: "main has uncommitted changes.",
+    });
+  }
+  yield* run("git", ["fetch", "--quiet", FORK_REMOTE, "main"], env);
+  yield* run("git", ["merge", "--ff-only", "--quiet", `${FORK_REMOTE}/main`]);
+
+  let mergedTag: string | undefined;
+  const next = yield* nextUpstreamTag("HEAD");
+  if (Option.isSome(next)) {
+    const tag = next.value;
+    const merged = yield* succeeds(
+      run("git", ["merge", "--no-ff", "--no-verify", "-m", `chore: merge upstream ${tag}`, tag]),
+    );
+    if (merged) {
+      mergedTag = tag;
+    } else {
+      yield* run("git", ["merge", "--abort"]);
+      yield* Console.log(`upstream ${tag} conflicts with main`);
+      yield* openSyncPr(tag, env);
+    }
+  }
+
+  const head = yield* run("git", ["rev-parse", "HEAD"]);
+  const deployed = yield* Effect.option(
+    run("git", ["rev-parse", "--verify", "--quiet", HOST_DEPLOYED_REF]),
+  );
+  if (Option.contains(deployed, head)) {
+    yield* Console.log(`${HOST_SERVICE} already runs ${head.slice(0, 12)}`);
+    return;
+  }
+
+  if (!(yield* succeeds(buildServer))) {
+    if (mergedTag !== undefined) yield* openSyncPr(mergedTag, env);
+    // The failed build replaced dist, which the running server still reads.
+    if (Option.isSome(deployed)) {
+      yield* run("git", ["reset", "--hard", "--quiet", deployed.value]);
+      yield* buildServer;
+    }
+    return yield* new PivotBuildFailedError({ commit: head.slice(0, 12) });
+  }
+
+  if (mergedTag !== undefined) {
+    yield* run("git", ["push", "--quiet", FORK_REMOTE, "HEAD:main"], env);
+    yield* Console.log(`merged upstream ${mergedTag} into main`);
+  }
+  // Recorded first: a restart started from inside T3 Pivot ends this process.
+  yield* run("git", ["update-ref", HOST_DEPLOYED_REF, head]);
+  yield* Console.log(`restarting ${HOST_SERVICE} on ${head.slice(0, 12)}`);
+  yield* run("systemctl", ["--user", "restart", HOST_SERVICE]);
+});
+
 const pivotCli = Command.make("pivot").pipe(
   Command.withDescription("Keep T3 Pivot level with upstream and publish its releases."),
   Command.withSubcommands([
@@ -289,6 +398,12 @@ const pivotCli = Command.make("pivot").pipe(
     Command.make("release").pipe(
       Command.withDescription("Build, sign, notarize and publish T3 Pivot from main."),
       Command.withHandler(() => release),
+    ),
+    Command.make("host-update").pipe(
+      Command.withDescription(
+        "Merge upstream's newest nightly if it is clean, then rebuild and restart this host's T3 Pivot.",
+      ),
+      Command.withHandler(() => hostUpdate),
     ),
   ]),
 );
