@@ -4,7 +4,9 @@
 > [Release](./release.md).
 
 T3 Pivot installs as its own Mac app next to T3 Code (Nightly) and updates itself from the
-fork's GitHub releases. Two commands keep it current, and both run by hand on the release Mac.
+fork's GitHub releases. The iPhone app updates itself from TestFlight. Every night Homebox
+merges upstream into `main` and redeploys, and every morning the release Mac publishes
+what `main` hasn't released yet, so the Mac, Homebox and the iPhone run the same build.
 GitHub Actions stays off on the fork, so upstream's release workflow never runs.
 
 ## One-time setup
@@ -20,9 +22,14 @@ GitHub Actions stays off on the fork, so upstream's release workflow never runs.
   It prompts for an app-specific password. An App Store Connect API key works too (`--key`,
   `--key-id`, `--issuer`).
 
-- `gh` is logged in as `teoaliano`. It doesn't have to be the active account, because both
+- `gh` is logged in as `teoaliano`. It doesn't have to be the active account, because the
   commands pass that account's token to `gh` and `git`.
 - The checkout has an `upstream` remote pointing at `pingdotgg/t3code`.
+- For TestFlight, team `N2X3SV5FDD` has an App Store Connect app with bundle id
+  `com.teoaliano.t3pivot`, and an internal testing group with automatic distribution. An
+  App Store Connect API key with the Admin role is saved as
+  `~/.appstoreconnect/private_keys/AuthKey_<key id>.p8`, and `T3PIVOT_ASC_KEY_ID` and
+  `T3PIVOT_ASC_ISSUER_ID` hold its ids. On the phone, TestFlight has Automatic Updates on.
 
 ## Pull in an upstream release
 
@@ -57,6 +64,29 @@ the first `0.0.47` nightly restarts at `0.0.4700`. After 100 releases on one bas
 refuses until you merge a newer upstream nightly. Release tags are `pivot-vX.Y.Z` and live only on `origin`, so they never
 clash with upstream's `v*` tags.
 
+`vp run pivot:ios-release` uploads the iPhone app for the release on `main` to TestFlight,
+under the same version. It is the reduced-capability build a personal-team install gets:
+no widgets, push, Sign in with Apple or OTA updates.
+
+## Publish every morning from the Mac
+
+The release Mac keeps a dedicated clone at `~/.t3-pivot/app`, never a working checkout, with
+an `upstream` remote. From that clone, with the TestFlight ids exported:
+
+```bash
+node scripts/pivot.ts nightly-install
+```
+
+It writes a launchd agent, `com.teoaliano.t3pivot.nightly`, that runs `pivot.ts nightly` at
+07:30 and at every login, so a Mac that was asleep or off catches up when it's next used. It
+needs you logged in, because signing reads the login keychain. `nightly` fast-forwards the
+clone, then publishes the desktop release and the TestFlight build `main` doesn't have yet;
+with nothing new it does nothing. Without the TestFlight ids it skips the iPhone. A failure
+shows a notification. The log is `~/Library/Logs/t3-pivot-nightly.log`; run it now with
+`launchctl kickstart gui/$(id -u)/com.teoaliano.t3pivot.nightly`, and remove it with
+`launchctl bootout gui/$(id -u)/com.teoaliano.t3pivot.nightly`. Rerun `nightly-install`
+after the ids or your `PATH` change, since the agent keeps the values it was installed with.
+
 ## Run it on a server host
 
 Homebox runs T3 Pivot as a headless server next to its npm `t3` service. They share nothing:
@@ -77,19 +107,20 @@ nightly. A merge that is clean and builds is pushed to `main`, so it replaces ru
 PR and the host keeps its deployed build. Then it rebuilds and restarts the service when `main`
 moved, which ends any running turn in T3 Pivot. Run it on demand with
 `systemctl --user start t3-pivot-update.service` and read the result with
-`journalctl --user -u t3-pivot-update`. Merged PRs reach the host on the next run. The Mac app
-still needs `pivot:release`.
+`journalctl --user -u t3-pivot-update`. Merged PRs reach the host on the next run, and the
+Mac and iPhone the next morning.
 
 ## Things that stay manual
 
-- The iOS app is rebuilt by hand after merges (`vp run ios:release` with the personal-team
-  variables). Its OTA updates are off.
+- A conflicting upstream merge waits for you on its `sync/<tag>` PR. Nothing updates until
+  it is merged.
+- The desktop app downloads a release and restarts into it when you click the update button.
 - Every machine keeps the two apps separate, so both can run at the same time. T3 Code
   keeps `~/.t3` and Tailscale HTTPS 443. T3 Pivot has its own data in `~/.t3-pivot` and
   defaults to Tailscale HTTPS port 8444, so on the Mac it is
   `https://mbp-aliano.<tailnet>.ts.net:8444`. Projects are added to each app separately.
 - T3 Code updates itself; T3 Pivot doesn't. A release records the upstream nightly it was
   built on, and each update check compares it with the newest nightly on upstream's release
-  feed. When upstream is ahead, the sidebar says so next to the update button; run
-  `pivot:sync` and `pivot:release` to catch up.
+  feed. When upstream is ahead, the sidebar says so next to the update button. That usually
+  means a `sync/<tag>` PR is waiting.
 - Pivot mode's own records live in `~/.t3-pivot/userdata/pivot.sqlite`.
