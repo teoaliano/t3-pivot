@@ -1,6 +1,5 @@
-// T3 Pivot shares the user's data with T3 Code (Nightly), which updates itself
-// and can migrate the database past what this build knows. Each update check
-// also compares the upstream nightly this build was released on with
+// T3 Pivot is built on an upstream T3 Code nightly. Each update check also
+// compares the upstream nightly this build was released on with
 // upstream's newest, so the sidebar can say a T3 Pivot release is due.
 
 import type { DesktopUpstreamNightlyNotice } from "@t3tools/contracts";

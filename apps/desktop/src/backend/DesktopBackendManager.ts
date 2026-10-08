@@ -309,8 +309,8 @@ export interface BackendInstanceSpec {
   // Fired when the backend exits because another live server owns its T3
   // home. The instance stops instead of restarting into the same refusal.
   readonly onHomeInUse?: () => Effect.Effect<void>;
-  // Fired when the backend exits because a newer T3 Code migrated the
-  // database it shares. The instance stops, since a restart cannot fix it.
+  // Fired when the backend exits because a newer build migrated its
+  // database. The instance stops, since a restart cannot fix it.
   readonly onDatabaseNewer?: () => Effect.Effect<void>;
 }
 

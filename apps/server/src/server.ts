@@ -774,7 +774,7 @@ const layerMakeServer = Layer.unwrap(
       originAnswers: (origin) =>
         serverOriginAnswers(origin).pipe(Effect.provide(FetchHttpClient.layer)),
     }).pipe(Effect.provide(layerPlatformServices));
-    // T3 Pivot shares its database with the T3 Code app; refuse one a newer T3 Code migrated.
+    // Refuse a database a newer build already migrated.
     yield* ensureDatabaseNotNewer(config.dbPath).pipe(Effect.provide(layerPlatformServices));
 
     const layerHttpListening = Layer.effectDiscard(

@@ -13,10 +13,9 @@ mode uses it. The spec keeps its own behavior only where V2's would change what 
 is: teammates nest under their Pivot, wake it after every run, and carry on after a
 restart.
 
-T3 Pivot shares its data folder and V2 database with the T3 Code (Nightly) app and tracks
-the same upstream build, so both apps show the same threads. Pivot mode therefore adds
-nothing to the shared database that T3 Code can't read; its own records live in a separate
-database next to it.
+T3 Pivot keeps its own data folder, separate from the T3 Code (Nightly) app, and tracks the
+same upstream build. Pivot mode adds nothing to the V2 database that T3 Code can't read;
+its own records live in a separate database next to it.
 
 ## Problem statement
 
@@ -826,10 +825,9 @@ Tasks marked **Done** landed on `main` before implementation started. Skip them.
 - Performance: V2's thread shell gains nothing. The Pivot stream carries one small record
   per Pivot and teammate; the brief never rides it.
   The layout tree, view choice and wallpaper stay on the client. Cards do not animate.
-- Shared data: T3 Pivot and the T3 Code (Nightly) app share `~/.t3/userdata` and track
-  the same upstream build, so both show the same threads. The user runs one at a time. T3
-  Pivot refuses to start on a database a newer T3 Code migrated. `pivot:sync` follows
-  upstream's nightly tags for the same reason.
+- Separate data: T3 Pivot keeps `~/.t3-pivot`, apart from T3 Code's `~/.t3`, so both run
+  at the same time. It tracks the same upstream build, and `pivot:sync` follows upstream's
+  nightly tags, so a V2 database stays readable by either.
 - Remote readiness: every Pivot record lives on the server, so local, remote and tunnel
   clients see the same state. Only per-device view preferences live on the client.
 - Durable decisions and their reasons go into `docs/internals/` as the work lands, as the

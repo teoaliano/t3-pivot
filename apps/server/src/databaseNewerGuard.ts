@@ -10,8 +10,9 @@ import * as Schema from "effect/Schema";
 import { migrationEntries } from "./persistence/Migrations.ts";
 
 /**
- * T3 Pivot shares its database with the T3 Code app. Once a newer T3 Code has
- * migrated it, this build would run against a schema it does not know.
+ * Once a newer build has migrated this T3 home's database, for example a later
+ * T3 Pivot or a T3 Code pointed at the same home, this build would run against
+ * a schema it does not know.
  */
 export class ServerDatabaseNewerError extends Schema.TaggedError<ServerDatabaseNewerError>()(
   "ServerDatabaseNewerError",
@@ -20,7 +21,7 @@ export class ServerDatabaseNewerError extends Schema.TaggedError<ServerDatabaseN
   override readonly [Runtime.errorExitCode] = DESKTOP_BACKEND_DATABASE_NEWER_EXIT_CODE;
 
   override get message(): string {
-    return `A newer T3 Code already upgraded this data (migration ${this.migration}). Update T3 Pivot to the same T3 Code version before opening it.`;
+    return `A newer version already upgraded this data (migration ${this.migration}). Update T3 Pivot before opening it.`;
   }
 }
 
@@ -49,7 +50,7 @@ export const readNewerMigration = (dbPath: string, knownThrough = KNOWN_THROUGH)
   });
 
 /**
- * Refuses to start on a database a newer T3 Code migrated. A missing database
+ * Refuses to start on a database a newer build migrated. A missing database
  * is new, and an unreadable one is left to the SQL layer to report.
  */
 export const ensureDatabaseNotNewer = Effect.fn("ensureDatabaseNotNewer")(function* (

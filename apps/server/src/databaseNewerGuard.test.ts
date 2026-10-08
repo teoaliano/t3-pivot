@@ -51,7 +51,7 @@ it.layer(NodeServices.layer)("ensureDatabaseNotNewer", (it) => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("refuses a database a newer T3 Code migrated, naming the migration", () =>
+  it.effect("refuses a database a newer build migrated, naming the migration", () =>
     Effect.gen(function* () {
       const dbPath = yield* databaseWith([
         [newest, "Current"],
