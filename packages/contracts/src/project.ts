@@ -41,7 +41,18 @@ export const ProjectScript = Schema.Struct({
   /** Start the agent while setup runs unless explicitly disabled. */
   async: Schema.optional(Schema.Boolean),
   previewUrl: Schema.optional(TrimmedNonEmptyString),
+  /**
+   * When true, open the preview on this script's dev server once it serves a
+   * page, after it was started as a managed process. The editor only offers
+   * it alongside `previewUrl`.
+   */
   autoOpenPreview: Schema.optional(Schema.Boolean),
+  /**
+   * Whether this action is a dev server the preview and agents can start as
+   * a managed process. Absent means T3 guesses from the command and
+   * `previewUrl`.
+   */
+  devServer: Schema.optional(Schema.Boolean),
 });
 export type ProjectScript = typeof ProjectScript.Type;
 

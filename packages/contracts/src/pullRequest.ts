@@ -860,6 +860,11 @@ export const PullRequestDetail = Schema.Struct({
   reviewers: Schema.Array(PullRequestActor),
   labels: Schema.Array(PullRequestLabel),
   checks: Schema.Array(PullRequestCheck),
+  /**
+   * The check names the base branch requires to merge. Absent where the host does not say. A
+   * required check that has never reported is missing from `checks`, and only this names it.
+   */
+  requiredChecks: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   mergeCapabilities: PullRequestMergeCapabilities,
   /**
    * Who the host says the reader is, which is the one thing a conversation cannot be read without
@@ -1084,6 +1089,11 @@ export const PullRequestActionInput = Schema.Struct({
   mergeMethod: Schema.optional(PullRequestMergeMethod),
   /** Only read for `update-branch`, where absent means the host's own default. */
   updateMethod: Schema.optional(PullRequestUpdateMethod),
+  /**
+   * For `merge`: the head commit the caller checked. The host refuses the merge if the head has
+   * moved since, so a push after the check cannot land unverified.
+   */
+  expectedHeadSha: Schema.optional(TrimmedNonEmptyString),
 });
 export type PullRequestActionInput = typeof PullRequestActionInput.Type;
 

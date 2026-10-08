@@ -441,6 +441,9 @@ export function notificationChildThreadId(
     case "subagent":
     case "delegated_task":
       return source.childThreadId;
+    // A Pivot wake about one teammate opens that teammate.
+    case "teammate":
+      return source.teammateThreadIds.length === 1 ? source.teammateThreadIds[0] : undefined;
     case "command":
     case "monitor":
     case "background_task":

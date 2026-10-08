@@ -58,6 +58,7 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.subscribeServerConfig
   | typeof WS_METHODS.subscribeServerLifecycle
   | typeof WS_METHODS.scheduledTasksSubscribe
+  | typeof WS_METHODS.pivotSubscribe
   | typeof WS_METHODS.subscribeTerminalEvents
   | typeof WS_METHODS.subscribeTerminalMetadata
   | typeof WS_METHODS.subscribePreviewEvents
@@ -67,6 +68,8 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.pullRequestsSubscribeRefreshes
   | typeof WS_METHODS.subscribeVcsStatus
   | typeof WS_METHODS.subscribeWorktreeSetup
+  | typeof WS_METHODS.subscribeManagedProcesses
+  | typeof WS_METHODS.subscribeManagedProcessOverview
   | typeof WS_METHODS.subscribeProjectClones
   | typeof WS_METHODS.terminalAttach
   | typeof WS_METHODS.terminalObserve;

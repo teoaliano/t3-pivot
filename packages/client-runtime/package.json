@@ -7,6 +7,10 @@
       "types": "./src/composerThreadItems.ts",
       "default": "./src/composerThreadItems.ts"
     },
+    "./pivot-state": {
+      "types": "./src/pivotState.ts",
+      "default": "./src/pivotState.ts"
+    },
     "./handoff": {
       "types": "./src/handoff.ts",
       "default": "./src/handoff.ts"
@@ -182,6 +186,10 @@
     "./state/preview": {
       "types": "./src/state/preview.ts",
       "default": "./src/state/preview.ts"
+    },
+    "./state/managed-processes": {
+      "types": "./src/state/managedProcesses.ts",
+      "default": "./src/state/managedProcesses.ts"
     },
     "./state/projects": {
       "types": "./src/state/projects.ts",

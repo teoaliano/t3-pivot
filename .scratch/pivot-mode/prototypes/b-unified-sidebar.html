@@ -1,0 +1,192 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>B · One sidebar + view switch</title>
+    <link rel="stylesheet" href="shared.css" />
+  </head>
+  <body
+    data-hint="Try: open a Pivot, flip Chat / Pivot view in the header, expand a Pivot in the sidebar"
+  >
+    <div class="app" id="app">
+      <aside class="sb" id="sb"></aside>
+      <main class="main" id="main"></main>
+    </div>
+    <script src="shared.js"></script>
+    <script src="bar.js"></script>
+    <script>
+      // Option B: one sidebar. Pivots sit among chats with a badge and expand to their teammates.
+      // Opening a Pivot shows it as a chat; a switch in the header center flips to the Pivot view.
+      const { data, h, seg, mountChat, mountPivotView, statusDot } = Proto;
+      const app = document.getElementById("app"),
+        sb = document.getElementById("sb"),
+        main = document.getElementById("main");
+      const ui = { expanded: { p1: true }, selected: null, menu: false };
+
+      function viewSwitch(id, current) {
+        return seg(
+          [
+            ["chat", "Chat"],
+            ["pivot", "Pivot view"],
+          ],
+          current,
+          (v) => (v === "pivot" ? openPivotView(id) : openPivotChat(id)),
+        );
+      }
+      function openPivotView(id) {
+        app.classList.add("full");
+        mountPivotView(main, id, { center: viewSwitch(id, "pivot") });
+      }
+      function openPivotChat(id) {
+        app.classList.remove("full");
+        ui.selected = id;
+        const p = Proto.pivotById(id);
+        mountChat(main, {
+          title: p.title,
+          project: p.project,
+          messages: p.messages,
+          center: viewSwitch(id, "chat"),
+          placeholder: "Talk to the Pivot",
+        });
+        renderSidebar();
+      }
+      function openThread(item) {
+        ui.selected = item.id;
+        const found = Proto.findTeammate(item.id);
+        if (found) {
+          mountChat(main, {
+            title: found.teammate.title,
+            project: found.pivot.project,
+            messages: Proto.teammateTranscript(found.teammate),
+            note:
+              "Teammate of " +
+              found.pivot.title +
+              ". Typing here wakes the Pivot with your message.",
+            placeholder: "Message this teammate directly",
+          });
+        } else {
+          mountChat(main, {
+            title: item.title,
+            project: item.project,
+            messages: [
+              { who: "user", text: "…" },
+              { who: "pivot", text: "An ordinary T3 chat." },
+            ],
+          });
+        }
+        renderSidebar();
+      }
+
+      function renderSidebar() {
+        const list = h("div", { class: "sb-list" });
+        for (const project of data.projects) {
+          list.append(h("div", { class: "sb-project" }, project.name));
+          for (const p of data.pivots.filter((p) => p.project === project.id)) {
+            const open = ui.expanded[p.id];
+            list.append(
+              h(
+                "button",
+                {
+                  class: "sb-item " + (ui.selected === p.id ? "on" : ""),
+                  onclick: () => openPivotChat(p.id),
+                },
+                h(
+                  "span",
+                  {
+                    class: "chev",
+                    onclick: (e) => {
+                      e.stopPropagation();
+                      ui.expanded[p.id] = !open;
+                      renderSidebar();
+                    },
+                  },
+                  open ? "▾" : "▸",
+                ),
+                h("span", { class: "grow" }, p.title),
+                p.decisions.length ? h("span", { class: "badge warn" }, p.decisions.length) : null,
+                h("span", { class: "badge" }, "Pivot"),
+              ),
+            );
+            if (open)
+              for (const t of p.teammates)
+                list.append(
+                  h(
+                    "button",
+                    {
+                      class: "sb-item child " + (ui.selected === t.id ? "on" : ""),
+                      onclick: () => openThread(t),
+                    },
+                    statusDot(t.status),
+                    h("span", { class: "grow" }, t.title),
+                  ),
+                );
+          }
+          for (const c of data.chats.filter((c) => c.project === project.id))
+            list.append(
+              h(
+                "button",
+                {
+                  class: "sb-item " + (ui.selected === c.id ? "on" : ""),
+                  onclick: () => openThread(c),
+                },
+                h("span", { class: "chev" }),
+                h("span", { class: "grow" }, c.title),
+              ),
+            );
+        }
+        sb.replaceChildren(
+          h("div", { class: "sb-search" }, "Search"),
+          h(
+            "div",
+            { class: "sb-row-actions" },
+            h(
+              "div",
+              {
+                class: "sb-new",
+                role: "button",
+                onclick: () => {
+                  ui.menu = !ui.menu;
+                  renderSidebar();
+                },
+              },
+              "+ New ▾",
+              ui.menu
+                ? h(
+                    "div",
+                    { class: "menu" },
+                    h(
+                      "button",
+                      {
+                        onclick: (e) => {
+                          e.stopPropagation();
+                          ui.menu = false;
+                          renderSidebar();
+                          Proto.toast("New chat");
+                        },
+                      },
+                      "New chat",
+                    ),
+                    h(
+                      "button",
+                      {
+                        onclick: (e) => {
+                          e.stopPropagation();
+                          ui.menu = false;
+                          renderSidebar();
+                          Proto.toast("New Pivot: pick project, provider, model");
+                        },
+                      },
+                      "New Pivot",
+                    ),
+                  )
+                : null,
+            ),
+          ),
+          list,
+        );
+      }
+      renderSidebar();
+      main.replaceChildren(h("div", { class: "empty" }, "Open a Pivot from the sidebar"));
+    </script>
+  </body>
+</html>

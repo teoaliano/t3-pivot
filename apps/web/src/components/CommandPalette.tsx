@@ -1,5 +1,7 @@
 "use client";
 
+import { openNewPivotDialog, usePivotProjectReadiness } from "./pivot/NewPivotDialog";
+import { usePivotModeSupported } from "../state/pivot";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
@@ -67,6 +69,7 @@ import {
   SquarePenIcon,
   SunIcon,
   TextSearchIcon,
+  LayoutDashboardIcon,
 } from "lucide-react";
 import { requestThreadFindOpen } from "./chat/threadFindActionBus";
 import {
@@ -743,7 +746,7 @@ function OpenCommandPaletteDialog(props: {
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
+  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeProjectRef } =
     useHandleNewThread();
   const projects = useProjects();
   const referenceThreadRef =
@@ -1143,9 +1146,8 @@ function OpenCommandPaletteDialog(props: {
   const supportsThreadFind =
     environments.find((environment) => environment.environmentId === activeThread?.environmentId)
       ?.serverConfig?.threadFind === true;
-  const currentProjectEnvironmentId =
-    activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
-  const currentProjectId = activeThread?.projectId ?? activeDraftThread?.projectId ?? null;
+  const currentProjectEnvironmentId = routeProjectRef?.environmentId ?? null;
+  const currentProjectId = routeProjectRef?.projectId ?? null;
   // Where "without a project" threads start: the current environment when it
   // offers them, otherwise the first connected one that does.
   const scratchTargetEnvironmentId = scratchEnvironmentId(
@@ -1154,6 +1156,9 @@ function OpenCommandPaletteDialog(props: {
   const currentProjectCwd = currentProjectId
     ? (projectCwdById.get(currentProjectId) ?? null)
     : null;
+  // T3 Pivot: New Pivot needs a git repository and a server that runs Pivot mode.
+  const pivotReadiness = usePivotProjectReadiness(currentProjectEnvironmentId, currentProjectCwd);
+  const pivotModeSupported = usePivotModeSupported(currentProjectEnvironmentId);
   const currentProjectCwdForBrowse =
     browseEnvironmentId && currentProjectEnvironmentId === browseEnvironmentId
       ? currentProjectCwd
@@ -1907,6 +1912,33 @@ function OpenCommandPaletteDialog(props: {
             handleNewThread,
           });
         },
+      });
+    }
+
+    if (
+      activeProjectTitle &&
+      pivotModeSupported &&
+      currentProjectId !== null &&
+      currentProjectEnvironmentId !== null
+    ) {
+      const pivotTarget = {
+        environmentId: currentProjectEnvironmentId,
+        projectId: currentProjectId,
+      };
+      actionItems.push({
+        kind: "action",
+        value: "action:new-pivot",
+        searchTerms: ["new pivot", "pivot", "supervise", "teammates", "takeover"],
+        title: (
+          <>
+            New Pivot in <span className="font-semibold">{activeProjectTitle}</span>
+          </>
+        ),
+        ...(pivotReadiness.reason === null ? {} : { description: pivotReadiness.reason }),
+        disabled: !pivotReadiness.ready,
+        icon: <LayoutDashboardIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "pivot.new",
+        run: async () => openNewPivotDialog(pivotTarget),
       });
     }
 

@@ -12,6 +12,7 @@ import {
   buildReviewerRequest,
   buildSetFilesViewedGraphQlMutation,
   decodePullRequestActivityJson,
+  decodePullRequestCoreJson,
   decodePullRequestDetailJson,
   decodePullRequestFilesJson,
   decodePullRequestFilesViewedJson,
@@ -341,6 +342,51 @@ describe("pull request detail decoding", () => {
     expect(detail.checks.map((check) => check.required)).toEqual([true, false, undefined]);
     expect(pullRequestCoreGraphQlQuery("github.com")).toContain("isRequired");
     expect(pullRequestCoreGraphQlQuery("github.example.com")).not.toContain("isRequired");
+  });
+
+  it("keeps the checks the base branch requires, which a check that never reported is absent from", () => {
+    const core = (baseRef: Record<string, unknown> | null) =>
+      expectSuccess(
+        decodePullRequestCoreJson(
+          JSON.stringify({
+            data: {
+              repository: {
+                mergeCommitAllowed: true,
+                squashMergeAllowed: true,
+                rebaseMergeAllowed: true,
+                pullRequest: {
+                  number: 7,
+                  title: "Core",
+                  url: "https://github.com/pingdotgg/t3code/pull/7",
+                  headRefName: "feat/core",
+                  baseRefName: "main",
+                  state: "OPEN",
+                  createdAt: "2026-07-01T00:00:00Z",
+                  updatedAt: "2026-07-02T00:00:00Z",
+                  viewerCanUpdateBranch: false,
+                  baseRef,
+                  reviewRequests: { nodes: [] },
+                  labels: { nodes: [] },
+                  commits: { nodes: [] },
+                },
+              },
+            },
+          }),
+        ),
+      );
+
+    expect(
+      core({
+        compare: null,
+        refUpdateRule: { requiredStatusCheckContexts: ["ci/build", null, " ", "test"] },
+      }).requiredChecks,
+    ).toEqual(["ci/build", "test"]);
+    // No rule, a rule GitHub did not answer for, and a server that was never asked all say nothing.
+    expect(core({ compare: null, refUpdateRule: null }).requiredChecks).toBeUndefined();
+    expect(core({ compare: null }).requiredChecks).toBeUndefined();
+    expect(core(null).requiredChecks).toBeUndefined();
+    expect(pullRequestCoreGraphQlQuery("github.com")).toContain("requiredStatusCheckContexts");
+    expect(pullRequestCoreGraphQlQuery("github.example.com")).not.toContain("refUpdateRule");
   });
 
   it("keeps a workflow waiting for approval out of the passing state", () => {

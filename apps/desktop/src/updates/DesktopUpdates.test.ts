@@ -249,6 +249,60 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
+  it.effect("reports a newer upstream nightly alongside each update check", () => {
+    const releaseLink = (tag: string) =>
+      `<entry><link rel="alternate" type="text/html" href="https://github.com/pingdotgg/t3code/releases/tag/${tag}"/></entry>`;
+    const harness = makeHarness({
+      appPackageJson: `{"t3codeUpstreamBaseTag":"v0.0.46-nightly.20261005.2676"}`,
+      upstreamReleasesFeed: `<feed>${[
+        "v0.0.47-preview.20261011.2810",
+        "v0.0.47-nightly.20261010.2801",
+        "v0.0.46-nightly.20261005.2676",
+      ]
+        .map(releaseLink)
+        .join("")}</feed>`,
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        assert.isUndefined((yield* updates.getState).upstreamNightly);
+
+        const result = yield* updates.check("manual");
+        const notice = {
+          latestVersion: "0.0.47-nightly.20261010.2801",
+          baseVersion: "0.0.46-nightly.20261005.2676",
+        };
+        assert.deepEqual(result.state.upstreamNightly, notice);
+        assert.deepEqual(harness.sentStates.at(-1)?.upstreamNightly, notice);
+
+        harness.emit("update-available", { version: "1.2.4" });
+        yield* flushCallbacks;
+        const state = yield* updates.getState;
+        assert.equal(state.status, "available");
+        assert.deepEqual(state.upstreamNightly, notice);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("keeps update checks working when upstream's feed is unreachable", () => {
+    const harness = makeHarness({
+      appPackageJson: `{"t3codeUpstreamBaseTag":"v0.0.46-nightly.20261005.2676"}`,
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        const result = yield* updates.check("manual");
+        assert.isTrue(result.checked);
+        assert.isUndefined(result.state.upstreamNightly);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
   it.effect("preserves a queued installer when the feed has no update", () => {
     const harness = makeHarness();
 
