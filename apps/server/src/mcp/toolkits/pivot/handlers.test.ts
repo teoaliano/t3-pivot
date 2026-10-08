@@ -6,6 +6,7 @@ import {
   EnvironmentId,
   ProjectId,
   ProviderInstanceId,
+  type OrchestrationV2ThreadShell,
   type PivotMcpDispatchTeammateResult,
   RunId,
   type ThreadId,
@@ -14,6 +15,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
+import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as PivotService from "../../../pivot/PivotService.ts";
 import {
   addWorktree,
@@ -25,7 +27,8 @@ import {
 import * as PivotStore from "../../../pivot/PivotStore.ts";
 import type { FakeV2 } from "../../../pivot/PivotThreads.testkit.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
-import { PivotToolkitHandlersLive, TeammateToolkitHandlersLive } from "./handlers.ts";
+import * as McpToolAccess from "../../McpToolAccess.ts";
+import * as PivotHandlers from "./handlers.ts";
 import { PivotToolkit, TeammateToolkit } from "./tools.ts";
 
 const invocation = (threadId: ThreadId): McpInvocationContext.McpInvocationScope => ({
@@ -45,11 +48,32 @@ type Outcome =
   | { readonly ok: true; readonly value: any }
   | { readonly ok: false; readonly code: string; readonly message: string };
 
+// The access gate admits a caller whose own run is live; these tests are about the Pivot's rules.
+const liveCallers = Layer.mock(ThreadManagement.ThreadManagementService)({
+  getThreadShell: (threadId) =>
+    Effect.succeed({
+      id: threadId,
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      activeRunId: RunId.make("run-1"),
+      archivedAt: null,
+      deletedAt: null,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+    } as unknown as OrchestrationV2ThreadShell),
+});
+
 const toolkits = Effect.gen(function* () {
   const pivotToolkit = yield* PivotToolkit;
   const teammateToolkit = yield* TeammateToolkit;
   return { pivotToolkit, teammateToolkit };
-}).pipe(Effect.provide(Layer.mergeAll(PivotToolkitHandlersLive, TeammateToolkitHandlersLive)));
+}).pipe(
+  Effect.provide(
+    Layer.mergeAll(
+      McpToolAccess.HandlersLayer.layer(PivotHandlers.layerPivot),
+      McpToolAccess.HandlersLayer.layer(PivotHandlers.layerTeammate),
+    ).pipe(Layer.provide(liveCallers)),
+  ),
+);
 
 /** Calls a Pivot or teammate tool as `caller` and returns what the agent would see. */
 const call = (

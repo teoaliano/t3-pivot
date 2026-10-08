@@ -24,7 +24,8 @@ import { ProjectStoreV2 } from "../../../orchestration-v2/ProjectStore.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
-import { ManagedProcessToolkitHandlersLive } from "./handlers.ts";
+import * as McpToolAccess from "../../McpToolAccess.ts";
+import * as ManagedProcessHandlers from "./handlers.ts";
 import { ManagedProcessToolkit } from "./tools.ts";
 
 const THREAD_ID = ThreadId.make("thread-1");
@@ -89,15 +90,19 @@ const makeHarness = (
       id: THREAD_ID,
       projectId: project.id,
       worktreePath: options.worktreePath ?? "/worktrees/project/feature",
-    } as Pick<OrchestrationV2ThreadShell, "id" | "projectId" | "worktreePath">;
+      // A live run, which the access gate requires of the calling thread.
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      activeRunId: "run-1",
+      archivedAt: null,
+      deletedAt: null,
+    } as unknown as OrchestrationV2ThreadShell;
     const starts: Array<{ checkoutPath: string; scriptId: string; reallocate: boolean }> = [];
     const commands: Array<string> = [];
     let lastStarted: ManagedProcess | null = null;
     const outcome = options.outcome ?? "running";
     const dependencies = Layer.mergeAll(
       Layer.mock(ThreadManagementService)({
-        getThreadShell: (threadId) =>
-          Effect.succeed(threadId === THREAD_ID ? (thread as OrchestrationV2ThreadShell) : null),
+        getThreadShell: (threadId) => Effect.succeed(threadId === THREAD_ID ? thread : null),
       }),
       Layer.mock(ProjectStoreV2)({
         getShell: () =>
@@ -141,7 +146,11 @@ const makeHarness = (
       ServerSettings.layerTest(),
     );
     const toolkit = yield* ManagedProcessToolkit.pipe(
-      Effect.provide(ManagedProcessToolkitHandlersLive.pipe(Layer.provide(dependencies))),
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(ManagedProcessHandlers.layer).pipe(
+          Layer.provide(dependencies),
+        ),
+      ),
     );
     const call = (
       params: { readonly script?: string },

@@ -1,4 +1,5 @@
 import {
+  OrchestratorMcpFailure,
   ManagedProcessExitedError,
   ManagedProcessDependenciesMissingError,
   ManagedProcessPortsExhaustedError,
@@ -45,7 +46,9 @@ export const StartServerResult = Schema.Struct({
 });
 export type StartServerResult = typeof StartServerResult.Type;
 
+/** What starting fails with, including the access gate's refusal. */
 export const StartServerError = Schema.Union([
+  OrchestratorMcpFailure,
   PreviewAutomationUnavailableError,
   ManagedProcessPortsExhaustedError,
   ManagedProcessScriptNotFoundError,

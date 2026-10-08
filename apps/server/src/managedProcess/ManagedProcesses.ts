@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - Hashes a checkout path into a stable terminal id.
 /**
  * ManagedProcesses - long-running project scripts owned by a checkout.
  *

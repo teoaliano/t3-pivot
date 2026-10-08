@@ -29,13 +29,18 @@ import {
 } from "@t3tools/contracts";
 import { Tool, Toolkit } from "effect/ai";
 
+import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as PivotService from "../../../pivot/PivotService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
 const pivotTool = {
   failure: OrchestratorMcpFailure,
   failureMode: "return" as const,
-  dependencies: [McpInvocationContext.McpInvocationContext, PivotService.PivotService],
+  dependencies: [
+    McpInvocationContext.McpInvocationContext,
+    PivotService.PivotService,
+    ThreadManagementService.ThreadManagementService,
+  ],
 };
 
 const PIVOT_ONLY = "Pivot only.";

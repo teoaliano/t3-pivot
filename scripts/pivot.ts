@@ -314,7 +314,7 @@ export class PivotBuildFailedError extends Schema.TaggedError<PivotBuildFailedEr
 const succeeds = <E, R>(effect: Effect.Effect<unknown, E | PivotCommandError, R>) =>
   effect.pipe(
     Effect.as(true),
-    Effect.catchTag("PivotCommandError", () => Effect.succeed(false)),
+    Effect.catchTags({ PivotCommandError: () => Effect.succeed(false) }),
   );
 
 /** Builds the `t3` server bundle, web client included, into apps/server/dist. */

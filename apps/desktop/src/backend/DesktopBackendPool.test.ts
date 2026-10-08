@@ -21,6 +21,7 @@ import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopTelemetryPublisher from "../telemetry/DesktopTelemetryPublisher.ts";
+import * as DesktopBrowserHost from "../preview/DesktopBrowserHost.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as DesktopWslEnvironment from "../wsl/DesktopWslEnvironment.ts";
@@ -121,7 +122,7 @@ interface PoolLayerOverrides {
   readonly quit?: Effect.Effect<void>;
 }
 
-function makePoolLayer(
+function layerPool(
   labelRef: Ref.Ref<string>,
   overrides: PoolLayerOverrides = {},
 ): Layer.Layer<DesktopBackendPool.DesktopBackendPool> {
@@ -160,11 +161,13 @@ function makePoolLayer(
           updateCommits: Stream.empty,
           updateCancellations: Stream.empty,
         }),
+        DesktopBrowserHost.layer,
         Layer.succeed(DesktopBackendConfiguration.DesktopBackendConfiguration, {
           resolvePrimary:
             overrides.resolvePrimary ?? Effect.die("unexpected primary config resolve"),
           resolvePrimaryLabel: Ref.get(labelRef),
           resolveWsl: () => Effect.die("unexpected WSL config resolve"),
+          currentBootstrapToken: Effect.die("unexpected bootstrap token read"),
         } satisfies DesktopBackendConfiguration.DesktopBackendConfiguration["Service"]),
         DesktopAppSettings.layerTest(),
         DesktopWslEnvironment.layerTest(),
@@ -230,7 +233,7 @@ describe("DesktopBackendPool", () => {
       Effect.gen(function* () {
         const labelRef = yield* Ref.make("Windows");
         const pool = yield* DesktopBackendPool.DesktopBackendPool.pipe(
-          Effect.provide(makePoolLayer(labelRef)),
+          Effect.provide(layerPool(labelRef)),
         );
         const primary = yield* pool.primary;
 
@@ -249,7 +252,7 @@ describe("DesktopBackendPool", () => {
         const quit = yield* Deferred.make<void>();
         const runtimeStatePath = "/Users/alice/.t3/userdata/server-runtime.json";
 
-        const poolLayer = makePoolLayer(labelRef, {
+        const poolLayer = layerPool(labelRef, {
           fileSystem: FileSystem.layerNoop({
             exists: () => Effect.succeed(true),
             readFileString: (path) =>
