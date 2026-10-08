@@ -11,6 +11,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   RunId,
+  RuntimeRequestId,
   ThreadId,
   TurnItemId,
 } from "@t3tools/contracts";
@@ -38,6 +39,8 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import type * as Context from "effect/Context";
+import * as PivotAwareness from "./PivotAwareness.ts";
 import * as AgentAwarenessRelay from "./AgentAwarenessRelay.ts";
 
 const THREAD_ID = ThreadId.make("relay-thread");
@@ -144,6 +147,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
     /** Serves shells from this source instead of `currentShell`. */
     readonly readShell?: (threadId: ThreadId) => Effect.Effect<OrchestrationV2ThreadShell | null>;
     readonly domainEvents?: Stream.Stream<OrchestrationV2DomainEvent>;
+    readonly pivotAwareness?: Context.Service.Shape<typeof PivotAwareness.PivotAwareness>;
   } = {},
 ) {
   const values = new Map<string, Uint8Array>(
@@ -216,6 +220,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
     streamStoredEvents: Stream.empty,
     streamStoredEventsFrom: () => Stream.empty,
     streamDomainEvents: options.domainEvents ?? Stream.empty,
+    streamLiveStoredEvents: Stream.empty,
   });
   const publications: Array<{
     readonly url: string;
@@ -246,6 +251,9 @@ const makeTestRelay = Effect.fnUntraced(function* (
     { preconnect: () => {} },
   );
   const relay = yield* AgentAwarenessRelay.make.pipe(
+    options.pivotAwareness === undefined
+      ? (effect) => effect
+      : Effect.provideService(PivotAwareness.PivotAwareness, options.pivotAwareness),
     Effect.provideService(ServerSecretStore.ServerSecretStore, secrets),
     Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
     Effect.provideService(ServerEnvironment.ServerEnvironment, {
@@ -687,6 +695,53 @@ describe("AgentAwarenessRelay", () => {
       yield* TestClock.adjust("5 seconds");
       yield* relay.drain;
       assert.equal(publications.length, 0);
+    }),
+  );
+
+  it.effect("never publishes for a T3 Pivot teammate", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay({
+        pivotAwareness: {
+          roleOf: () => Effect.succeed({ kind: "teammate" }),
+          changes: Stream.empty,
+        },
+      });
+      yield* Ref.set(currentShell, shell({ status: "running" }));
+      yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      assert.equal(publications.length, 0);
+    }),
+  );
+
+  it.effect("publishes a T3 Pivot teammate while a question holds it for the user", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay({
+        pivotAwareness: {
+          roleOf: () => Effect.succeed({ kind: "teammate" }),
+          changes: Stream.empty,
+        },
+      });
+      yield* Ref.set(
+        currentShell,
+        shell({
+          status: "waiting",
+          pendingRuntimeRequest: {
+            id: RuntimeRequestId.make("request-1"),
+            kind: "user_input",
+            createdAt: yield* DateTime.now,
+          },
+        }),
+      );
+      yield* relay.publishThread(THREAD_ID);
+      assert.equal(publications[0]?.state?.phase, "waiting_for_input");
+      // Answered: the teammate goes back to its Pivot, and the alert clears.
+      yield* Ref.set(currentShell, shell({ status: "running" }));
+      yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      assert.equal(publications.length, 2);
+      assert.equal(publications[1]?.state, null);
     }),
   );
 

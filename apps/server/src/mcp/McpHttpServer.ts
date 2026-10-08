@@ -20,6 +20,8 @@ import * as ServerConfig from "../config.ts";
 import * as DeviceService from "../device/DeviceService.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import * as PivotHandlers from "./toolkits/pivot/handlers.ts";
+import { PivotToolkit, TeammateToolkit } from "./toolkits/pivot/tools.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
@@ -45,6 +47,8 @@ import {
   PreviewStandardToolkit,
 } from "./toolkits/preview/tools.ts";
 import * as WorktreeHandlers from "./toolkits/worktree/handlers.ts";
+import * as ManagedProcessHandlers from "./toolkits/managedProcess/handlers.ts";
+import { ManagedProcessToolkit } from "./toolkits/managedProcess/tools.ts";
 import { WorktreeToolkit } from "./toolkits/worktree/tools.ts";
 import * as WorktreeMcpService from "./WorktreeMcpService.ts";
 import * as PullRequestsHandlers from "./toolkits/pullRequests/handlers.ts";
@@ -786,9 +790,15 @@ const layerPreviewSnapshotRegistration = imageToolRegistration(
   PreviewHandlers.layerSnapshot,
 );
 
+const layerManagedProcessToolkitRegistration = toolkitRegistration(
+  ManagedProcessToolkit,
+  ManagedProcessHandlers.layer,
+);
+
 export const layerPreviewToolkit = Layer.mergeAll(
   layerPreviewStandardToolkitRegistration,
   layerPreviewSnapshotRegistration,
+  layerManagedProcessToolkitRegistration,
 );
 
 export const layerOrchestratorToolkit = toolkitRegistration(
@@ -840,6 +850,12 @@ export const layerDeviceToolkit = Layer.mergeAll(
   layerDeviceScreenshotRegistration,
 );
 
+// Every caller sees these; each call checks the caller is the active Pivot or a teammate.
+const layerPivotToolkit = Layer.mergeAll(
+  toolkitRegistration(PivotToolkit, PivotHandlers.layerPivot),
+  toolkitRegistration(TeammateToolkit, PivotHandlers.layerTeammate),
+);
+
 export const layerMcpTransport = McpServer.layerHttp({
   name: "T3 Code",
   version: packageJson.version,
@@ -859,4 +875,5 @@ export const layer = Layer.mergeAll(
   layerPullRequestsToolkit,
   layerDeviceToolkit,
   layerHtmlToolkit,
+  layerPivotToolkit,
 ).pipe(Layer.provideMerge(layerMcpTransport));

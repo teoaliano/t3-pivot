@@ -111,6 +111,7 @@ type ThreadGitControlsProps = ThreadGitMenuProps & {
   readonly onOpenTerminal: (terminalId?: string | null) => void;
   readonly onOpenNewTerminal: () => void;
   readonly onRunProjectScript: (script: ProjectScript) => Promise<void>;
+  readonly onOpenDevServers: () => void;
 };
 
 function useThreadGitControlModel(props: ThreadGitMenuProps) {
@@ -322,6 +323,13 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
               type: "action" as const,
             })),
             {
+              description: "Start, stop and pin this checkout's servers",
+              icon: { name: "server.rack", type: "sfSymbol" },
+              label: "Dev servers",
+              onPress: props.onOpenDevServers,
+              type: "action",
+            },
+            {
               description: "Start another shell for this thread",
               disabled: !props.canOperateTerminal,
               icon: { name: "plus", type: "sfSymbol" },
@@ -422,6 +430,7 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
       props.canOpenTerminal,
       props.canOperateTerminal,
       props.gitStatus,
+      props.onOpenDevServers,
       props.onMergeBack,
       props.onOpenNewTerminal,
       props.onOpenTerminal,
@@ -515,6 +524,13 @@ export function ThreadGitControls(props: ThreadGitControlsProps) {
               <NativeHeaderToolbar.Label>{session.displayLabel}</NativeHeaderToolbar.Label>
             </NativeHeaderToolbar.MenuAction>
           ))}
+          <NativeHeaderToolbar.MenuAction
+            icon="server.rack"
+            onPress={props.onOpenDevServers}
+            subtitle="Start, stop and pin this checkout's servers"
+          >
+            <NativeHeaderToolbar.Label>Dev servers</NativeHeaderToolbar.Label>
+          </NativeHeaderToolbar.MenuAction>
           <NativeHeaderToolbar.MenuAction
             icon="plus"
             disabled={!props.canOperateTerminal}

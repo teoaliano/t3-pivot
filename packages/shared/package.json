@@ -19,6 +19,10 @@
       "types": "./src/composerPullRequestMatches.ts",
       "import": "./src/composerPullRequestMatches.ts"
     },
+    "./teammateStatus": {
+      "types": "./src/teammateStatus.ts",
+      "import": "./src/teammateStatus.ts"
+    },
     "./themePalettes": {
       "types": "./src/themePalettes.ts",
       "import": "./src/themePalettes.ts"
@@ -390,6 +394,10 @@
     "./cliRelease": {
       "types": "./src/cliRelease.ts",
       "import": "./src/cliRelease.ts"
+    },
+    "./nightlyTag": {
+      "types": "./src/nightlyTag.ts",
+      "import": "./src/nightlyTag.ts"
     },
     "./gitPatchPath": {
       "types": "./src/gitPatchPath.ts",

@@ -110,6 +110,16 @@ import {
   WorktreeSetupSubscribeInput,
 } from "./worktreeSetup.ts";
 import {
+  ManagedProcess,
+  ManagedProcessCheckoutSnapshot,
+  ManagedProcessOverview,
+  ManagedProcessSetPinnedInput,
+  ManagedProcessStartFailure,
+  ManagedProcessStartInput,
+  ManagedProcessSubscribeInput,
+  ManagedProcessTarget,
+} from "./managedProcess.ts";
+import {
   GitActionProgressEvent,
   VcsSwitchRefInput,
   VcsSwitchRefResult,
@@ -329,6 +339,19 @@ import {
   ScheduledTaskUpsertInput,
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
+import {
+  PivotAnswerDecisionInput,
+  PivotAnswerDecisionResult,
+  PivotCreateInput,
+  PivotCreateResult,
+  PivotDecisionLog,
+  PivotDecisionLogInput,
+  PivotError,
+  PivotStreamEvent,
+  PivotSubscribeInput,
+  PivotTeammateDetail,
+  PivotTeammateDetailInput,
+} from "./pivot.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import {
   ProjectCloneActionInput,
@@ -489,6 +512,11 @@ export const WS_METHODS = {
   serverRefreshUsageRates: "server.refreshUsageRates",
 
   // Scheduled tasks
+  pivotSubscribe: "pivot.subscribe",
+  pivotCreate: "pivot.create",
+  pivotAnswerDecision: "pivot.answerDecision",
+  pivotTeammateDetail: "pivot.teammateDetail",
+  pivotDecisionLog: "pivot.decisionLog",
   scheduledTasksList: "scheduledTasks.list",
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
   scheduledTasksUpsert: "scheduledTasks.upsert",
@@ -548,6 +576,11 @@ export const WS_METHODS = {
   subscribeVcsStatus: "subscribeVcsStatus",
   subscribeWorktreeSetup: "subscribeWorktreeSetup",
   worktreeSetupCancel: "worktreeSetup.cancel",
+  subscribeManagedProcesses: "subscribeManagedProcesses",
+  subscribeManagedProcessOverview: "subscribeManagedProcessOverview",
+  managedProcessStart: "managedProcess.start",
+  managedProcessStop: "managedProcess.stop",
+  managedProcessSetPinned: "managedProcess.setPinned",
   subscribeTerminalEvents: "subscribeTerminalEvents",
   subscribeTerminalMetadata: "subscribeTerminalMetadata",
   subscribePreviewEvents: "subscribePreviewEvents",
@@ -1309,6 +1342,36 @@ const WsWorktreeSetupCancelRpc = Rpc.make(WS_METHODS.worktreeSetupCancel, {
   error: EnvironmentAuthorizationError,
 });
 
+const WsSubscribeManagedProcessesRpc = Rpc.make(WS_METHODS.subscribeManagedProcesses, {
+  payload: ManagedProcessSubscribeInput,
+  success: ManagedProcessCheckoutSnapshot,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+const WsSubscribeManagedProcessOverviewRpc = Rpc.make(WS_METHODS.subscribeManagedProcessOverview, {
+  payload: Schema.Struct({}),
+  success: ManagedProcessOverview,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+const WsManagedProcessStartRpc = Rpc.make(WS_METHODS.managedProcessStart, {
+  payload: ManagedProcessStartInput,
+  success: ManagedProcess,
+  error: Schema.Union([ManagedProcessStartFailure, EnvironmentAuthorizationError]),
+});
+
+const WsManagedProcessStopRpc = Rpc.make(WS_METHODS.managedProcessStop, {
+  payload: ManagedProcessTarget,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsManagedProcessSetPinnedRpc = Rpc.make(WS_METHODS.managedProcessSetPinned, {
+  payload: ManagedProcessSetPinnedInput,
+  error: EnvironmentAuthorizationError,
+});
+
 const WsGitRunStackedActionRpc = Rpc.make(WS_METHODS.gitRunStackedAction, {
   payload: GitRunStackedActionInput,
   success: GitActionProgressEvent,
@@ -1679,6 +1742,38 @@ const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServerLifecyc
   stream: true,
 });
 
+/** Pivot mode's records: a snapshot on subscribe, then the records that changed. */
+const WsPivotSubscribeRpc = Rpc.make(WS_METHODS.pivotSubscribe, {
+  payload: PivotSubscribeInput,
+  success: PivotStreamEvent,
+  error: Schema.Union([PivotError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+const WsPivotCreateRpc = Rpc.make(WS_METHODS.pivotCreate, {
+  payload: PivotCreateInput,
+  success: PivotCreateResult,
+  error: Schema.Union([PivotError, EnvironmentAuthorizationError]),
+});
+
+const WsPivotAnswerDecisionRpc = Rpc.make(WS_METHODS.pivotAnswerDecision, {
+  payload: PivotAnswerDecisionInput,
+  success: PivotAnswerDecisionResult,
+  error: Schema.Union([PivotError, EnvironmentAuthorizationError]),
+});
+
+const WsPivotTeammateDetailRpc = Rpc.make(WS_METHODS.pivotTeammateDetail, {
+  payload: PivotTeammateDetailInput,
+  success: PivotTeammateDetail,
+  error: Schema.Union([PivotError, EnvironmentAuthorizationError]),
+});
+
+const WsPivotDecisionLogRpc = Rpc.make(WS_METHODS.pivotDecisionLog, {
+  payload: PivotDecisionLogInput,
+  success: PivotDecisionLog,
+  error: Schema.Union([PivotError, EnvironmentAuthorizationError]),
+});
+
 const WsScheduledTasksListRpc = Rpc.make(WS_METHODS.scheduledTasksList, {
   payload: ScheduledTaskListInput,
   success: ScheduledTaskListResult,
@@ -1830,6 +1925,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerSignalProcessRpc,
   WsScheduledTasksListRpc,
   WsScheduledTasksSubscribeRpc,
+  WsPivotSubscribeRpc,
+  WsPivotCreateRpc,
+  WsPivotAnswerDecisionRpc,
+  WsPivotTeammateDetailRpc,
+  WsPivotDecisionLogRpc,
   WsScheduledTasksUpsertRpc,
   WsScheduledTasksSetEnabledRpc,
   WsScheduledTasksDeleteRpc,
@@ -1937,6 +2037,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsPreviewReportStatusRpc,
   WsSubscribePreviewEventsRpc,
   WsSubscribeDiscoveredLocalServersRpc,
+  WsSubscribeManagedProcessesRpc,
+  WsSubscribeManagedProcessOverviewRpc,
+  WsManagedProcessStartRpc,
+  WsManagedProcessStopRpc,
+  WsManagedProcessSetPinnedRpc,
   WsDeviceConfigureRpc,
   WsDeviceListRpc,
   WsDeviceTestHostRpc,

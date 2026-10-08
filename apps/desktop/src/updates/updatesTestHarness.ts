@@ -5,6 +5,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as PlatformError from "effect/PlatformError";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import { HttpClient, HttpClientResponse } from "effect/http";
 
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
@@ -37,6 +38,10 @@ export interface UpdatesHarnessOptions {
   readonly platform?: NodeJS.Platform;
   /** Contents of the resources/package-type marker a Linux package ships. */
   readonly packageType?: string | undefined;
+  /** Contents of the packaged app's package.json. */
+  readonly appPackageJson?: string | undefined;
+  /** Upstream's releases Atom feed; fetching fails when unset. */
+  readonly upstreamReleasesFeed?: string | undefined;
 }
 
 export function makeHarness(options: UpdatesHarnessOptions = {}) {
@@ -215,14 +220,16 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     readFileString: (path) =>
       path === "/missing/resources/package-type" && options.packageType !== undefined
         ? Effect.succeed(options.packageType)
-        : Effect.fail(
-            PlatformError.systemError({
-              module: "FileSystem",
-              method: "readFileString",
-              _tag: "NotFound",
-              pathOrDescriptor: path,
-            }),
-          ),
+        : path === "/repo/package.json" && options.appPackageJson !== undefined
+          ? Effect.succeed(options.appPackageJson)
+          : Effect.fail(
+              PlatformError.systemError({
+                module: "FileSystem",
+                method: "readFileString",
+                _tag: "NotFound",
+                pathOrDescriptor: path,
+              }),
+            ),
     makeDirectory: () => Effect.void,
     writeFileString: (path) =>
       Effect.sync(() => {
@@ -234,8 +241,19 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
       }),
   });
 
+  const upstreamFeed = options.upstreamReleasesFeed;
+  const httpClientLayer = Layer.succeed(
+    HttpClient.HttpClient,
+    HttpClient.make((request) =>
+      upstreamFeed === undefined
+        ? Effect.succeed(HttpClientResponse.fromWeb(request, new Response(null, { status: 503 })))
+        : Effect.succeed(HttpClientResponse.fromWeb(request, new Response(upstreamFeed))),
+    ),
+  );
+
   const layer = DesktopUpdates.layer.pipe(
     Layer.provide(layerFileSystem),
+    Layer.provide(httpClientLayer),
     Layer.provideMerge(layerUpdater),
     Layer.provideMerge(layerWindow),
     Layer.provideMerge(layerBackend),

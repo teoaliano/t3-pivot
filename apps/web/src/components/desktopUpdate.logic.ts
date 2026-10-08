@@ -2,7 +2,10 @@ import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/con
 
 export type DesktopUpdateButtonAction = "download" | "install" | "none";
 
-const DESKTOP_RELEASE_HISTORY_URL = "https://github.com/pingdotgg/t3code/releases";
+// T3 Pivot publishes its desktop releases here, tagged `pivot-vX.Y.Z`.
+const DESKTOP_RELEASE_REPOSITORY = "teoaliano/t3-pivot";
+const DESKTOP_RELEASE_TAG_PREFIX = "pivot-v";
+const DESKTOP_RELEASE_HISTORY_URL = `https://github.com/${DESKTOP_RELEASE_REPOSITORY}/releases`;
 const DESKTOP_RELEASE_TAG_URL = `${DESKTOP_RELEASE_HISTORY_URL}/tag`;
 
 /**
@@ -14,11 +17,11 @@ export function getDesktopUpdateDownloadedVersion(state: DesktopUpdateState): st
   return state.downloadedVersion ?? state.availableVersion;
 }
 
-/** Release notes for an exact downloaded build; nightly suffixes are part of the tag. */
+/** Release notes for an exact downloaded build. */
 export function getDesktopUpdateReleaseUrl(version: string | null): string | null {
   const normalizedVersion = version?.trim();
   if (!normalizedVersion) return null;
-  return `${DESKTOP_RELEASE_TAG_URL}/v${encodeURIComponent(normalizedVersion)}`;
+  return `${DESKTOP_RELEASE_TAG_URL}/${DESKTOP_RELEASE_TAG_PREFIX}${encodeURIComponent(normalizedVersion)}`;
 }
 
 export function getDesktopUpdateReleaseHistoryUrl(): string {
