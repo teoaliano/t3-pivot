@@ -34,7 +34,7 @@ const beta = ThreadId.make("beta");
 describe("pivotLayoutPreset", () => {
   it("teammates on top with the Pivot chat below", () => {
     expect(pivotLayoutPreset("teammates-top")).toEqual(
-      col([0.3, 0.7], pane("teammates"), pane("pivot-chat")),
+      col([0.2, 0.8], pane("teammates"), pane("pivot-chat")),
     );
   });
 
@@ -123,7 +123,7 @@ describe("showPane", () => {
 
   it("wraps a column root in a row and gives the new pane a third", () => {
     expect(showPane(pivotLayoutPreset("teammates-top"), "preview")).toEqual(
-      row([2 / 3, 1 / 3], col([0.3, 0.7], pane("teammates"), pane("pivot-chat")), pane("preview")),
+      row([2 / 3, 1 / 3], col([0.2, 0.8], pane("teammates"), pane("pivot-chat")), pane("preview")),
     );
   });
 

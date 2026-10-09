@@ -103,7 +103,7 @@ export function SidebarTeammateList(props: {
 }
 
 /** The icon a normal thread row shows for the same state; paused rests like done. */
-function teammateStatusIcon(card: TeammateCard): SidebarStatusIconKind {
+export function teammateStatusIcon(card: TeammateCard): SidebarStatusIconKind {
   switch (card.tone) {
     case "working":
       return "working";

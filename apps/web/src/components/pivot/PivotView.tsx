@@ -2,7 +2,7 @@ import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environ
 import { teammatesOfPivot } from "@t3tools/client-runtime/pivot-state";
 import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { EllipsisIcon } from "lucide-react";
+import { EllipsisIcon, XIcon } from "lucide-react";
 import {
   type PointerEvent as ReactPointerEvent,
   lazy,
@@ -468,6 +468,11 @@ function ScoutReport(props: { teammateRef: ScopedThreadRef }) {
   );
 }
 
+/**
+ * The chrome around a pane. The teammate cards sit straight on the view and the
+ * Pivot's chat is one plain box; only panes opened on demand get a title bar, to
+ * say whose material they show and to move or close them.
+ */
 function PaneFrame(props: {
   node: Extract<LayoutNode, { type: "pane" }>;
   single: boolean;
@@ -477,15 +482,27 @@ function PaneFrame(props: {
   children: ReactNode;
 }) {
   const { node } = props;
-  // The Teammates pane is see-through, so a wallpaper shows behind the cards.
-  const solid = node.kind !== "teammates";
+  if (node.kind === "teammates") {
+    return (
+      <section aria-label={PANE_TITLES[node.kind]} className="size-full min-h-0 min-w-0">
+        {props.children}
+      </section>
+    );
+  }
+  if (node.kind === "pivot-chat") {
+    return (
+      <section
+        aria-label={PANE_TITLES[node.kind]}
+        className="relative flex size-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background"
+      >
+        {props.children}
+      </section>
+    );
+  }
   return (
     <section
       aria-label={PANE_TITLES[node.kind]}
-      className={cn(
-        "flex size-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-border",
-        solid ? "bg-background" : "bg-background/40",
-      )}
+      className="flex size-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background"
     >
       <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border px-2 text-xs">
         <span className="font-medium">{PANE_TITLES[node.kind]}</span>
@@ -511,12 +528,17 @@ function PaneFrame(props: {
                 {label}
               </MenuItem>
             ))}
-            <MenuSeparator />
-            <MenuItem disabled={props.single} onClick={props.onHide}>
-              Hide pane
-            </MenuItem>
           </MenuPopup>
         </Menu>
+        <Button
+          size="icon-micro"
+          variant="ghost-muted"
+          aria-label={`Close ${PANE_TITLES[node.kind]}`}
+          disabled={props.single}
+          onClick={props.onHide}
+        >
+          <XIcon />
+        </Button>
       </div>
       <div className="relative min-h-0 flex-1">{props.children}</div>
     </section>
@@ -580,17 +602,27 @@ function LayoutNodeView(props: {
             renderPane={props.renderPane}
           />
           {index < node.children.length - 1 ? (
+            // Invisible until hovered or dragged: a thin line shows where the drag grabs.
             <div
               role="separator"
               aria-orientation={horizontal ? "vertical" : "horizontal"}
+              data-dragging={dragSizes !== null ? "true" : undefined}
               onPointerDown={(event) => startDrag(index, event)}
               className={cn(
-                "absolute z-10 bg-transparent hover:bg-border",
+                "group/divider absolute z-10 flex items-center justify-center",
                 horizontal
                   ? "top-0 -right-1.5 h-full w-1.5 cursor-col-resize"
                   : "-bottom-1.5 left-0 h-1.5 w-full cursor-row-resize",
               )}
-            />
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  "rounded-full bg-muted-foreground/50 opacity-0 transition-opacity group-hover/divider:opacity-100 group-data-[dragging=true]/divider:opacity-100",
+                  horizontal ? "h-10 w-0.5" : "h-0.5 w-10",
+                )}
+              />
+            </div>
           ) : null}
         </PaneSlot>
       ))}

@@ -69,7 +69,7 @@ const PRESETS = {
   "teammates-top": (): LayoutNode => ({
     type: "col",
     children: [leaf("teammates"), leaf("pivot-chat")],
-    sizes: [0.3, 0.7],
+    sizes: [0.2, 0.8],
   }),
   "chat-left": (): LayoutNode => ({
     type: "row",
