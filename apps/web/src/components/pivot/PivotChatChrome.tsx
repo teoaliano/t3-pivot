@@ -11,9 +11,9 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { useChatCanvas } from "../chat/ChatCanvasContext";
 import { Button } from "../ui/button";
-import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
+import { PivotDecisionCard } from "./PivotDecisionCard";
 import { useInPivotView } from "./pivotViewContext";
 import { usePivotViewMode, usePivotViewStore } from "./pivotViewStore";
 
@@ -102,58 +102,74 @@ export function PivotComposerBar(props: {
 }
 
 /**
- * The decisions a Pivot holds for the user, above its composer until answered.
- * The answer is recorded in the user's exact words and goes to the Pivot.
+ * The decisions a Pivot holds for the user, above its composer until answered. Answered
+ * ones wait as quiet rows while the Pivot relays them; the oldest open one takes the
+ * answer. The answer is recorded in the user's exact words and goes to the Pivot.
  */
 export function PivotDecisionsStrip(props: {
   environmentId: EnvironmentId;
   pivotThreadId: ThreadId;
 }) {
   const state = usePivotState(props.environmentId);
-  // A short Pivot view pane still needs room for the timeline and composer around the strip.
+  // A short Pivot view pane still needs room for the timeline and composer around the card.
   const canvasHeight = useChatCanvas()?.container.height ?? 0;
   const decisions = state === null ? [] : decisionsHeldBy(state, props.pivotThreadId);
   if (decisions.length === 0) return null;
+  const answered = decisions.filter((decision) => decision.userAnswer !== null);
+  const waiting = decisions.filter((decision) => decision.userAnswer === null);
+  const current = waiting[0];
+  const askerOf = (decision: PivotDecision) =>
+    (decision.teammateThreadId === null
+      ? null
+      : state?.teammates[decision.teammateThreadId]?.title) ?? "The Pivot";
   return (
-    // Opaque: the strip floats over the timeline with the composer.
-    <div
-      data-pivot-decisions-strip="true"
-      className="mb-2 flex max-h-72 flex-col overflow-hidden rounded-xl border border-warning/32 bg-background"
-      style={
-        canvasHeight > 0
-          ? { maxHeight: `min(18rem, ${Math.round(Math.max(180, canvasHeight * 0.45))}px)` }
-          : undefined
-      }
-    >
-      <div className="flex min-h-0 flex-col gap-2 overflow-y-auto bg-warning-surface p-2">
-        {decisions.map((decision) => (
-          <PivotDecisionCard
-            key={decision.decisionId}
-            environmentId={props.environmentId}
-            decision={decision}
-          />
-        ))}
-      </div>
+    <div data-pivot-decisions-strip="true">
+      {answered.map((decision) => (
+        <PivotDecisionCard
+          key={decision.decisionId}
+          decision={decision}
+          asker={askerOf(decision)}
+          position={null}
+          sending={false}
+          onAnswer={() => {}}
+        />
+      ))}
+      {current !== undefined ? (
+        <OpenPivotDecision
+          key={current.decisionId}
+          environmentId={props.environmentId}
+          decision={current}
+          asker={askerOf(current)}
+          position={waiting.length > 1 ? { index: 0, total: waiting.length } : null}
+          bodyMaxHeight={
+            canvasHeight > 0
+              ? `min(14rem, ${Math.round(Math.max(120, canvasHeight * 0.3))}px)`
+              : undefined
+          }
+        />
+      ) : null}
     </div>
   );
 }
 
-function PivotDecisionCard(props: { environmentId: EnvironmentId; decision: PivotDecision }) {
-  const { decision } = props;
-  const escalation = decision.escalation;
-  const [answer, setAnswer] = useState("");
+function OpenPivotDecision(props: {
+  environmentId: EnvironmentId;
+  decision: PivotDecision;
+  asker: string;
+  position: { index: number; total: number } | null;
+  bodyMaxHeight: string | undefined;
+}) {
   const [sending, setSending] = useState(false);
   const answerDecision = useAtomCommand(serverEnvironment.answerPivotDecision, {
     reportFailure: false,
   });
-  const asksApproval = escalation?.asksApproval === true;
   const submit = async (text: string, approved?: boolean) => {
     if (text.trim().length === 0 || sending) return;
     setSending(true);
     const result = await answerDecision({
       environmentId: props.environmentId,
       input: {
-        decisionId: decision.decisionId,
+        decisionId: props.decision.decisionId,
         answer: text,
         ...(approved === undefined ? {} : { approved }),
       },
@@ -161,114 +177,16 @@ function PivotDecisionCard(props: { environmentId: EnvironmentId; decision: Pivo
     setSending(false);
     if (result._tag === "Failure") {
       toastManager.add({ type: "error", title: "Your answer was not recorded." });
-      return;
     }
-    setAnswer("");
   };
-
-  if (decision.userAnswer !== null) {
-    return (
-      <div className="rounded-lg bg-background/60 px-3 py-2 text-sm">
-        <div className="font-medium">{escalation?.questions.join(" ") ?? decision.summary}</div>
-        <div className="mt-1 text-muted-foreground">
-          {decision.userApproved === true
-            ? "You approved"
-            : decision.userApproved === false
-              ? "You declined"
-              : "You answered"}
-          : “{decision.userAnswer}”. The Pivot is relaying it.
-        </div>
-      </div>
-    );
-  }
   return (
-    // The question scrolls when space is short; the answer controls below it always show.
-    <div className="flex min-h-0 flex-col gap-2 rounded-lg bg-background/60 px-3 py-2 text-sm">
-      <div className="flex min-h-12 shrink flex-col gap-2 overflow-y-auto">
-        <div className="font-medium">
-          {escalation?.questions.map((question) => <p key={question}>{question}</p>) ??
-            decision.summary}
-        </div>
-        {escalation !== null ? (
-          <dl className="grid gap-1 text-muted-foreground">
-            <div>
-              <dt className="inline font-medium text-foreground">Evidence: </dt>
-              <dd className="inline">{escalation.evidence}</dd>
-            </div>
-            <div>
-              <dt className="inline font-medium text-foreground">Consequence: </dt>
-              <dd className="inline">{escalation.consequence}</dd>
-            </div>
-            <div>
-              <dt className="inline font-medium text-foreground">Recommended: </dt>
-              <dd className="inline">{escalation.recommendation}</dd>
-            </div>
-          </dl>
-        ) : null}
-        {/* An approval is answered by Approve or Decline; option chips would only duplicate them. */}
-        {escalation !== null && !asksApproval && escalation.options.length > 0 ? (
-          <div className="flex flex-wrap gap-1.5">
-            {escalation.options.map((option) => (
-              <Button
-                key={option}
-                size="xs"
-                variant={answer === option ? "default" : "outline"}
-                onClick={() => setAnswer(option)}
-              >
-                {option}
-              </Button>
-            ))}
-          </div>
-        ) : null}
-      </div>
-      {asksApproval ? (
-        // A yes or no, recorded as such, with the user's own words if they add any.
-        <div className="flex shrink-0 items-end gap-2">
-          <Textarea
-            aria-label="Anything to add"
-            placeholder="Anything to add (optional)"
-            value={answer}
-            onChange={(event) => setAnswer(event.target.value)}
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={sending}
-            onClick={() => void submit(answer.trim() || "Declined", false)}
-          >
-            Decline
-          </Button>
-          <Button
-            size="sm"
-            disabled={sending}
-            onClick={() => void submit(answer.trim() || "Approved", true)}
-          >
-            Approve
-          </Button>
-        </div>
-      ) : (
-        <div className="flex shrink-0 items-end gap-2">
-          <Textarea
-            aria-label="Your answer"
-            placeholder="Answer in your own words"
-            value={answer}
-            onChange={(event) => setAnswer(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                event.preventDefault();
-                void submit(answer);
-              }
-            }}
-          />
-          <Button
-            size="sm"
-            disabled={answer.trim().length === 0 || sending}
-            onClick={() => void submit(answer)}
-          >
-            Answer
-          </Button>
-        </div>
-      )}
-    </div>
+    <PivotDecisionCard
+      decision={props.decision}
+      asker={props.asker}
+      position={props.position}
+      sending={sending}
+      bodyMaxHeight={props.bodyMaxHeight}
+      onAnswer={(text, approved) => void submit(text, approved)}
+    />
   );
 }

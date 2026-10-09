@@ -50,3 +50,40 @@ export function decisionLogEntry(decision: PivotDecision): DecisionLogEntry {
       return { outcome: "cleared", label: "Cleared by the teammate", text: resolution.text, at };
   }
 }
+
+const normalizeChoice = (text: string) =>
+  text
+    .trim()
+    .toLowerCase()
+    .replace(/[\s.!?;:,]+$/u, "");
+
+/**
+ * The option a recommendation names, for its Recommended badge: the recommendation is the
+ * option itself or starts with it ("Restart now, nothing is running"). The longest such
+ * option wins; null when the recommendation names none, so it shows as its own line.
+ */
+export function recommendedOption(
+  options: ReadonlyArray<string>,
+  recommendation: string,
+): string | null {
+  const recommended = normalizeChoice(recommendation);
+  let best: string | null = null;
+  for (const option of options) {
+    const choice = normalizeChoice(option);
+    if (choice.length === 0) continue;
+    const named =
+      recommended === choice ||
+      (recommended.startsWith(choice) && /^[^\p{L}\p{N}]/u.test(recommended.slice(choice.length)));
+    if (named && (best === null || choice.length > normalizeChoice(best).length)) best = option;
+  }
+  return best;
+}
+
+/** How the user's answer to a decision reads once given. */
+export function userAnswerLabel(userApproved: boolean | null): string {
+  return userApproved === true
+    ? "You approved"
+    : userApproved === false
+      ? "You declined"
+      : "You answered";
+}
