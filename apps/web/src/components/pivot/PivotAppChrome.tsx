@@ -3,13 +3,13 @@ import type { ScopedThreadRef } from "@t3tools/contracts";
 import { useParams } from "@tanstack/react-router";
 import { useEffect } from "react";
 
-import { useRouteThreadContext } from "../../hooks/useHandleNewThread";
+import { openCommandPalette } from "../../commandPaletteBus";
 import { isNewPivotShortcut, isPivotToggleViewShortcut } from "../../keybindings";
-import { usePivotState } from "../../state/pivot";
+import { usePivotModeEnvironmentIds, usePivotState } from "../../state/pivot";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { resolveThreadRouteRef } from "../../threadRoutes";
 import { useEnvironmentIds } from "../../state/environments";
-import { NewPivotHost, startNewPivot } from "./NewPivot";
+import { NewPivotHost } from "./NewPivot";
 import { PivotStateSync } from "./pivotStatesStore";
 import { usePivotViewMode, usePivotViewStore } from "./pivotViewStore";
 
@@ -28,8 +28,7 @@ export function useRoutePivot(): {
 
 /**
  * App-wide Pivot mode wiring: the New Pivot dialog and the two Pivot shortcuts,
- * toggling the routed Pivot's view and starting a Pivot in the routed thread's
- * or draft's project.
+ * toggling the routed Pivot's view and opening the "New Pivot in..." picker.
  */
 export function PivotAppChrome() {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -39,9 +38,7 @@ export function PivotAppChrome() {
   const routeRef = route.ref;
   const isPivot = route.isPivot;
   const inPivotView = route.inPivotView;
-  const { routeProjectRef } = useRouteThreadContext();
-  const projectEnvironmentId = routeProjectRef?.environmentId ?? null;
-  const projectId = routeProjectRef?.projectId ?? null;
+  const pivotEnvironmentIds = usePivotModeEnvironmentIds();
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -50,18 +47,14 @@ export function PivotAppChrome() {
         setMode(routeRef, inPivotView ? "chat" : "pivot");
         return;
       }
-      if (
-        projectEnvironmentId !== null &&
-        projectId !== null &&
-        isNewPivotShortcut(event, keybindings)
-      ) {
+      if (pivotEnvironmentIds.size > 0 && isNewPivotShortcut(event, keybindings)) {
         event.preventDefault();
-        startNewPivot({ environmentId: projectEnvironmentId, projectId });
+        openCommandPalette({ open: "new-pivot-in" });
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [inPivotView, isPivot, keybindings, projectEnvironmentId, projectId, routeRef, setMode]);
+  }, [inPivotView, isPivot, keybindings, pivotEnvironmentIds, routeRef, setMode]);
 
   return (
     <>
