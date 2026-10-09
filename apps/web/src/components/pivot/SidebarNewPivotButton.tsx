@@ -7,7 +7,7 @@ import { useProject } from "../../state/entities";
 import { usePivotModeSupported } from "../../state/pivot";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { SidebarHeaderIconButton } from "../sidebar/SidebarThreadHeader";
-import { openNewPivotDialog, usePivotProjectReadiness } from "./NewPivotDialog";
+import { startNewPivot, usePivotProjectReadiness } from "./NewPivot";
 
 /**
  * New Pivot, for the project new threads would go to. Disabled with the reason
@@ -33,7 +33,7 @@ export function SidebarNewPivotButton(props: { projectRef: ScopedProjectRef | nu
       tooltip={readiness.reason ?? label}
       aria-disabled={!readiness.ready || undefined}
       onClick={() => {
-        if (readiness.ready) openNewPivotDialog(target);
+        if (readiness.ready) startNewPivot(target);
       }}
     >
       <LayoutDashboardIcon />

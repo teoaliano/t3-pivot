@@ -64,6 +64,8 @@ export const PivotEvent = Schema.Union([
     deliveryMode: PivotDeliveryMode,
     intent: Schema.String,
     spec: Schema.String,
+    /** The teammate model it was dispatched on; absent on events from before entries. */
+    modelEntry: Schema.optional(Schema.NullOr(Schema.String)),
   }),
   event("teammate.promoted", { threadId: ThreadId, spec: Schema.String }),
   event("teammate.intent-added", { threadId: ThreadId, text: Schema.String }),

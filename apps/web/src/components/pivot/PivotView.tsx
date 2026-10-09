@@ -51,7 +51,7 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { toastManager } from "../ui/toast";
-import { openNewPivotDialog } from "./NewPivotDialog";
+import { startNewPivot } from "./NewPivot";
 import { PivotViewSwitch } from "./PivotChatChrome";
 import {
   hidePane,
@@ -271,7 +271,7 @@ export function PivotView(props: { pivot: ScopedThreadRef }) {
                 {pivotShell !== null && record?.retiredAt === null ? (
                   <MenuItem
                     onClick={() =>
-                      openNewPivotDialog({
+                      startNewPivot({
                         environmentId: pivot.environmentId,
                         projectId: pivotShell.projectId,
                       })

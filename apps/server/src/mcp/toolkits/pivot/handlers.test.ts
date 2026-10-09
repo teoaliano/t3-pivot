@@ -9,6 +9,7 @@ import {
   type OrchestrationV2ThreadShell,
   type PivotMcpDispatchTeammateResult,
   RunId,
+  type TeammateModelEntry,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -25,6 +26,7 @@ import {
   sh,
 } from "../../../pivot/PivotService.testkit.ts";
 import * as PivotStore from "../../../pivot/PivotStore.ts";
+import * as ServerSettings from "../../../serverSettings.ts";
 import type { FakeV2 } from "../../../pivot/PivotThreads.testkit.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -118,7 +120,14 @@ const createPivot = Effect.gen(function* () {
 
 const dispatch = (
   pivot: ThreadId,
-  params: Partial<{ title: string; kind: "ship" | "scout"; intent: string; spec: string }> = {},
+  params: Partial<{
+    title: string;
+    kind: "ship" | "scout";
+    intent: string;
+    spec: string;
+    modelEntry: string;
+    modelSelection: typeof modelSelection;
+  }> = {},
 ) =>
   call(pivot, "dispatch_teammate", {
     title: "Fix the login bug",
@@ -362,6 +371,153 @@ describe("Pivot and teammate tools", () => {
         "Only a scout",
       );
     }).pipe(Effect.provide(layer));
+  });
+
+  describe("teammate models", () => {
+    const research: TeammateModelEntry = {
+      name: "research",
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-opus-5-5",
+        options: [{ id: "effort", value: "high" }],
+      },
+      description: "Investigations and audits.",
+      isDefault: false,
+    };
+    const quickFix: TeammateModelEntry = {
+      name: "quick-fix",
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4-mini" },
+      description: "Small, clear fixes.",
+      isDefault: true,
+    };
+    const useTeammateModels = (teammateModels: ReadonlyArray<TeammateModelEntry>) =>
+      Effect.flatMap(ServerSettings.ServerSettingsService, (settings) =>
+        settings.updateSettings({ teammateModels }),
+      );
+    const launchedModel = (fake: FakeV2, threadId: ThreadId) =>
+      fake.threads.get(threadId)?.modelSelection;
+
+    it.effect("runs a named entry and records it on the teammate", () => {
+      const { fake, layer } = setup();
+      return Effect.gen(function* () {
+        yield* useTeammateModels([research, quickFix]);
+        const pivot = yield* createPivot;
+        const result = yield* dispatch(pivot, { modelEntry: "research" });
+
+        assert.strictEqual(result.modelEntry, "research");
+        assert.deepStrictEqual(launchedModel(fake, result.threadId), research.modelSelection);
+        const listed = expectOk(yield* call(pivot, "list_teammates", {}));
+        assert.strictEqual(listed.teammates[0].modelEntry, "research");
+        const history = expectOk(
+          yield* call(pivot, "teammate_history", { threadId: result.threadId }),
+        );
+        assert.include(history.entries.at(-1).line, "on teammate model research");
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("refuses an unknown name, listing the valid ones", () => {
+      const { layer } = setup();
+      return Effect.gen(function* () {
+        yield* useTeammateModels([research, quickFix]);
+        const pivot = yield* createPivot;
+        expectRefused(
+          yield* call(pivot, "dispatch_teammate", {
+            title: "Audit",
+            kind: "scout",
+            intent: "Audit the logs.",
+            spec: "Read the logs.",
+            modelEntry: "heavy-coding",
+          }),
+          "invalid_request",
+          "Use one of: research, quick-fix.",
+        );
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("runs the default entry when none is named", () => {
+      const { fake, layer } = setup();
+      return Effect.gen(function* () {
+        yield* useTeammateModels([research, quickFix]);
+        const pivot = yield* createPivot;
+        const result = yield* dispatch(pivot);
+        assert.strictEqual(result.modelEntry, "quick-fix");
+        assert.deepStrictEqual(launchedModel(fake, result.threadId), quickFix.modelSelection);
+
+        // Without one marked default, the first entry is.
+        yield* useTeammateModels([research, { ...quickFix, isDefault: false }]);
+        const second = yield* dispatch(pivot, { title: "Second" });
+        assert.strictEqual(second.modelEntry, "research");
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("a model the user named wins over the entry", () => {
+      const { fake, layer } = setup();
+      return Effect.gen(function* () {
+        yield* useTeammateModels([research, quickFix]);
+        const pivot = yield* createPivot;
+        const named = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.5" };
+        const result = yield* dispatch(pivot, { modelEntry: "research", modelSelection: named });
+        assert.isNull(result.modelEntry);
+        assert.deepStrictEqual(launchedModel(fake, result.threadId), named);
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("a project's list replaces the environment's", () => {
+      const { fake, layer } = setup();
+      return Effect.gen(function* () {
+        const settings = yield* ServerSettings.ServerSettingsService;
+        yield* settings.updateSettings({
+          teammateModels: [research, quickFix],
+          projectSettingsOverrides: { [projectId]: { teammateModels: [research] } },
+        });
+        const pivot = yield* createPivot;
+        const result = yield* dispatch(pivot);
+        assert.strictEqual(result.modelEntry, "research");
+        assert.deepStrictEqual(launchedModel(fake, result.threadId), research.modelSelection);
+        expectRefused(
+          yield* call(pivot, "dispatch_teammate", {
+            title: "Small",
+            kind: "ship",
+            intent: "Fix the typo.",
+            spec: "Fix it.",
+            modelEntry: "quick-fix",
+          }),
+          "invalid_request",
+          "Use one of: research.",
+        );
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("with no entries, runs on the Pivot's own model", () => {
+      const { fake, layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const result = yield* dispatch(pivot);
+        assert.isNull(result.modelEntry);
+        assert.deepStrictEqual(launchedModel(fake, result.threadId), modelSelection);
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("lists the entries in the Pivot's contract", () => {
+      const { fake, layer } = setup();
+      return Effect.gen(function* () {
+        yield* useTeammateModels([research, quickFix]);
+        const pivot = yield* createPivot;
+        const contract = NodeFS.readFileSync(
+          NodePath.join(fake.threads.get(pivot)!.worktreePath!, "AGENTS.md"),
+          "utf8",
+        );
+        assert.include(
+          contract,
+          "- `research`: claudeAgent / claude-opus-5-5, effort high. Investigations and audits.",
+        );
+        assert.include(
+          contract,
+          "- `quick-fix` (default): codex / gpt-5.4-mini. Small, clear fixes.",
+        );
+        assert.notInclude(contract, "{{");
+      }).pipe(Effect.provide(layer));
+    });
   });
 
   describe("report_status", () => {

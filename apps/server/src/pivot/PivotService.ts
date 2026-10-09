@@ -45,8 +45,10 @@ import {
   type PivotStreamEvent,
   type PivotTeammateDetail,
   type ProjectId,
+  type ServerSettingsError,
   type ThreadId,
 } from "@t3tools/contracts";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { deriveTeammateStatus } from "@t3tools/shared/teammateStatus";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -58,6 +60,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import { ServerConfig } from "../config.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import {
   BRIEF_TEXTS,
   definitionOfDoneText,
@@ -72,6 +75,7 @@ import type { PivotEvent, StoredPivotEvent } from "./PivotEvents.ts";
 import * as PivotGit from "./PivotGit.ts";
 import * as PivotHome from "./PivotHome.ts";
 import * as PivotStore from "./PivotStore.ts";
+import { chooseTeammateModel, renderTeammateModels } from "./pivotTeammateModels.ts";
 import { loadPivotText, type PivotTextError } from "./pivotTexts.ts";
 import * as PivotThreads from "./PivotThreads.ts";
 
@@ -92,7 +96,8 @@ export type PivotServiceError =
   | PivotThreads.PivotThreadsError
   | PivotHome.PivotHomeError
   | PivotGit.PivotGitError
-  | PivotTextError;
+  | PivotTextError
+  | ServerSettingsError;
 
 type Result<A> = Effect.Effect<A, PivotServiceError>;
 
@@ -111,7 +116,8 @@ export class PivotService extends Context.Service<
     }) => Effect.Effect<PivotCreateResult, PivotServiceError>;
     /**
      * Rewrites every active Pivot's home contract to this release's, leaving
-     * `preferences.md` alone. Runs at server start, so an update reaches existing Pivots.
+     * `preferences.md` alone. Runs at server start, so an update reaches existing Pivots,
+     * and when teammate models change in Settings.
      * A home that fails is logged and skipped.
      */
     readonly refreshHomes: Effect.Effect<void>;
@@ -235,7 +241,7 @@ const clip = (text: string, max = HISTORY_LINE_MAX) =>
 export const historyLine = (event: PivotEvent): string => {
   switch (event.type) {
     case "teammate.dispatched":
-      return `Dispatched as a ${event.kind} on ${event.branch} from ${event.baseBranch}.`;
+      return `Dispatched as a ${event.kind} on ${event.branch} from ${event.baseBranch}${event.modelEntry ? `, on teammate model ${event.modelEntry}` : ""}.`;
     case "teammate.promoted":
       return "Promoted from scout to ship.";
     case "teammate.intent-added":
@@ -314,6 +320,7 @@ export const make = Effect.gen(function* () {
   const home = yield* PivotHome.PivotHome;
   const git = yield* PivotGit.PivotGit;
   const config = yield* ServerConfig;
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
@@ -327,6 +334,18 @@ export const make = Effect.gen(function* () {
         projectLocks.set(projectId, lock);
       }
       return lock.withPermits(1)(effect);
+    });
+
+  /** The project's teammate models: its own list when it overrides one, else the environment's. */
+  const teammateModels = (projectId: ProjectId) =>
+    serverSettings.getSettings.pipe(
+      Effect.map((settings) => resolveProjectSettings(settings, projectId).settings.teammateModels),
+    );
+
+  const ensureHome = (projectId: ProjectId) =>
+    Effect.gen(function* () {
+      const entries = yield* teammateModels(projectId);
+      return yield* home.ensure(projectId, renderTeammateModels(entries));
     });
 
   const refuse = (command: string, reason: string) =>
@@ -358,7 +377,7 @@ export const make = Effect.gen(function* () {
             "This project already has an active Pivot. Creating another takes over its work.",
           );
         }
-        const homePath = yield* home.ensure(input.projectId);
+        const homePath = yield* ensureHome(input.projectId);
         const threadId = yield* threads.createPivotThread({
           projectId: input.projectId,
           homePath,
@@ -381,13 +400,11 @@ export const make = Effect.gen(function* () {
   const refreshHomes: PivotService["Service"]["refreshHomes"] = Effect.gen(function* () {
     const active = yield* store.listActivePivots;
     for (const pivot of active) {
-      yield* home
-        .ensure(pivot.projectId)
-        .pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("Pivot home refresh failed", { projectId: pivot.projectId, cause }),
-          ),
-        );
+      yield* ensureHome(pivot.projectId).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Pivot home refresh failed", { projectId: pivot.projectId, cause }),
+        ),
+      );
     }
   }).pipe(Effect.catchCause((cause) => Effect.logWarning("Pivot home refresh failed", { cause })));
 
@@ -570,9 +587,11 @@ export const make = Effect.gen(function* () {
             worktreePath,
             definitionOfDone: yield* text(definitionOfDoneText(input.kind, deliveryMode)),
           });
+          const choice = chooseTeammateModel(yield* teammateModels(pivot.projectId), input);
+          if (choice.type === "refused") return yield* refuse(command, choice.reason);
           const pivotShell = yield* threads.shell(pivot.threadId);
           const modelSelection =
-            input.modelSelection ??
+            choice.modelSelection ??
             project.defaultModelSelection ??
             pivotShell?.modelSelection ??
             null;
@@ -603,6 +622,7 @@ export const make = Effect.gen(function* () {
               deliveryMode,
               intent: input.intent,
               spec: input.spec,
+              modelEntry: choice.entry,
             })
             .pipe(Effect.tapError(() => threads.archive(launched.threadId).pipe(Effect.ignore)));
           const start =
@@ -619,6 +639,7 @@ export const make = Effect.gen(function* () {
             baseBranch,
             worktreePath,
             deliveryMode,
+            modelEntry: choice.entry,
             firstRun: start.type,
             detail: start.type === "failed" ? start.detail : null,
             setupScript: setup.status,
@@ -804,6 +825,7 @@ export const make = Effect.gen(function* () {
         pullRequestUrl: pullRequest,
         lastChangeAt: latest?.occurredAt ?? null,
         worktreePath: teammate.worktreePath,
+        modelEntry: teammate.modelEntry,
         tornDown: teammate.tornDownAt !== null,
       } satisfies PivotMcpTeammateLine;
     });
