@@ -1,21 +1,12 @@
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useNavigate } from "@tanstack/react-router";
-import {
-  ChevronDownIcon,
-  ChevronRightIcon,
-  CircleAlertIcon,
-  CircleCheckIcon,
-  CircleDashedIcon,
-  CirclePauseIcon,
-  LayoutDashboardIcon,
-  MessageCircleQuestionIcon,
-  ShieldQuestionIcon,
-} from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, LayoutDashboardIcon } from "lucide-react";
 
 import { cn } from "../../lib/utils";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import type { SidebarPivotGroup } from "../sidebar/pivotNesting.logic";
+import { SidebarStatusIcon, type SidebarStatusIconKind } from "../sidebar/SidebarStatusIcon";
 import { WorkingDuration } from "../sidebar/WorkingDuration";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -88,11 +79,7 @@ export function SidebarTeammateList(props: {
 }) {
   return (
     <li role="presentation">
-      <ul
-        role="presentation"
-        aria-label="Teammates"
-        className="mb-1 ml-4 flex flex-col gap-px border-l border-sidebar-border pl-1"
-      >
+      <ul role="presentation" aria-label="Teammates" className="mb-1 flex flex-col gap-px">
         {props.group.teammates.map((card) => (
           <SidebarTeammateRow
             key={card.threadId}
@@ -106,28 +93,17 @@ export function SidebarTeammateList(props: {
   );
 }
 
-/** The status icon a normal thread row shows for the same state. */
-function TeammateStatusIcon(props: { card: TeammateCard }) {
-  const className = "size-4 shrink-0";
-  switch (props.card.tone) {
+/** The icon a normal thread row shows for the same state; paused rests like done. */
+function teammateStatusIcon(card: TeammateCard): SidebarStatusIconKind {
+  switch (card.tone) {
     case "working":
-      return <CircleDashedIcon aria-hidden className={className} />;
+      return "working";
     case "attention":
-      return props.card.status === "waiting" ? (
-        <ShieldQuestionIcon aria-hidden className={className} />
-      ) : props.card.needsYou ? (
-        <MessageCircleQuestionIcon aria-hidden className={className} />
-      ) : (
-        <CircleAlertIcon aria-hidden className={className} />
-      );
+      return card.status === "waiting" ? "approval" : card.needsYou ? "input" : "failed";
     case "failed":
-      return <CircleAlertIcon aria-hidden className={className} />;
+      return "failed";
     case "resting":
-      return props.card.status === "paused" ? (
-        <CirclePauseIcon aria-hidden className={className} />
-      ) : (
-        <CircleCheckIcon aria-hidden className={className} />
-      );
+      return "done";
   }
 }
 
@@ -155,13 +131,15 @@ function SidebarTeammateRow(props: {
           props.active && "bg-sidebar-row-hover text-sidebar-foreground",
         )}
       >
-        <span aria-hidden className={cn("size-2 shrink-0 rounded-full", tone.dot)} />
+        {/* px-2 puts this icon's center under the Pivot row's chevron. */}
+        <span className={cn("inline-flex shrink-0", tone.text)}>
+          <SidebarStatusIcon kind={teammateStatusIcon(card)} />
+        </span>
         <span className="min-w-0 flex-1 truncate">{card.title}</span>
         {/* The status as a normal thread row shows it, with the working time. */}
         <span
           className={cn("inline-flex shrink-0 items-center gap-1 text-xs font-medium", tone.text)}
         >
-          <TeammateStatusIcon card={card} />
           <span role="status">{card.label}</span>
           {card.tone === "working" ? (
             <span aria-hidden>
