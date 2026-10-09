@@ -1,4 +1,10 @@
-import type { EnvironmentId, TeammateRecord, ThreadId } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  OrchestrationV2TurnItem,
+  TeammateRecord,
+  TeammateStatus,
+  ThreadId,
+} from "@t3tools/contracts";
 import { EllipsisIcon } from "lucide-react";
 import { memo, useMemo, useState } from "react";
 
@@ -6,8 +12,14 @@ import { useNowMinute } from "../../hooks/useNowMinute";
 import { cn } from "../../lib/utils";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { useThreadShells } from "../../state/entities";
-import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
+import {
+  SUBAGENT_ROW_CLASS,
+  SUBAGENT_ROW_INTERACTIVE_CLASS,
+  SubagentAvatar,
+  SubagentRowContent,
+} from "../chat/V2LifecycleRow";
 import { Button } from "../ui/button";
+import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useEnvironmentQuery } from "../../state/query";
@@ -30,8 +42,8 @@ const OPEN_ACTIONS: ReadonlyArray<{ readonly kind: TeammatePaneKind; readonly la
 ];
 
 /**
- * One card per teammate in dispatch order, finished ones folded into a chip at
- * the end. Nothing here animates; elapsed times move once a minute.
+ * One subagent-style row per teammate in dispatch order, finished ones folded into
+ * a section at the end. Nothing here animates; elapsed times move once a minute.
  */
 export function PivotTeammatesPane(props: {
   environmentId: EnvironmentId;
@@ -73,50 +85,69 @@ export function PivotTeammatesPane(props: {
     />
   );
   return (
-    <div className="h-full overflow-y-auto p-3">
-      <div className="flex flex-wrap content-start gap-2">
-        {cards.live.map(render)}
-        {cards.finished.length > 0 ? (
-          <Button
-            size="sm"
-            variant="outline"
-            aria-expanded={showFinished}
+    <div className="h-full overflow-y-auto p-2">
+      {cards.live.map(render)}
+      {cards.finished.length > 0 ? (
+        <>
+          <CollapsibleSectionHeader
+            expanded={showFinished}
             onClick={() => setShowFinished((value) => !value)}
           >
-            {cards.finished.length} finished
-          </Button>
-        ) : null}
-        {showFinished ? cards.finished.map(render) : null}
-      </div>
+            Finished
+            {!showFinished && ` (${cards.finished.length})`}
+          </CollapsibleSectionHeader>
+          {showFinished ? cards.finished.map(render) : null}
+        </>
+      ) : null}
     </div>
   );
 }
 
 /**
- * The worktree setup in progress, or how it went wrong. Subscribes only while the card
- * follows setup, so a settled team holds no setup streams.
+ * Teammate states drawn with the subagent dot colors. A state that asks someone to act
+ * has no subagent equivalent, so it gets the warning dot instead.
  */
-function TeammateSetupLine(props: { environmentId: EnvironmentId; threadId: ThreadId }) {
+const SUBAGENT_STATUS: Record<TeammateStatus, OrchestrationV2TurnItem["status"]> = {
+  working: "running",
+  waiting: "waiting",
+  "needs-decision": "waiting",
+  blocked: "waiting",
+  paused: "idle",
+  done: "completed",
+  failed: "failed",
+  unreported: "cancelled",
+};
+
+/**
+ * The worktree setup in progress, or how it went wrong, as the row's detail line.
+ * Subscribes only while the card follows setup, so a settled team holds no setup streams.
+ */
+function TeammateSetupRow(props: Parameters<typeof PivotTeammateRow>[0]) {
   const setup = useEnvironmentQuery(
     vcsEnvironment.worktreeSetup({
       environmentId: props.environmentId,
-      input: { threadId: props.threadId },
+      input: { threadId: props.card.threadId },
     }),
   );
   const line = setupProgressLine(setup.data ?? null);
-  return line === null ? null : (
-    <Tooltip>
-      <TooltipTrigger
-        render={<div className="truncate text-xs text-muted-foreground">{line}</div>}
-      />
-      <TooltipPopup side="bottom">{line}</TooltipPopup>
-    </Tooltip>
-  );
+  return <PivotTeammateRow {...props} detail={line ?? props.detail} />;
 }
 
-const PivotTeammateCard = memo(function PivotTeammateCard(props: {
+const PivotTeammateCard = memo(function PivotTeammateCard(
+  props: Omit<Parameters<typeof PivotTeammateRow>[0], "detail">,
+) {
+  return props.card.followsSetup ? (
+    <TeammateSetupRow {...props} detail={props.card.detail} />
+  ) : (
+    <PivotTeammateRow {...props} detail={props.card.detail} />
+  );
+});
+
+/** A teammate drawn as a subagent row, with the PR number by its elapsed time. */
+function PivotTeammateRow(props: {
   environmentId: EnvironmentId;
   card: TeammateCard;
+  detail: string | null;
   nowMs: number;
   providerEntries: ReadonlyMap<string, ProviderInstanceEntry>;
   onOpen: (kind: TeammatePaneKind, teammate: ThreadId) => void;
@@ -127,100 +158,90 @@ const PivotTeammateCard = memo(function PivotTeammateCard(props: {
     card.providerInstanceId === null
       ? null
       : (props.providerEntries.get(card.providerInstanceId) ?? null);
+  const failed = card.status === "failed";
+  const tag =
+    card.footer?.kind === "pull-request"
+      ? `#${card.footer.number}`
+      : card.footer?.kind === "scout"
+        ? "Scout"
+        : null;
   const element = (
     <div
       role="button"
       tabIndex={0}
+      aria-label={`Open ${card.title}`}
+      aria-description={card.label}
       data-pivot-teammate-card="true"
       data-attention={card.attention ? "true" : undefined}
       onClick={() => props.onOpen("teammate", card.threadId)}
       onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           props.onOpen("teammate", card.threadId);
         }
       }}
-      className={cn(
-        "flex w-60 cursor-pointer flex-col gap-2 rounded-xl border bg-background p-3 text-left",
-        card.attention ? "border-warning" : "border-border",
-      )}
+      className={cn(SUBAGENT_ROW_CLASS, SUBAGENT_ROW_INTERACTIVE_CLASS)}
     >
-      <div className="flex items-center justify-between gap-2 text-xs">
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span
-            aria-hidden
-            className={cn(
-              "size-2 shrink-0 rounded-full",
-              card.attention
-                ? "bg-warning"
-                : card.status === "working"
-                  ? "bg-success"
-                  : "bg-muted-foreground/50",
-            )}
-          />
-          <span className="truncate font-medium">{card.label}</span>
-          {elapsed !== null ? <span className="text-muted-foreground">{elapsed}</span> : null}
-        </span>
-        <Menu>
-          <MenuTrigger
-            render={
-              <Button
-                size="icon-micro"
-                variant="ghost-muted"
-                aria-label="Teammate actions"
-                onClick={(event) => event.stopPropagation()}
-              />
+      <SubagentRowContent
+        avatar={
+          <SubagentAvatar
+            driver={provider?.driverKind}
+            provider={
+              provider === null
+                ? undefined
+                : { displayName: provider.displayName, iconUrl: provider.acpRegistryIconUrl }
             }
-          >
-            <EllipsisIcon />
-          </MenuTrigger>
-          <MenuPopup side="bottom" align="end">
-            {OPEN_ACTIONS.map((action) => (
-              <MenuItem
-                key={action.kind}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  props.onOpen(action.kind, card.threadId);
-                }}
-              >
-                {action.label}
-              </MenuItem>
-            ))}
-          </MenuPopup>
-        </Menu>
-      </div>
-      <div className="line-clamp-2 text-sm">{card.title}</div>
-      {card.followsSetup ? (
-        <TeammateSetupLine environmentId={props.environmentId} threadId={card.threadId} />
-      ) : null}
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span>
-          {card.footer?.kind === "pull-request"
-            ? `#${card.footer.number}`
-            : card.footer?.kind === "scout"
-              ? "Scout"
-              : null}
-        </span>
-        {provider !== null ? (
-          <ProviderInstanceIcon
-            driverKind={provider.driverKind}
-            displayName={provider.displayName}
-            accentColor={provider.accentColor}
-            acpRegistryAgentId={provider.acpRegistryAgentId}
-            acpRegistryIconUrl={provider.acpRegistryIconUrl}
-            iconClassName="size-3.5"
+            status={SUBAGENT_STATUS[card.status]}
+            dotClassName={card.attention && !failed ? "bg-warning" : undefined}
           />
-        ) : null}
-      </div>
+        }
+        title={card.title}
+        statusLabel={card.label}
+        showStatus
+        detail={props.detail}
+        failed={failed}
+        trailing={[tag, elapsed].filter((part) => part !== null).join(" · ")}
+        actions={
+          <Menu>
+            <MenuTrigger
+              render={
+                <Button
+                  size="icon-micro"
+                  variant="ghost-muted"
+                  aria-label="Teammate actions"
+                  onClick={(event) => event.stopPropagation()}
+                />
+              }
+            >
+              <EllipsisIcon />
+            </MenuTrigger>
+            <MenuPopup side="bottom" align="end">
+              {OPEN_ACTIONS.map((action) => (
+                <MenuItem
+                  key={action.kind}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    props.onOpen(action.kind, card.threadId);
+                  }}
+                >
+                  {action.label}
+                </MenuItem>
+              ))}
+            </MenuPopup>
+          </Menu>
+        }
+        chevron
+      />
     </div>
   );
-  // The latest report or error, which the card has no room for.
-  return card.detail === null ? (
+  // The full report or error, which one truncated line can cut short.
+  return props.detail === null ? (
     element
   ) : (
     <Tooltip>
-      <TooltipTrigger render={element} />
-      <TooltipPopup side="bottom">{card.detail}</TooltipPopup>
+      <TooltipTrigger delay={200} render={element} />
+      <TooltipPopup side="bottom">{props.detail}</TooltipPopup>
     </Tooltip>
   );
-});
+}

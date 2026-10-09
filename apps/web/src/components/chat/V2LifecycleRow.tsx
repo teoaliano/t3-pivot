@@ -292,12 +292,15 @@ export function SubagentAvatar({
   driver,
   provider,
   status,
+  dotClassName,
   className,
 }: {
   driver?: ProviderDriverKind | undefined;
-  provider?: ServerProvider | undefined;
+  provider?: Pick<ServerProvider, "displayName" | "iconUrl"> | undefined;
   /** Omitted inside an overlapped stack, where a covered dot would only add noise. */
   status?: OrchestrationV2TurnItem["status"] | undefined;
+  /** Replaces the status color, for a state subagents don't have. */
+  dotClassName?: string | undefined;
   className?: string;
 }) {
   return (
@@ -323,7 +326,7 @@ export function SubagentAvatar({
         <span
           className={cn(
             "absolute -right-px -bottom-px size-2 rounded-full ring-2 ring-background",
-            subagentStatusVisual(status).dotClass,
+            dotClassName ?? subagentStatusVisual(status).dotClass,
           )}
         />
       ) : null}
@@ -397,6 +400,75 @@ export function SubagentNotificationLink(props: {
   );
 }
 
+export const SUBAGENT_ROW_CLASS =
+  "group/subagent flex w-full min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-left";
+export const SUBAGENT_ROW_INTERACTIVE_CLASS =
+  "cursor-pointer transition-colors hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70";
+
+/**
+ * The inside of a subagent row: avatar, title, one detail line, trailing time, and a
+ * chevron when it opens a thread. Wrap it in an element with `SUBAGENT_ROW_CLASS`.
+ * The Pivot's teammate rows reuse it, with their menu in `actions`.
+ */
+export function SubagentRowContent(props: {
+  readonly avatar: ReactNode;
+  readonly title: string;
+  readonly statusLabel: string;
+  /** Show the status beside the title when the detail takes the second line. */
+  readonly showStatus: boolean;
+  readonly detail: string | null;
+  readonly failed: boolean;
+  readonly trailing: ReactNode;
+  readonly actions?: ReactNode;
+  readonly chevron: boolean;
+}) {
+  const { detail, failed } = props;
+  return (
+    <>
+      {props.avatar}
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline gap-2">
+          <span className="min-w-0 truncate text-xs font-medium text-foreground">
+            {props.title}
+          </span>
+          {detail !== null && props.showStatus ? (
+            <span
+              className={cn(
+                "shrink-0 text-3xs",
+                failed ? "text-destructive" : "text-muted-foreground",
+              )}
+            >
+              {props.statusLabel}
+            </span>
+          ) : null}
+        </span>
+        <span
+          className={cn(
+            "block text-2xs leading-relaxed",
+            failed ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {detail === null ? (
+            props.statusLabel
+          ) : detail.includes("/") && !detail.includes(" ") ? (
+            <MiddleTruncate value={detail} showTitle={false} className="flex" />
+          ) : (
+            <span className="block truncate">{detail}</span>
+          )}
+        </span>
+      </span>
+      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{props.trailing}</span>
+      {props.actions}
+      {props.chevron ? (
+        <ChevronRightIcon
+          aria-hidden
+          className="size-3.5 shrink-0 text-muted-foreground/60 transition-colors group-hover/subagent:text-foreground"
+        />
+      ) : null}
+    </>
+  );
+}
+
 function SubagentTimelineLink(props: {
   readonly parentRef: ScopedThreadRef;
   readonly subagentId: NodeId;
@@ -441,56 +513,24 @@ function SubagentTimelineLink(props: {
     completedAt: isoOrNull(agent?.completedAt ?? props.completedAt),
   };
   const content = (
-    <>
-      <SubagentAvatar
-        driver={props.driver}
-        provider={props.provider}
-        status={status ?? undefined}
-      />
-      <span className="min-w-0 flex-1">
-        <span className="flex items-baseline gap-2">
-          <span className="min-w-0 truncate text-xs font-medium text-foreground">
-            {props.title}
-          </span>
-          {detail !== null && (props.event !== undefined || status !== "completed") ? (
-            <span
-              className={cn(
-                "shrink-0 text-3xs",
-                failed ? "text-destructive" : "text-muted-foreground",
-              )}
-            >
-              {statusLabel}
-            </span>
-          ) : null}
-        </span>
-        <span
-          className={cn(
-            "block text-2xs leading-relaxed",
-            failed ? "text-destructive" : "text-muted-foreground",
-          )}
-        >
-          {detail === null ? (
-            statusLabel
-          ) : detail.includes("/") && !detail.includes(" ") ? (
-            <MiddleTruncate value={detail} showTitle={false} className="flex" />
-          ) : (
-            <span className="block truncate">{detail}</span>
-          )}
-        </span>
-      </span>
-      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-        {props.event ? props.event.timestamp : <SubagentElapsed agent={timing} />}
-      </span>
-      {threadId !== null ? (
-        <ChevronRightIcon
-          aria-hidden
-          className="size-3.5 shrink-0 text-muted-foreground/60 transition-colors group-hover/subagent:text-foreground"
+    <SubagentRowContent
+      avatar={
+        <SubagentAvatar
+          driver={props.driver}
+          provider={props.provider}
+          status={status ?? undefined}
         />
-      ) : null}
-    </>
+      }
+      title={props.title}
+      statusLabel={statusLabel}
+      showStatus={props.event !== undefined || status !== "completed"}
+      detail={detail}
+      failed={failed}
+      trailing={props.event ? props.event.timestamp : <SubagentElapsed agent={timing} />}
+      chevron={threadId !== null}
+    />
   );
-  const className =
-    "group/subagent flex w-full min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-left";
+  const className = SUBAGENT_ROW_CLASS;
   return (
     <Tooltip>
       <TooltipTrigger
@@ -507,10 +547,7 @@ function SubagentTimelineLink(props: {
               aria-label={`Open ${props.title}`}
               aria-description={statusLabel}
               onClick={() => props.onOpenThread(threadId)}
-              className={cn(
-                className,
-                "cursor-pointer transition-colors hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
-              )}
+              className={cn(className, SUBAGENT_ROW_INTERACTIVE_CLASS)}
             >
               {content}
             </button>
