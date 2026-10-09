@@ -38,6 +38,7 @@ export interface FakeThread {
   title: string;
   modelSelection: ModelSelection;
   archived: boolean;
+  settled: boolean;
   stops: number;
   relaunches: number;
   readonly messages: Array<FakeMessage>;
@@ -159,6 +160,7 @@ export const layer = (fake: FakeV2) =>
             title: "Pivot",
             modelSelection,
             archived: false,
+            settled: false,
             stops: 0,
             relaunches: 0,
             messages: [],
@@ -184,6 +186,7 @@ export const layer = (fake: FakeV2) =>
             title: input.title,
             modelSelection: input.modelSelection,
             archived: false,
+            settled: false,
             stops: 0,
             relaunches: 0,
             messages: [{ senderThreadId: input.pivotThreadId, text: input.text, mode: "launch" }],
@@ -215,6 +218,10 @@ export const layer = (fake: FakeV2) =>
       archive: (threadId) =>
         Effect.map(thread(fake, threadId, "archive"), (found) => {
           found.archived = true;
+        }),
+      settle: (threadId) =>
+        Effect.map(thread(fake, threadId, "settle"), (found) => {
+          found.settled = true;
         }),
       send: ({ threadId, senderThreadId, text, mode }) =>
         Effect.flatMap(thread(fake, threadId, "send"), (found) =>

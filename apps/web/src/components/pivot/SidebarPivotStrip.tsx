@@ -5,7 +5,7 @@ import { ChevronDownIcon, ChevronRightIcon, LayoutDashboardIcon } from "lucide-r
 
 import { cn } from "../../lib/utils";
 import { buildThreadRouteParams } from "../../threadRoutes";
-import type { SidebarPivotGroup } from "../sidebar/pivotNesting.logic";
+import { pivotGroupHasTeammates, type SidebarPivotGroup } from "../sidebar/pivotNesting.logic";
 import { SidebarStatusIcon, type SidebarStatusIconKind } from "../sidebar/SidebarStatusIcon";
 import { WorkingDuration } from "../sidebar/WorkingDuration";
 import { Badge } from "../ui/badge";
@@ -29,7 +29,7 @@ export function SidebarPivotSummary(props: {
   // Only the numbers show; the words stay in tooltips and for screen readers.
   const teammatesLabel = `${count} ${count === 1 ? "teammate" : "teammates"}`;
   const needYouLabel = `${group.needYou} ${group.needYou === 1 ? "needs you" : "need you"}`;
-  if (count === 0 && group.needYou === 0) {
+  if (!pivotGroupHasTeammates(group)) {
     // Still rendered, so the row doesn't fall back to showing the branch here.
     return (
       <span className="min-w-0 flex-1 truncate text-muted-foreground">
