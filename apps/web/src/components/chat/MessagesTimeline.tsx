@@ -485,6 +485,8 @@ interface MessagesTimelineProps {
   parentThreadLink?: {
     readonly threadId: ThreadId;
     readonly title: string;
+    /** How this thread relates to the parent; a Pivot teammate is "Teammate of". */
+    readonly relation: "Subagent of" | "Teammate of";
   } | null;
   onForkFromRun: (input: {
     readonly sourceThreadId: ThreadId;
@@ -1419,7 +1421,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
         <div className="messages-timeline-row-frame">
           <div className="chat-content-lane pt-1 sm:pt-2">
             <TimelineSystemDivider
-              label="Subagent of"
+              label={parentThreadLink.relation}
               detail={parentThreadLink.title}
               icon={BotIcon}
               actionLabel="Open parent thread"

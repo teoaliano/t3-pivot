@@ -394,7 +394,6 @@ function TeammatePaneBody(props: {
               environmentId={teammateRef.environmentId}
               threadId={teammateRef.threadId}
               routeKind="server"
-              pivotReadOnly
             />
           </div>
         </div>
