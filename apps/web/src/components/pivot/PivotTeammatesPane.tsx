@@ -75,14 +75,14 @@ export function PivotTeammatesPane(props: {
 
   if (props.teammates.length === 0) {
     return (
-      <p className="flex h-full items-center justify-center p-4 text-center text-sm text-muted-foreground">
+      <p className="flex min-h-0 flex-auto items-center justify-center p-4 text-center text-sm text-muted-foreground">
         No teammates yet. Tell the Pivot what you want done and it dispatches them.
       </p>
     );
   }
   return (
     // Centered in the strip; m-auto rather than centering keeps an overflowing top reachable.
-    <div className="flex h-full overflow-y-auto p-1 scrollbar-gutter-both">
+    <div className="flex min-h-0 flex-auto overflow-y-auto p-1 scrollbar-gutter-both">
       <div className="m-auto flex flex-wrap items-center justify-center gap-2">
         {cards.live.map((card) => (
           <PivotTeammateCard

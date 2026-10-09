@@ -484,7 +484,11 @@ function PaneFrame(props: {
   const { node } = props;
   if (node.kind === "teammates") {
     return (
-      <section aria-label={PANE_TITLES[node.kind]} className="size-full min-h-0 min-w-0">
+      // Sized by its rows when fitted, so it flexes rather than filling a set height.
+      <section
+        aria-label={PANE_TITLES[node.kind]}
+        className="flex min-h-0 min-w-0 flex-auto flex-col"
+      >
         {props.children}
       </section>
     );
@@ -557,8 +561,21 @@ function LayoutNodeView(props: {
   // While dragging, sizes live here and commit to the stored tree on release.
   const [dragSizes, setDragSizes] = useState<ReadonlyArray<number> | null>(null);
   if (node.type === "pane") return <>{props.renderPane(node)}</>;
-  const sizes = dragSizes ?? node.sizes;
   const horizontal = node.type === "row";
+  // The teammate cards in a column fit their rows until the user drags their height.
+  const fits = node.children.map(
+    (child) =>
+      !horizontal &&
+      dragSizes === null &&
+      child.type === "pane" &&
+      child.kind === "teammates" &&
+      child.sized !== true,
+  );
+  const stored = dragSizes ?? node.sizes;
+  // Flex hands out only a fraction of the free space when the grows sum below 1, so the
+  // slots left sharing it split it whole.
+  const shared = stored.reduce((sum, size, index) => (fits[index] ? sum : sum + size), 0);
+  const sizes = stored.map((size) => (shared > 0 ? size / shared : size));
 
   const startDrag = (index: number, event: ReactPointerEvent<HTMLDivElement>) => {
     const element = container.current;
@@ -567,7 +584,16 @@ function LayoutNodeView(props: {
     const rect = element.getBoundingClientRect();
     const extent = horizontal ? rect.width : rect.height;
     const origin = horizontal ? event.clientX : event.clientY;
-    const start = [...node.sizes];
+    // Start from what is on screen: cards fitted to their rows don't take their stored share.
+    const extents = Array.from(element.children, (child) => {
+      const box = child.getBoundingClientRect();
+      return horizontal ? box.width : box.height;
+    });
+    const total = extents.reduce((sum, value) => sum + value, 0);
+    const start =
+      extents.length === node.sizes.length && total > 0
+        ? extents.map((value) => value / total)
+        : [...node.sizes];
     let latest: ReadonlyArray<number> = start;
     const move = (moveEvent: PointerEvent) => {
       const delta = ((horizontal ? moveEvent.clientX : moveEvent.clientY) - origin) / extent;
@@ -594,7 +620,7 @@ function LayoutNodeView(props: {
       className={cn("flex size-full min-h-0 min-w-0", horizontal ? "flex-row" : "flex-col")}
     >
       {node.children.map((child, index) => (
-        <PaneSlot key={paneKey(child, index)} grow={sizes[index] ?? 1}>
+        <PaneSlot key={paneKey(child, index)} grow={sizes[index] ?? 1} fit={fits[index] === true}>
           <LayoutNodeView
             node={child}
             path={[...props.path, index]}
@@ -630,9 +656,16 @@ function LayoutNodeView(props: {
   );
 }
 
-function PaneSlot(props: { grow: number; children: ReactNode }) {
+/**
+ * One child of a split. A fitted slot is as tall as its content, up to a cap, and the
+ * rest of the split shares what is left; any other slot takes its share.
+ */
+function PaneSlot(props: { grow: number; fit: boolean; children: ReactNode }) {
   return (
-    <div className="relative min-h-0 min-w-0 p-0.75" style={{ flex: `${props.grow} 1 0` }}>
+    <div
+      className="relative flex min-h-0 min-w-0 flex-col p-0.75"
+      style={props.fit ? { flex: "0 0 auto", maxHeight: "40%" } : { flex: `${props.grow} 1 0` }}
+    >
       {props.children}
     </div>
   );
