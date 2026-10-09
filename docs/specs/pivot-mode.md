@@ -298,7 +298,7 @@ cards, one teammate's chat, a preview, files, a diff), with an optional wallpape
 - **Takeover.** Creating a Pivot while one is active moves every live teammate, open
   decision and pending wake from the active Pivot to the new one in one Pivot-store
   transaction, and marks the old one retired. A retired Pivot is read-only history: its
-  composer is hidden, and its finished teammates stay nested under it.
+  composer is hidden, and its unsettled finished teammates stay nested under it.
 - **Permanence.** No release, no adoption. A thread is a Pivot or a teammate from
   creation and stays one. Teammates only come from dispatch.
 - **Worktrees are required.** The server refuses a dispatch that does not produce a
@@ -590,8 +590,10 @@ cards, one teammate's chat, a preview, files, a diff), with an optional wallpape
 - **Sidebar.** A Pivot sits among the project's threads with a Pivot badge and a count
   of escalated decisions, and expands to its teammates. V2 hides `subagent` threads from
   the sidebar. Teammates are not subagents, so they stay visible, and the sidebar nests
-  them under their Pivot using the Pivot stream. A retired Pivot keeps its finished
-  teammates nested.
+  them under their Pivot using the Pivot stream. Nested rows show the same status colors
+  as threads (blue working with its elapsed time, orange when someone must act, green
+  paused or done). A teammate torn down, or whose thread settled (its PR merged or
+  closed), leaves the nested list as settled threads leave the inbox.
 - **Switch.** The header center shows a Chat / Pivot view switch on a Pivot. A keybinding
   toggles it. Each Pivot remembers its last choice per device. The Pivot view has no
   sidebar.

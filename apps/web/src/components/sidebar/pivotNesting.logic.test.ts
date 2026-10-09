@@ -119,6 +119,7 @@ describe("Pivot nesting in the sidebar", () => {
       latestRunStartedAt: null,
       latestRunCompletedAt: null,
       pullRequest: null,
+      settled: false,
     };
     const withNeeds: PivotState = {
       ...state,
@@ -131,6 +132,7 @@ describe("Pivot nesting in the sidebar", () => {
           ...teammate("cleaned", "active", "2026-10-05T00:00:00.000Z"),
           tornDownAt: "2026-10-05T01:00:00.000Z",
         },
+        merged: teammate("merged", "active", "2026-10-05T02:00:00.000Z"),
       },
       decisions: {
         own: {
@@ -145,15 +147,16 @@ describe("Pivot nesting in the sidebar", () => {
         ? { ...running, pendingRuntimeRequest: { kind: "approval" } as never }
         : threadId === "cleaned"
           ? null
-          : running;
+          : threadId === "merged"
+            ? { ...running, status: "idle" as const, settled: true }
+            : running;
     const group = sidebarPivotGroup(withNeeds, ThreadId.make("active"), shellOf);
-    expect(group?.live.map((card) => card.threadId)).toEqual(["first", "second", "third"]);
-    expect(group?.finished.map((card) => card.threadId)).toEqual(["cleaned"]);
+    // Torn-down and settled (merged) teammates leave the list, as settled threads do.
+    expect(group?.teammates.map((card) => card.threadId)).toEqual(["first", "second", "third"]);
     // Two teammates need the user, plus the Pivot's own held decision.
     expect(group?.needYou).toBe(3);
     expect(group?.retired).toBe(false);
-    // A retired Pivot keeps its finished teammates, read from the records.
-    // A takeover moves every live teammate, so a retired Pivot only has cleaned-up ones.
+    // A takeover moves every live teammate, so a retired Pivot lists none.
     const afterTakeover: PivotState = {
       ...state,
       teammates: {
@@ -162,8 +165,7 @@ describe("Pivot nesting in the sidebar", () => {
       },
     };
     const retired = sidebarPivotGroup(afterTakeover, ThreadId.make("retired"), () => null);
-    expect(retired).toMatchObject({ retired: true, live: [], needYou: 0 });
-    expect(retired?.finished.map((card) => card.threadId)).toEqual(["finished"]);
+    expect(retired).toMatchObject({ retired: true, teammates: [], needYou: 0 });
     expect(sidebarPivotGroup(state, ThreadId.make("first"), () => null)).toBeNull();
   });
 

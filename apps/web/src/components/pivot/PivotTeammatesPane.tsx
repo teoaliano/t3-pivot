@@ -27,6 +27,7 @@ import { vcsEnvironment } from "../../state/vcs";
 import {
   elapsedLabel,
   setupProgressLine,
+  TEAMMATE_TONE_CLASSES,
   type TeammateCard,
   teammateCardShellOf,
   teammateCards,
@@ -103,10 +104,7 @@ export function PivotTeammatesPane(props: {
   );
 }
 
-/**
- * Teammate states drawn with the subagent dot colors. A state that asks someone to act
- * has no subagent equivalent, so it gets the warning dot instead.
- */
+/** Teammate states as subagent states; the dot takes the teammate's thread status color. */
 const SUBAGENT_STATUS: Record<TeammateStatus, OrchestrationV2TurnItem["status"]> = {
   working: "running",
   waiting: "waiting",
@@ -193,7 +191,7 @@ function PivotTeammateRow(props: {
                 : { displayName: provider.displayName, iconUrl: provider.acpRegistryIconUrl }
             }
             status={SUBAGENT_STATUS[card.status]}
-            dotClassName={card.attention && !failed ? "bg-warning" : undefined}
+            dotClassName={TEAMMATE_TONE_CLASSES[card.tone].dot}
           />
         }
         title={card.title}

@@ -197,7 +197,6 @@ import {
   buildBulkUnpinContextMenuItem,
   deleteSelectedThreadEntries,
   filterSidebarProjectScopeItems,
-  formatWorkingDurationLabel,
   firstValidTimestampMs,
   hasUnseenCompletion,
   isSidebarNestedLinkClick,
@@ -285,6 +284,7 @@ import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
+import { WorkingDuration } from "./sidebar/WorkingDuration";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { MiddleTruncate } from "./ui/middle-truncate";
 import {
@@ -367,19 +367,6 @@ function JumpHintBadge(props: { label: string }) {
       {props.label}
     </span>
   );
-}
-
-// Self-ticking so only this span re-renders each second, not the whole row.
-function WorkingDuration(props: { startedAt: string | null }) {
-  const startedMs = props.startedAt !== null ? Date.parse(props.startedAt) : Number.NaN;
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (Number.isNaN(startedMs)) return;
-    const id = window.setInterval(() => setTick((tick) => tick + 1), 1_000);
-    return () => window.clearInterval(id);
-  }, [startedMs]);
-  if (Number.isNaN(startedMs)) return null;
-  return <span className="tabular-nums">{formatWorkingDurationLabel(Date.now() - startedMs)}</span>;
 }
 
 function terminalProcessLabel(count: number): string {
@@ -2487,8 +2474,8 @@ export default function Sidebar() {
   const [collapsedPivotKeys, setCollapsedPivotKeys] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  // T3 Pivot: each Pivot's row sums up its teammates, read from the Pivot records so
-  // cleaned-up (archived) teammates stay listed under it.
+  // T3 Pivot: each Pivot's row sums up its teammates that are not settled, read from
+  // the Pivot records.
   const pivotGroupsByKey = useMemo(() => {
     const shellByKey = new Map(threads.map((shell) => [pivotNestingKey(shell), shell] as const));
     const groups = new Map<string, SidebarPivotGroup>();
@@ -5491,7 +5478,7 @@ export default function Sidebar() {
                           const pivotKey = pivotNestingKey(thread);
                           const pivotGroup = pivotGroupsByKey.get(pivotKey);
                           if (pivotGroup !== undefined && !collapsedPivotKeys.has(pivotKey)) {
-                            if (pivotGroup.live.length + pivotGroup.finished.length > 0) {
+                            if (pivotGroup.teammates.length > 0) {
                               items.push(
                                 <SidebarTeammateList
                                   key={`${item.key}:teammates`}

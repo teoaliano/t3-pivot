@@ -23,7 +23,25 @@ export interface TeammateCardShell extends Omit<TeammateStatusInput, "teammate">
   readonly latestRunStartedAt: string | null;
   readonly latestRunCompletedAt: string | null;
   readonly pullRequest: { readonly number: number; readonly url: string } | null;
+  /** Settled like any thread: by hand, or automatically once its PR merged or closed. */
+  readonly settled: boolean;
 }
+
+/**
+ * The thread status color a teammate wears, as normal threads in the sidebar: blue
+ * while working, orange while it needs someone, green while resting, red when failed.
+ */
+export type TeammateTone = "working" | "attention" | "resting" | "failed";
+
+export const TEAMMATE_TONE_CLASSES: Record<
+  TeammateTone,
+  { readonly text: string; readonly dot: string }
+> = {
+  working: { text: "text-info", dot: "bg-info" },
+  attention: { text: "text-warning-foreground", dot: "bg-warning" },
+  resting: { text: "text-success", dot: "bg-success" },
+  failed: { text: "text-error", dot: "bg-destructive" },
+};
 
 export interface TeammateCard {
   readonly threadId: ThreadId;
@@ -34,6 +52,9 @@ export interface TeammateCard {
   readonly label: string;
   /** Accent border: something here needs someone's action. */
   readonly attention: boolean;
+  readonly tone: TeammateTone;
+  /** Finished for good: torn down, or its thread settled. Hidden from the sidebar. */
+  readonly settled: boolean;
   /** When the current status began, for the elapsed time. */
   readonly since: string | null;
   readonly footer:
@@ -89,13 +110,24 @@ export function teammateCard(
     teammate.report !== null && shell !== null && teammate.report.runId === shell.latestRunId
       ? teammate.report.reportedAt
       : null;
+  const attention = needsYou || ATTENTION.has(derived.status);
   return {
     threadId: teammate.threadId,
     title: shell?.title || teammate.title,
     status: derived.status,
     needsYou,
     label: needsYou ? "Needs you" : STATUS_LABEL[derived.status],
-    attention: needsYou || ATTENTION.has(derived.status),
+    attention,
+    tone:
+      derived.status === "failed"
+        ? "failed"
+        : attention
+          ? "attention"
+          : derived.status === "working"
+            ? "working"
+            : "resting",
+    // Anything asking for the user stays in view, as a settled thread wakes on a request.
+    settled: !needsYou && (teammate.tornDownAt !== null || shell?.settled === true),
     since:
       derived.status === "working"
         ? (shell?.latestRunStartedAt ?? teammate.dispatchedAt)
@@ -161,6 +193,7 @@ export function teammateCardShellOf(
     latestRunStartedAt: isoOrNull(source.latestRunStartedAt),
     latestRunCompletedAt: isoOrNull(source.latestRunCompletedAt),
     pullRequest: link === null ? null : { number: link.number, url: link.url },
+    settled: source.settledOverride === "settled",
   };
 }
 
