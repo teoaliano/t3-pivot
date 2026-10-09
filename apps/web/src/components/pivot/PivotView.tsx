@@ -164,12 +164,15 @@ export function PivotView(props: { pivot: ScopedThreadRef }) {
       node.teammate === undefined ? null : scopeThreadRef(pivot.environmentId, node.teammate);
     switch (node.kind) {
       case "pivot-chat":
+        // ChatView sizes itself as a flex item, so it needs a flex column to stay bounded.
         return (
-          <ChatView
-            environmentId={pivot.environmentId}
-            threadId={pivot.threadId}
-            routeKind="server"
-          />
+          <div className="flex size-full min-h-0 flex-col">
+            <ChatView
+              environmentId={pivot.environmentId}
+              threadId={pivot.threadId}
+              routeKind="server"
+            />
+          </div>
         );
       case "teammates":
         return (
@@ -385,7 +388,7 @@ function TeammatePaneBody(props: {
       return (
         <div className="flex size-full min-h-0 flex-col">
           {props.hasScoutReport ? <ScoutReport teammateRef={teammateRef} /> : null}
-          <div className="relative min-h-0 flex-1">
+          <div className="relative flex min-h-0 flex-1 flex-col">
             <ChatView
               key={teammateRef.threadId}
               environmentId={teammateRef.environmentId}
