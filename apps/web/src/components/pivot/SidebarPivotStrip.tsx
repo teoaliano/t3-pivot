@@ -14,7 +14,8 @@ import { TEAMMATE_TONE_CLASSES, type TeammateCard } from "./pivotCards.logic";
 
 /**
  * The last line of a Pivot's sidebar row: the fold toggle, how many teammates it
- * has, and how many need the user. The row itself opens the Pivot.
+ * has, and how many need the user. The row itself opens the Pivot. A Pivot with
+ * nothing to fold or count leaves the line empty, apart from "Retired".
  */
 export function SidebarPivotSummary(props: {
   group: SidebarPivotGroup;
@@ -28,6 +29,14 @@ export function SidebarPivotSummary(props: {
   // Only the numbers show; the words stay in tooltips and for screen readers.
   const teammatesLabel = `${count} ${count === 1 ? "teammate" : "teammates"}`;
   const needYouLabel = `${group.needYou} ${group.needYou === 1 ? "needs you" : "need you"}`;
+  if (count === 0 && group.needYou === 0) {
+    // Still rendered, so the row doesn't fall back to showing the branch here.
+    return (
+      <span className="min-w-0 flex-1 truncate text-muted-foreground">
+        {group.retired ? "Retired" : null}
+      </span>
+    );
+  }
   return (
     <span className="flex min-w-0 flex-1 items-center gap-1.5">
       <button
