@@ -35,7 +35,7 @@ import * as ManagedProcesses from "../managedProcess/ManagedProcesses.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
-import { randomUuidV4 } from "../orchestration-v2/RandomUuid.ts";
+import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadLifecycle from "../orchestration-v2/ThreadLifecycleService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";

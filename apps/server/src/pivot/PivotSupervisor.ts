@@ -29,7 +29,7 @@ import * as Queue from "effect/Queue";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
-import { randomUuidV4 } from "../orchestration-v2/RandomUuid.ts";
+import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
 import * as ServerActivation from "../serverActivation.ts";
 import { loadPivotText } from "./pivotTexts.ts";
 import * as PivotStore from "./PivotStore.ts";

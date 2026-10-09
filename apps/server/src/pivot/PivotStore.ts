@@ -40,7 +40,7 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
-import { randomUuidV4 } from "../orchestration-v2/RandomUuid.ts";
+import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
 import * as PivotDatabase from "./PivotDatabase.ts";
 import { PivotEvent, SeenPullRequest, type StoredPivotEvent } from "./PivotEvents.ts";
 
