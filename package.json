@@ -39,6 +39,8 @@
     "fmt:check": "vp fmt --check",
     "dist:desktop:artifact": "node scripts/build-desktop-artifact.ts",
     "pivot:release": "node scripts/pivot.ts release",
+    "pivot:ios-release": "node scripts/pivot.ts ios-release",
+    "pivot:nightly": "node scripts/pivot.ts nightly",
     "pivot:sync": "node scripts/pivot.ts sync",
     "pivot:host-update": "node scripts/pivot.ts host-update",
     "dist:desktop:dmg": "node scripts/build-desktop-artifact.ts --platform mac --target dmg",

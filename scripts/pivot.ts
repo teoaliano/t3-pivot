@@ -3,6 +3,9 @@
 // Maintainer commands for T3 Pivot.
 //   sync         open a PR on the fork that merges upstream's newest nightly tag
 //   release      build, sign, notarize and publish T3 Pivot from main (release Mac)
+//   ios-release  upload the iPhone app for main's release to TestFlight (release Mac)
+//   nightly      publish whatever main has not released yet, desktop and iPhone (release Mac)
+//   nightly-install  schedule `nightly` with launchd, from the release Mac's clone
 //   host-update  keep a server host's checkout level with upstream and running it
 // All commands act as the fork owner's GitHub account, whatever gh's active
 // account is.
@@ -10,7 +13,9 @@
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Console from "effect/Console";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
@@ -23,9 +28,11 @@ import { newestNightlyTag } from "@t3tools/shared/nightlyTag";
 
 import {
   FORK_TAG_PREFIX,
+  iosBuildNumber,
   nightlyBaseVersion,
   planForkVersion,
   planUpstreamSync,
+  releasedVersion,
 } from "./pivot-release-plan.ts";
 
 const FORK_REPOSITORY = "teoaliano/t3-pivot";
@@ -39,6 +46,13 @@ const NOTARY_KEYCHAIN_PROFILE = "t3-pivot";
 // marking the commit that unit last started on.
 const HOST_SERVICE = "t3-pivot.service";
 const HOST_DEPLOYED_REF = "refs/pivot/deployed";
+// The iPhone app ships through TestFlight under the same team. Expo's prebuild
+// names the Xcode workspace and scheme after the app's display name.
+const IOS_BUNDLE_ID = "com.teoaliano.t3pivot";
+const IOS_PROJECT = "T3Pivot";
+// The local ref marking the commit the release Mac last uploaded to TestFlight.
+const IOS_UPLOADED_REF = "refs/pivot/testflight";
+const NIGHTLY_LABEL = "com.teoaliano.t3pivot.nightly";
 
 export class PivotCommandError extends Schema.TaggedError<PivotCommandError>()(
   "PivotCommandError",
@@ -103,10 +117,12 @@ const runVisible = Effect.fn("pivot.runVisible")(function* (
   command: string,
   args: ReadonlyArray<string>,
   env: Record<string, string> = {},
+  cwd?: string,
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const exitCode = yield* spawner.exitCode(
     ChildProcess.make(command, args, {
+      cwd,
       env,
       extendEnv: true,
       stdin: "ignore",
@@ -188,6 +204,43 @@ const openSyncPr = Effect.fn("pivot.openSyncPr")(function* (
   yield* Console.log(prUrl);
 });
 
+/** Refuses unless the checkout is on `main` with no uncommitted changes to tracked files. */
+const ensureCleanMain = Effect.fn("pivot.ensureCleanMain")(function* (action: string) {
+  const branch = yield* run("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+  if (branch !== "main") {
+    return yield* new PivotRefusedError({ action, reason: `on ${branch}, not main.` });
+  }
+  const changes = yield* run("git", ["status", "--porcelain", "--untracked-files=no"]);
+  if (changes.length > 0) {
+    return yield* new PivotRefusedError({ action, reason: "main has uncommitted changes." });
+  }
+});
+
+/** Refuses unless HEAD is exactly the fork's `main`, so a release never ships local commits. */
+const ensureLevelWithOrigin = Effect.fn("pivot.ensureLevelWithOrigin")(function* (
+  action: string,
+  env: Record<string, string>,
+) {
+  yield* run("git", ["fetch", "--quiet", "--tags", FORK_REMOTE, "main"], env);
+  const head = yield* run("git", ["rev-parse", "HEAD"]);
+  if (head !== (yield* run("git", ["rev-parse", `${FORK_REMOTE}/main`]))) {
+    return yield* new PivotRefusedError({
+      action,
+      reason: `main differs from ${FORK_REMOTE}/main.`,
+    });
+  }
+  return head;
+});
+
+/** The fork release already tagged on HEAD, from the fork's tags fetched last. */
+const headRelease = run("git", [
+  "tag",
+  "--points-at",
+  "HEAD",
+  "--list",
+  `${FORK_TAG_PREFIX}*`,
+]).pipe(Effect.map((output) => releasedVersion(lines(output))));
+
 const sync = Effect.gen(function* () {
   const env = yield* forkAccountEnv;
   yield* run("git", ["fetch", "--quiet", FORK_REMOTE, "main"], env);
@@ -195,28 +248,12 @@ const sync = Effect.gen(function* () {
   if (Option.isSome(next)) yield* openSyncPr(next.value, env);
 });
 
+/** Publishes the desktop release for HEAD and returns its version. */
 const release = Effect.gen(function* () {
   const env = yield* forkAccountEnv;
 
-  const branch = yield* run("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
-  if (branch !== "main") {
-    return yield* new PivotRefusedError({ action: "release", reason: `on ${branch}, not main.` });
-  }
-  const changes = yield* run("git", ["status", "--porcelain", "--untracked-files=no"]);
-  if (changes.length > 0) {
-    return yield* new PivotRefusedError({
-      action: "release",
-      reason: "main has uncommitted changes.",
-    });
-  }
-  yield* run("git", ["fetch", "--quiet", FORK_REMOTE, "main"], env);
-  const head = yield* run("git", ["rev-parse", "HEAD"]);
-  if (head !== (yield* run("git", ["rev-parse", `${FORK_REMOTE}/main`]))) {
-    return yield* new PivotRefusedError({
-      action: "release",
-      reason: `main differs from ${FORK_REMOTE}/main.`,
-    });
-  }
+  yield* ensureCleanMain("release");
+  const head = yield* ensureLevelWithOrigin("release", env);
 
   yield* run("git", ["fetch", "--quiet", "--tags", UPSTREAM_REMOTE]);
   const upstreamBaseTag = newestNightlyTag(
@@ -297,6 +334,229 @@ const release = Effect.gen(function* () {
     env,
   );
   yield* Console.log(releaseUrl);
+  return version;
+});
+
+interface AppStoreConnectKey {
+  readonly keyId: string;
+  readonly issuerId: string;
+  readonly keyPath: string;
+}
+
+// TestFlight uploads use an App Store Connect API key. Its .p8 sits where Apple's
+// tools look for it; its ids come from the environment. None when not set up.
+const appStoreConnectKey = Effect.gen(function* () {
+  const keyId = process.env.T3PIVOT_ASC_KEY_ID?.trim();
+  const issuerId = process.env.T3PIVOT_ASC_ISSUER_ID?.trim();
+  if (!keyId || !issuerId) return Option.none<AppStoreConnectKey>();
+  const keyPath = `${process.env.HOME}/.appstoreconnect/private_keys/AuthKey_${keyId}.p8`;
+  if (!(yield* (yield* FileSystem.FileSystem).exists(keyPath))) {
+    return yield* new PivotRefusedError({
+      action: "upload to TestFlight",
+      reason: `no App Store Connect key at ${keyPath}.`,
+    });
+  }
+  return Option.some<AppStoreConnectKey>({ keyId, issuerId, keyPath });
+});
+
+const EXPORT_OPTIONS = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>method</key>
+  <string>app-store-connect</string>
+  <key>destination</key>
+  <string>upload</string>
+  <key>signingStyle</key>
+  <string>automatic</string>
+  <key>teamID</key>
+  <string>${APPLE_TEAM_ID}</string>
+</dict>
+</plist>
+`;
+
+/**
+ * Builds the iPhone app at HEAD as `version` and uploads it to TestFlight. It is
+ * the same reduced-capability T3 Pivot build as a personal-team install (no
+ * widgets, push, Sign in with Apple or OTA updates), signed by the fork's team.
+ */
+const uploadIos = Effect.fn("pivot.uploadIos")(function* (
+  version: string,
+  key: AppStoreConnectKey,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const build = iosBuildNumber(yield* DateTime.now);
+  const outputDir = `release/ios-${version}-${build}`;
+  const archivePath = `${outputDir}/${IOS_PROJECT}.xcarchive`;
+  const exportOptionsPath = `${outputDir}/ExportOptions.plist`;
+  const appEnv = {
+    APP_VARIANT: "production",
+    EXPO_NO_GIT_STATUS: "1",
+    T3CODE_IOS_PERSONAL_TEAM: "1",
+    T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID: IOS_BUNDLE_ID,
+  };
+  const authArgs = [
+    "-allowProvisioningUpdates",
+    ...["-authenticationKeyPath", key.keyPath],
+    ...["-authenticationKeyID", key.keyId],
+    ...["-authenticationKeyIssuerID", key.issuerId],
+  ];
+
+  yield* Console.log(`Uploading the T3 Pivot iPhone app ${version} (${build}) to TestFlight...`);
+  yield* runVisible(
+    "pnpm",
+    ["exec", "expo", "prebuild", "--clean", "--platform", "ios"],
+    appEnv,
+    "apps/mobile",
+  );
+  yield* runVisible(
+    "xcodebuild",
+    [
+      "archive",
+      ...["-workspace", `apps/mobile/ios/${IOS_PROJECT}.xcworkspace`],
+      ...["-scheme", IOS_PROJECT, "-configuration", "Release"],
+      ...["-destination", "generic/platform=iOS", "-archivePath", archivePath],
+      ...authArgs,
+      `DEVELOPMENT_TEAM=${APPLE_TEAM_ID}`,
+      "CODE_SIGN_STYLE=Automatic",
+      `MARKETING_VERSION=${version}`,
+      `CURRENT_PROJECT_VERSION=${build}`,
+    ],
+    // The archive bundles the JS, which reads the app config again.
+    appEnv,
+  );
+  yield* fileSystem.writeFileString(exportOptionsPath, EXPORT_OPTIONS);
+  yield* runVisible("xcodebuild", [
+    "-exportArchive",
+    ...["-archivePath", archivePath, "-exportOptionsPlist", exportOptionsPath],
+    ...["-exportPath", `${outputDir}/export`],
+    ...authArgs,
+  ]);
+  yield* Console.log(`uploaded ${version} (${build}); TestFlight installs it once processed`);
+});
+
+/** Records that HEAD's iPhone build reached TestFlight. */
+const markIosUploaded = Effect.gen(function* () {
+  yield* run("git", ["update-ref", IOS_UPLOADED_REF, yield* run("git", ["rev-parse", "HEAD"])]);
+});
+
+const iosRelease = Effect.gen(function* () {
+  const env = yield* forkAccountEnv;
+  yield* ensureCleanMain("upload to TestFlight");
+  yield* ensureLevelWithOrigin("upload to TestFlight", env);
+  const version = yield* headRelease;
+  if (Option.isNone(version)) {
+    return yield* new PivotRefusedError({
+      action: "upload to TestFlight",
+      reason: "main has no desktop release yet. Run `pivot:release` first.",
+    });
+  }
+  const key = yield* appStoreConnectKey;
+  if (Option.isNone(key)) {
+    return yield* new PivotRefusedError({
+      action: "upload to TestFlight",
+      reason: "set T3PIVOT_ASC_KEY_ID and T3PIVOT_ASC_ISSUER_ID.",
+    });
+  }
+  yield* runVisible("pnpm", ["install", "--frozen-lockfile"]);
+  yield* uploadIos(version.value, key.value);
+  yield* markIosUploaded;
+});
+
+// Runs from the release Mac's dedicated clone at login and every morning (see
+// `nightly-install`). Publishes the desktop release and the TestFlight build
+// that `main` doesn't have yet, so running it again is a no-op.
+const nightly = Effect.gen(function* () {
+  const env = yield* forkAccountEnv;
+  yield* ensureCleanMain("publish nightly");
+  yield* run("git", ["fetch", "--quiet", "--tags", FORK_REMOTE, "main"], env);
+  yield* run("git", ["merge", "--ff-only", "--quiet", `${FORK_REMOTE}/main`]);
+  const head = yield* run("git", ["rev-parse", "HEAD"]);
+
+  const released = yield* headRelease;
+  const key = yield* appStoreConnectKey;
+  const uploaded = yield* Effect.option(
+    run("git", ["rev-parse", "--verify", "--quiet", IOS_UPLOADED_REF]),
+  );
+  const iosDue = Option.isSome(key) && !Option.contains(uploaded, head);
+  if (Option.isSome(released) && !iosDue) {
+    yield* Console.log(`already published ${released.value} at ${head.slice(0, 12)}`);
+    return;
+  }
+
+  yield* runVisible("pnpm", ["install", "--frozen-lockfile"]);
+  const version = Option.isSome(released) ? released.value : yield* release;
+  if (Option.isNone(key)) {
+    yield* Console.log("TestFlight is not set up, so the iPhone app was not uploaded.");
+    return;
+  }
+  yield* uploadIos(version, key.value);
+  yield* markIosUploaded;
+});
+
+const escapeXml = (value: string) =>
+  value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
+// Writes a launchd agent that runs `nightly` from this checkout at 07:30 and at
+// every login. launchd runs a calendar job missed during sleep on wake; the
+// login run covers a Mac that was off. Rerun after changing the TestFlight ids.
+const nightlyInstall = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const home = process.env.HOME ?? "";
+  const plistPath = `${home}/Library/LaunchAgents/${NIGHTLY_LABEL}.plist`;
+  const logPath = `${home}/Library/Logs/t3-pivot-nightly.log`;
+  const environment: Record<string, string | undefined> = {
+    PATH: process.env.PATH,
+    T3PIVOT_ASC_KEY_ID: process.env.T3PIVOT_ASC_KEY_ID,
+    T3PIVOT_ASC_ISSUER_ID: process.env.T3PIVOT_ASC_ISSUER_ID,
+  };
+  const command = [
+    "node scripts/pivot.ts nightly",
+    `osascript -e 'display notification "Nightly release failed. See ${logPath}" with title "T3 Pivot"'`,
+  ].join(" || ");
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${NIGHTLY_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>${escapeXml(command)}</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>${escapeXml(process.cwd())}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+${Object.entries(environment)
+  .filter((entry): entry is [string, string] => entry[1] !== undefined && entry[1] !== "")
+  .map(([name, value]) => `    <key>${name}</key>\n    <string>${escapeXml(value)}</string>`)
+  .join("\n")}
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>7</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>${escapeXml(logPath)}</string>
+  <key>StandardErrorPath</key>
+  <string>${escapeXml(logPath)}</string>
+</dict>
+</plist>
+`;
+  yield* fileSystem.writeFileString(plistPath, plist);
+  const domain = `gui/${yield* run("id", ["-u"])}`;
+  // Replace a loaded copy; bootout fails harmlessly when none is loaded.
+  yield* Effect.ignore(run("launchctl", ["bootout", `${domain}/${NIGHTLY_LABEL}`]));
+  yield* run("launchctl", ["bootstrap", domain, plistPath]);
+  yield* Console.log(`scheduled ${NIGHTLY_LABEL} from ${process.cwd()}; it also runs now`);
 });
 
 export class PivotBuildFailedError extends Schema.TaggedError<PivotBuildFailedError>()(
@@ -329,17 +589,7 @@ const buildServer = Effect.gen(function* () {
 const hostUpdate = Effect.gen(function* () {
   const env = yield* forkAccountEnv;
 
-  const branch = yield* run("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
-  if (branch !== "main") {
-    return yield* new PivotRefusedError({ action: "update", reason: `on ${branch}, not main.` });
-  }
-  const changes = yield* run("git", ["status", "--porcelain", "--untracked-files=no"]);
-  if (changes.length > 0) {
-    return yield* new PivotRefusedError({
-      action: "update",
-      reason: "main has uncommitted changes.",
-    });
-  }
+  yield* ensureCleanMain("update");
   yield* run("git", ["fetch", "--quiet", FORK_REMOTE, "main"], env);
   yield* run("git", ["merge", "--ff-only", "--quiet", `${FORK_REMOTE}/main`]);
 
@@ -397,7 +647,21 @@ const pivotCli = Command.make("pivot").pipe(
     ),
     Command.make("release").pipe(
       Command.withDescription("Build, sign, notarize and publish T3 Pivot from main."),
-      Command.withHandler(() => release),
+      Command.withHandler(() => Effect.asVoid(release)),
+    ),
+    Command.make("ios-release").pipe(
+      Command.withDescription("Upload the iPhone app for main's desktop release to TestFlight."),
+      Command.withHandler(() => iosRelease),
+    ),
+    Command.make("nightly").pipe(
+      Command.withDescription(
+        "Publish the desktop release and TestFlight build main doesn't have yet.",
+      ),
+      Command.withHandler(() => nightly),
+    ),
+    Command.make("nightly-install").pipe(
+      Command.withDescription("Run `nightly` from this checkout at 07:30 and at every login."),
+      Command.withHandler(() => nightlyInstall),
     ),
     Command.make("host-update").pipe(
       Command.withDescription(

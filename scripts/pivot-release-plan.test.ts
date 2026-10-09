@@ -1,8 +1,15 @@
 import { assert, describe, it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
-import { nightlyBaseVersion, planForkVersion, planUpstreamSync } from "./pivot-release-plan.ts";
+import {
+  iosBuildNumber,
+  nightlyBaseVersion,
+  planForkVersion,
+  planUpstreamSync,
+  releasedVersion,
+} from "./pivot-release-plan.ts";
 
 describe("planUpstreamSync", () => {
   const upstreamTags = [
@@ -114,4 +121,30 @@ describe("planForkVersion", () => {
       );
     }),
   );
+});
+
+describe("releasedVersion", () => {
+  it("reads the fork release among a commit's tags", () => {
+    assert.deepEqual(
+      releasedVersion(["v0.0.46-nightly.20261008.2833", "pivot-v0.0.4601"]),
+      Option.some("0.0.4601"),
+    );
+  });
+
+  it("is none when the commit has no fork release", () => {
+    assert.deepEqual(
+      releasedVersion(["v0.0.46-nightly.20261008.2833", "pivot-vnext"]),
+      Option.none(),
+    );
+  });
+});
+
+describe("iosBuildNumber", () => {
+  it("is the upload's UTC minute, so later uploads sort higher", () => {
+    assert.equal(iosBuildNumber(DateTime.makeUnsafe("2026-10-09T05:30:59.999Z")), "202610090530");
+    assert.isAbove(
+      Number(iosBuildNumber(DateTime.makeUnsafe("2026-10-10T00:00:00Z"))),
+      Number(iosBuildNumber(DateTime.makeUnsafe("2026-10-09T23:59:00Z"))),
+    );
+  });
 });
