@@ -236,6 +236,8 @@ export interface ProviderChangeRequestDetail extends ProviderChangeRequest {
   readonly closedAt: string | null;
   readonly reviewers: ReadonlyArray<PullRequestActor>;
   readonly checks: ReadonlyArray<PullRequestCheck>;
+  /** The check names the base branch requires, from a host that says. */
+  readonly requiredChecks?: ReadonlyArray<string>;
   readonly mergeCapabilities: PullRequestMergeCapabilities;
   readonly viewerPermissions: PullRequestViewerPermissions;
   /** Absent from a host that cannot compare the branch with its base, which is most of them. */
@@ -567,6 +569,8 @@ export interface PullRequestProviderApi {
       readonly mergeMethod?: PullRequestMergeMethod;
       /** Only meaningful for `update-branch`; absent takes the host's own default. */
       readonly updateMethod?: PullRequestUpdateMethod;
+      /** For `merge`: refuse unless the head is still this commit. */
+      readonly expectedHeadSha?: string;
     },
   ) => Effect.Effect<void, PullRequestProviderError>;
 

@@ -27,7 +27,11 @@ import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPr
 import { isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
 import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
-import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
+import {
+  SidebarUpdateArchitectureWarning,
+  SidebarUpdatePill,
+  SidebarUpstreamNightlyNotice,
+} from "./SidebarUpdatePill";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
@@ -242,6 +246,7 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
       <SidebarThreadUndoNotice />
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
+      <SidebarUpstreamNightlyNotice />
       <SidebarUtilityMenu />
     </SidebarFooter>
   );

@@ -1,4 +1,4 @@
-import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
+import { OrchestrationDispatchCommandError, PivotError } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 
@@ -123,6 +123,7 @@ import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts"
 import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
+import * as PivotService from "./pivot/PivotService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import {
   archivedShellStreamItemFromThreadShell,
@@ -206,6 +207,8 @@ import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
+import * as ManagedProcesses from "./managedProcess/ManagedProcesses.ts";
+import { resolveManagedScriptTarget } from "./managedProcess/resolveScriptTarget.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as DirectEndpoints from "./environment/DirectEndpoints.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
@@ -1225,6 +1228,9 @@ const layerWsRpc = (
       const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
       const providerSessionManager = yield* ProviderSessionManager.ProviderSessionManagerV2;
       const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
+      const pivots = yield* PivotService.PivotService;
+      const toPivotError = (cause: PivotService.PivotServiceError) =>
+        new PivotError({ message: cause.message, cause });
       const secretRequests = yield* SecretRequests.SecretRequests;
       const pullRequests = yield* PullRequestService.PullRequestService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
@@ -1288,6 +1294,7 @@ const layerWsRpc = (
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
+      const managedProcesses = yield* ManagedProcesses.ManagedProcesses;
       const rpcClientIds = yield* Ref.make(new Set<RpcClientId>());
       yield* Effect.addFinalizer(() =>
         Ref.get(rpcClientIds).pipe(
@@ -2042,6 +2049,21 @@ const layerWsRpc = (
           ),
         [WS_METHODS.scheduledTasksList]: (_input) =>
           scheduledTasks.list().pipe(Effect.map(withVisibleWebhookUrls)),
+        [WS_METHODS.pivotSubscribe]: (_input) => pivots.stream.pipe(Stream.mapError(toPivotError)),
+        [WS_METHODS.pivotCreate]: (input) =>
+          pivots.create(input).pipe(Effect.mapError(toPivotError)),
+        [WS_METHODS.pivotAnswerDecision]: (input) =>
+          pivots.recordUserAnswer(input).pipe(
+            Effect.map((decision) => ({ decision })),
+            Effect.mapError(toPivotError),
+          ),
+        [WS_METHODS.pivotTeammateDetail]: (input) =>
+          pivots.teammateDetail(input.threadId).pipe(Effect.mapError(toPivotError)),
+        [WS_METHODS.pivotDecisionLog]: (input) =>
+          pivots.decisionLog(input.pivotThreadId).pipe(
+            Effect.map((decisions) => ({ decisions })),
+            Effect.mapError(toPivotError),
+          ),
         [WS_METHODS.scheduledTasksSubscribe]: (_input) =>
           scheduledTasks.subscribeList().pipe(Stream.map(withVisibleWebhookUrls)),
         [WS_METHODS.scheduledTasksUpsert]: (input) => scheduledTasks.upsert(input),
@@ -2786,6 +2808,26 @@ const layerWsRpc = (
             automaticRemoteRefreshInterval: automaticGitFetchInterval,
           }),
         [WS_METHODS.subscribeWorktreeSetup]: (input) => worktreeSetupTracker.stream(input.threadId),
+        [WS_METHODS.subscribeManagedProcesses]: (input) =>
+          managedProcesses.stream(input.checkoutPath),
+        [WS_METHODS.subscribeManagedProcessOverview]: () => managedProcesses.streamOverview,
+        [WS_METHODS.managedProcessStart]: (input) =>
+          resolveManagedScriptTarget(input.threadId, input.scriptId).pipe(
+            Effect.provideService(
+              ThreadManagementService.ThreadManagementService,
+              threadManagement,
+            ),
+            Effect.provideService(ProjectStore.ProjectStoreV2, projectStore),
+            Effect.provideService(ServerSettings.ServerSettingsService, serverSettings),
+            Effect.flatMap((target) =>
+              managedProcesses.start(
+                target,
+                input.reallocate === undefined ? undefined : { reallocate: input.reallocate },
+              ),
+            ),
+          ),
+        [WS_METHODS.managedProcessStop]: (input) => managedProcesses.stop(input),
+        [WS_METHODS.managedProcessSetPinned]: (input) => managedProcesses.setPinned(input),
         [WS_METHODS.worktreeSetupCancel]: (input) =>
           worktreeSetupTracker
             .cancel(input.threadId)
@@ -2841,14 +2883,26 @@ const layerWsRpc = (
           ),
         [WS_METHODS.gitResolvePullRequest]: (input) => gitWorkflow.resolvePullRequest(input),
         [WS_METHODS.gitPreparePullRequestThread]: (input) =>
-          gitWorkflow
-            .preparePullRequestThread(input)
-            .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+          gitWorkflow.preparePullRequestThread(input).pipe(
+            Effect.tap((result) =>
+              result.worktreePath === null
+                ? Effect.void
+                : managedProcesses.reserve(result.worktreePath),
+            ),
+            Effect.tap(() => refreshGitStatus(input.cwd)),
+          ),
         [WS_METHODS.vcsListRefs]: (input) => gitWorkflow.listRefs(input),
         [WS_METHODS.vcsCreateWorktree]: (input) =>
-          gitWorkflow.createWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+          gitWorkflow.createWorktree(input).pipe(
+            Effect.tap((result) => managedProcesses.reserve(result.worktree.path)),
+            Effect.tap(() => refreshGitStatus(input.cwd)),
+          ),
         [WS_METHODS.vcsRemoveWorktree]: (input) =>
-          gitWorkflow.removeWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+          // Nothing may keep serving a checkout that is about to be deleted.
+          managedProcesses.stopAllForCheckout(input.path, { releaseReservation: true }).pipe(
+            Effect.andThen(gitWorkflow.removeWorktree(input)),
+            Effect.tap(() => refreshGitStatus(input.cwd)),
+          ),
         [WS_METHODS.vcsCreateRef]: (input) =>
           gitWorkflow.createRef(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
         [WS_METHODS.vcsSwitchRef]: (input) =>

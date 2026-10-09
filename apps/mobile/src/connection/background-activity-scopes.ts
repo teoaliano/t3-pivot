@@ -33,6 +33,8 @@ function stableScopeKey(environmentId: EnvironmentId, scope: BackgroundScope): s
       return JSON.stringify([environmentId, scope.type, scope.cwd]);
     case "thread":
       return JSON.stringify([environmentId, scope.type, scope.threadId]);
+    case "managed-process":
+      return JSON.stringify([environmentId, scope.type, scope.checkoutPath]);
   }
 }
 

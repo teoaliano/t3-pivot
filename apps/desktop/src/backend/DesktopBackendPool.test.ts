@@ -9,7 +9,16 @@ import * as Stream from "effect/Stream";
 import { HttpClient } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 
+import * as NodePath from "@effect/platform-node/NodePath";
+import { DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE } from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
+import * as PlatformError from "effect/PlatformError";
+import * as Sink from "effect/Sink";
+
+import * as DesktopConfig from "../app/DesktopConfig.ts";
+import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
+import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopTelemetryPublisher from "../telemetry/DesktopTelemetryPublisher.ts";
 import * as DesktopBrowserHost from "../preview/DesktopBrowserHost.ts";
@@ -42,19 +51,95 @@ function makeStubInstance(
   };
 }
 
-function layerPool(labelRef: Ref.Ref<string>): Layer.Layer<DesktopBackendPool.DesktopBackendPool> {
+const primaryConfig: DesktopBackendStartConfig = {
+  executablePath: "/electron",
+  args: ["/server/bin.mjs", "--bootstrap-fd", "3"],
+  entryPath: "/server/bin.mjs",
+  cwd: "/server",
+  env: {},
+  bootstrap: {
+    mode: "desktop",
+    noBrowser: true,
+    port: 3774,
+    t3Home: "/Users/alice/.t3",
+    host: "127.0.0.1",
+    desktopBootstrapToken: "token",
+    tailscaleServeEnabled: false,
+    tailscaleServePort: 443,
+  },
+  bootstrapDelivery: "fd3",
+  extendEnv: true,
+  httpBaseUrl: new URL("http://127.0.0.1:3774"),
+  captureOutput: false,
+  preflightFailure: Option.none(),
+};
+
+function makeElectronAppLayer(quit: Effect.Effect<void>) {
+  return Layer.succeed(ElectronApp.ElectronApp, {
+    metadata: Effect.die("unexpected metadata read"),
+    name: Effect.succeed("T3 Pivot"),
+    systemLocale: Effect.succeed("en-US"),
+    whenReady: Effect.void,
+    quit,
+    exit: () => Effect.void,
+    relaunch: () => Effect.void,
+    setPath: () => Effect.void,
+    setName: () => Effect.void,
+    setAboutPanelOptions: () => Effect.void,
+    setAppUserModelId: () => Effect.void,
+    getAppMetrics: Effect.succeed([]),
+    setAsDefaultProtocolClient: () => Effect.succeed(true),
+    setDesktopName: () => Effect.void,
+    setDockIcon: () => Effect.void,
+    appendCommandLineSwitch: () => Effect.void,
+    removeCommandLineSwitch: () => Effect.void,
+    onBeforeQuitForUpdate: () => Effect.void,
+    on: () => Effect.void,
+  } satisfies ElectronApp.ElectronApp["Service"]);
+}
+
+const environmentLayer = DesktopEnvironment.layer({
+  dirname: "/Applications/T3 Pivot.app/Contents/Resources/app.asar/apps/desktop/dist-electron",
+  homeDirectory: "/Users/alice",
+  platform: "darwin",
+  processArch: "arm64",
+  appVersion: "0.0.4200",
+  appPath: "/Applications/T3 Pivot.app/Contents/Resources/app.asar",
+  isPackaged: true,
+  resourcesPath: "/Applications/T3 Pivot.app/Contents/Resources",
+  runningUnderArm64Translation: false,
+}).pipe(
+  Layer.provide(Layer.mergeAll(NodePath.layerPosix, DesktopConfig.layerTest({}))),
+  Layer.orDie,
+);
+
+interface PoolLayerOverrides {
+  readonly fileSystem?: Layer.Layer<FileSystem.FileSystem>;
+  readonly spawner?: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>;
+  readonly httpClient?: Layer.Layer<HttpClient.HttpClient>;
+  readonly resolvePrimary?: DesktopBackendConfiguration.DesktopBackendConfiguration["Service"]["resolvePrimary"];
+  readonly dialog?: Layer.Layer<ElectronDialog.ElectronDialog>;
+  readonly quit?: Effect.Effect<void>;
+}
+
+function layerPool(
+  labelRef: Ref.Ref<string>,
+  overrides: PoolLayerOverrides = {},
+): Layer.Layer<DesktopBackendPool.DesktopBackendPool> {
   return DesktopBackendPool.layer.pipe(
     Layer.provideMerge(
       Layer.mergeAll(
-        FileSystem.layerNoop({}),
-        Layer.succeed(
-          ChildProcessSpawner.ChildProcessSpawner,
-          ChildProcessSpawner.make(() => Effect.die("unexpected child process spawn")),
-        ),
-        Layer.succeed(
-          HttpClient.HttpClient,
-          HttpClient.make(() => Effect.die("unexpected HTTP request")),
-        ),
+        overrides.fileSystem ?? FileSystem.layerNoop({}),
+        overrides.spawner ??
+          Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() => Effect.die("unexpected child process spawn")),
+          ),
+        overrides.httpClient ??
+          Layer.succeed(
+            HttpClient.HttpClient,
+            HttpClient.make(() => Effect.die("unexpected HTTP request")),
+          ),
         Layer.succeed(DesktopObservability.DesktopBackendOutputLogFactory, {
           forInstance: () =>
             Effect.succeed({
@@ -78,14 +163,17 @@ function layerPool(labelRef: Ref.Ref<string>): Layer.Layer<DesktopBackendPool.De
         }),
         DesktopBrowserHost.layer,
         Layer.succeed(DesktopBackendConfiguration.DesktopBackendConfiguration, {
-          resolvePrimary: Effect.die("unexpected primary config resolve"),
+          resolvePrimary:
+            overrides.resolvePrimary ?? Effect.die("unexpected primary config resolve"),
           resolvePrimaryLabel: Ref.get(labelRef),
           resolveWsl: () => Effect.die("unexpected WSL config resolve"),
           currentBootstrapToken: Effect.die("unexpected bootstrap token read"),
         } satisfies DesktopBackendConfiguration.DesktopBackendConfiguration["Service"]),
         DesktopAppSettings.layerTest(),
         DesktopWslEnvironment.layerTest(),
-        ElectronDialog.layer,
+        overrides.dialog ?? ElectronDialog.layer,
+        makeElectronAppLayer(overrides.quit ?? Effect.void),
+        environmentLayer,
         Layer.succeed(DesktopWindow.DesktopWindow, {
           createMain: Effect.die("unexpected window create"),
           ensureMain: Effect.die("unexpected window ensure"),
@@ -152,6 +240,85 @@ describe("DesktopBackendPool", () => {
         yield* Ref.set(labelRef, "WSL (Ubuntu)");
 
         assert.equal(yield* primary.label, "WSL (Ubuntu)");
+      }),
+    ),
+  );
+
+  it.effect("tells the user which server holds the data and quits when the home is in use", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const labelRef = yield* Ref.make("Local");
+        const shown = yield* Deferred.make<{ readonly title: string; readonly content: string }>();
+        const quit = yield* Deferred.make<void>();
+        const runtimeStatePath = "/Users/alice/.t3-pivot/userdata/server-runtime.json";
+
+        const poolLayer = layerPool(labelRef, {
+          fileSystem: FileSystem.layerNoop({
+            exists: () => Effect.succeed(true),
+            readFileString: (path) =>
+              path === runtimeStatePath
+                ? Effect.succeed(
+                    '{"version":1,"pid":88438,"host":"127.0.0.1","port":3773,"origin":"http://127.0.0.1:3773","startedAt":"2026-09-27T16:45:21.054Z"}',
+                  )
+                : Effect.fail(
+                    PlatformError.systemError({
+                      _tag: "NotFound",
+                      module: "FileSystem",
+                      method: "readFileString",
+                      pathOrDescriptor: path,
+                    }),
+                  ),
+          }),
+          spawner: Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() =>
+              Effect.succeed(
+                ChildProcessSpawner.makeHandle({
+                  pid: ChildProcessSpawner.ProcessId(123),
+                  stdout: Stream.empty,
+                  stderr: Stream.empty,
+                  all: Stream.empty,
+                  exitCode: Effect.succeed(
+                    ChildProcessSpawner.ExitCode(DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE),
+                  ),
+                  isRunning: Effect.succeed(false),
+                  kill: () => Effect.void,
+                  stdin: Sink.drain,
+                  getInputFd: () => Sink.drain,
+                  getOutputFd: () => Stream.empty,
+                  unref: Effect.succeed(Effect.void),
+                }),
+              ),
+            ),
+          ),
+          httpClient: Layer.succeed(
+            HttpClient.HttpClient,
+            HttpClient.make(() => Effect.never),
+          ),
+          resolvePrimary: Effect.succeed(primaryConfig),
+          dialog: Layer.succeed(ElectronDialog.ElectronDialog, {
+            pickFolder: () => Effect.die("unexpected folder picker"),
+            pickFiles: () => Effect.die("unexpected file picker"),
+            showMessageBox: () => Effect.die("unexpected message box"),
+            showErrorBox: (title, content) =>
+              Deferred.succeed(shown, { title, content }).pipe(Effect.asVoid),
+          }),
+          quit: Deferred.succeed(quit, undefined).pipe(Effect.asVoid),
+        });
+
+        yield* Effect.gen(function* () {
+          const pool = yield* DesktopBackendPool.DesktopBackendPool;
+          const primary = yield* pool.primary;
+
+          yield* primary.start;
+
+          assert.deepEqual(yield* Deferred.await(shown), {
+            title: "T3 Pivot can't start",
+            content:
+              "Another server is already using this data (pid 88438, origin http://127.0.0.1:3773). Quit it and reopen T3 Pivot.",
+          });
+          yield* Deferred.await(quit);
+        }).pipe(Effect.provide(poolLayer));
       }),
     ),
   );

@@ -17,18 +17,20 @@ const resolveWindowsUserData = (appDataDirectory: string) =>
   }).pipe(Effect.provide(DesktopPreReadyFileSystem.layer));
 
 it.layer(NodeServices.layer)("DesktopPreReadyFileSystem", (it) => {
-  it.effect("migrates the legacy Windows profile state", () =>
+  it.effect("never copies T3 Code's Windows profile state", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-pre-ready-fs-" });
-      yield* fileSystem.makeDirectory(path.join(root, "T3 Code (Alpha)"));
-      yield* fileSystem.writeFileString(path.join(root, "T3 Code (Alpha)", "Local State"), "keys");
+      for (const name of ["t3code", "T3 Code (Alpha)"]) {
+        yield* fileSystem.makeDirectory(path.join(root, name));
+        yield* fileSystem.writeFileString(path.join(root, name, "Local State"), "keys");
+      }
 
       const userData = yield* resolveWindowsUserData(root);
 
-      assert.equal(userData, path.join(root, "t3code-v2"));
-      assert.equal(yield* fileSystem.readFileString(path.join(userData, "Local State")), "keys");
+      assert.equal(userData, path.join(root, "t3pivot"));
+      assert.isFalse(yield* fileSystem.exists(path.join(userData, "Local State")));
     }),
   );
 

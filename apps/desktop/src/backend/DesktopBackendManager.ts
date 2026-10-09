@@ -42,6 +42,8 @@ import { HttpClient } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import {
+  DESKTOP_BACKEND_DATABASE_NEWER_EXIT_CODE,
+  DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE,
   DesktopBackendBootstrap,
   type DesktopBackendBootstrap as DesktopBackendBootstrapValue,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
@@ -304,6 +306,12 @@ export interface BackendInstanceSpec {
   // retries. Returns true when the callback changed configuration and the
   // manager should resolve once more; false stops the failed instance.
   readonly onPreflightFailed?: (failure: PreflightFailure) => Effect.Effect<boolean>;
+  // Fired when the backend exits because another live server owns its T3
+  // home. The instance stops instead of restarting into the same refusal.
+  readonly onHomeInUse?: () => Effect.Effect<void>;
+  // Fired when the backend exits because a newer build migrated its
+  // database. The instance stops, since a restart cannot fix it.
+  readonly onDatabaseNewer?: () => Effect.Effect<void>;
 }
 
 interface ActiveBackendRun {
@@ -1013,7 +1021,21 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
           Scope.provide(runScope),
           Effect.matchEffect({
             onFailure: (error) => finalizeRun(error.message),
-            onSuccess: (exit) => finalizeRun(exit.reason),
+            onSuccess: (exit) => {
+              const code = Option.getOrUndefined(exit.code);
+              const onRefused =
+                code === DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE
+                  ? (spec.onHomeInUse ?? (() => Effect.void))
+                  : code === DESKTOP_BACKEND_DATABASE_NEWER_EXIT_CODE
+                    ? (spec.onDatabaseNewer ?? (() => Effect.void))
+                    : undefined;
+              return onRefused === undefined
+                ? finalizeRun(exit.reason)
+                : Ref.update(state, (latest) => ({ ...latest, desiredRunning: false })).pipe(
+                    Effect.andThen(finalizeRun(exit.reason)),
+                    Effect.andThen(onRefused()),
+                  );
+            },
           }),
           Effect.ensuring(Scope.close(runScope, Exit.void).pipe(Effect.ignore)),
         );

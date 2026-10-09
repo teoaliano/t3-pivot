@@ -95,12 +95,14 @@ import { ChildProcessSpawner } from "effect/process";
 
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopBackendManager from "./DesktopBackendManager.ts";
+import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopTelemetryPublisher from "../telemetry/DesktopTelemetryPublisher.ts";
 import * as DesktopBrowserHost from "../preview/DesktopBrowserHost.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as DesktopWslEnvironment from "../wsl/DesktopWslEnvironment.ts";
+import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 
 const { logWarning: logBackendPoolWarning } =
@@ -184,6 +186,12 @@ export type BackendInstanceFactoryRequirements =
   | DesktopBrowserHost.DesktopBrowserHost
   | DesktopWslEnvironment.DesktopWslEnvironment;
 
+// The part of the server's runtime state file that names the server holding
+// the T3 home.
+const decodeHomeOwner = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Struct({ pid: Schema.Int, origin: Schema.String })),
+);
+
 interface ActiveRegisteredInstance {
   readonly _tag: "Active";
   readonly instance: DesktopBackendInstance;
@@ -215,6 +223,8 @@ export const layer = Layer.effect(
     const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
     const desktopWindow = yield* DesktopWindow.DesktopWindow;
     const electronDialog = yield* ElectronDialog.ElectronDialog;
+    const electronApp = yield* ElectronApp.ElectronApp;
+    const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const appSettings = yield* DesktopAppSettings.DesktopAppSettings;
     // Anchor the pool's lifetime to its layer scope so registered
     // instance scopes can be forked off it. Without this, instance
@@ -279,6 +289,44 @@ export const layer = Layer.effect(
       },
     );
 
+    // The primary backend refused to start because another live server owns
+    // the T3 home. The server has just read the owner from the runtime state
+    // file; read it again to name it, then quit so the user can close it.
+    const handlePrimaryHomeInUse = Effect.fn("desktop.backendPool.primaryHomeInUse")(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const owner = yield* fileSystem
+        .readFileString(environment.path.join(environment.stateDir, "server-runtime.json"))
+        .pipe(Effect.flatMap(decodeHomeOwner), Effect.option);
+      const holder = Option.match(owner, {
+        onNone: () => "",
+        onSome: ({ pid, origin }) => ` (pid ${pid}, origin ${origin})`,
+      });
+      const appName = environment.branding.baseName;
+      yield* logBackendPoolWarning("primary backend refused: another server owns the T3 home", {
+        stateDir: environment.stateDir,
+      });
+      yield* electronDialog.showErrorBox(
+        `${appName} can't start`,
+        `Another server is already using this data${holder}. Quit it and reopen ${appName}.`,
+      );
+      yield* electronApp.quit;
+    }, Effect.provide(factoryContext));
+
+    const handlePrimaryDatabaseNewer = Effect.fn("desktop.backendPool.primaryDatabaseNewer")(
+      function* () {
+        const appName = environment.branding.baseName;
+        yield* logBackendPoolWarning("primary backend refused: a newer build migrated its data", {
+          stateDir: environment.stateDir,
+        });
+        yield* electronDialog.showErrorBox(
+          `${appName} can't start`,
+          `A newer version already upgraded this data. Update ${appName}, then reopen it.`,
+        );
+        yield* electronApp.quit;
+      },
+      Effect.provide(factoryContext),
+    );
+
     const primary = yield* DesktopBackendManager.makeBackendInstance({
       id: DesktopBackendManager.PRIMARY_INSTANCE_ID,
       // Keep this lazy. The pool layer is initialized before startup loads
@@ -303,6 +351,8 @@ export const layer = Layer.effect(
         ),
       onShutdown: () => desktopWindow.handleBackendNotReady,
       onPreflightFailed: handlePrimaryPreflightFailure,
+      onHomeInUse: handlePrimaryHomeInUse,
+      onDatabaseNewer: handlePrimaryDatabaseNewer,
     });
 
     const instancesRef = yield* SynchronizedRef.make<

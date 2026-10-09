@@ -714,6 +714,16 @@ const RawCoreSchema = Schema.Struct({
         baseRef: Schema.NullOr(
           Schema.Struct({
             compare: Schema.NullOr(Schema.Struct({ behindBy: Schema.Int })),
+            /** Classic branch protection on the base; asked for on github.com only. */
+            refUpdateRule: Schema.optional(
+              Schema.NullOr(
+                Schema.Struct({
+                  requiredStatusCheckContexts: Schema.optional(
+                    Schema.NullOr(Schema.Array(Schema.NullOr(Schema.String))),
+                  ),
+                }),
+              ),
+            ),
           }),
         ),
         reviewRequests: Schema.Struct({
@@ -805,8 +815,10 @@ export function decodeActorAvatarsJson(
 
 /**
  * Pull refs let the comparison share the detail read without first resolving a fork branch.
- * `isRequired` is asked for on github.com only: an older Enterprise server may not know it, and
- * an unknown field fails the whole read.
+ * `isRequired` and the base's `refUpdateRule` are asked for on github.com only: an older
+ * Enterprise server may not know them, and an unknown field fails the whole read.
+ * `refUpdateRule` is the branch protection a non-admin may read; `branchProtectionRule` needs
+ * admin.
  */
 function checkContextNodesSelection(host: string): string {
   const required =
@@ -822,6 +834,8 @@ function checkContextNodesSelection(host: string): string {
 }
 
 export const pullRequestCoreGraphQlQuery = (host: string) => {
+  const requiredContexts =
+    host.toLowerCase() === "github.com" ? " refUpdateRule { requiredStatusCheckContexts }" : "";
   return `query($owner: String!, $name: String!, $number: Int!, $headRef: String!) {
   repository(owner: $owner, name: $name) {
     mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed viewerPermission
@@ -833,7 +847,7 @@ export const pullRequestCoreGraphQlQuery = (host: string) => {
       author { login avatarUrl ... on User { id name } }
       autoMergeRequest { mergeMethod }
       viewerCanUpdate viewerDidAuthor viewerCanUpdateBranch
-      baseRef { compare(headRef: $headRef) { behindBy } }
+      baseRef { compare(headRef: $headRef) { behindBy }${requiredContexts} }
       reviewRequests(first: 100) {
         nodes { requestedReviewer { ... on User { login name } ... on Bot { login } ... on Team { slug name } } }
       }
@@ -2297,6 +2311,8 @@ export interface GitHubPullRequestCore extends GitHubPullRequestDetail {
   readonly viewerAccess: GitHubViewerAccess & GitHubRepositoryAccess;
   readonly comparison: GitHubBaseComparison | null;
   readonly checksTruncated: boolean;
+  /** The check names the base branch requires; absent where GitHub did not report a list. */
+  readonly requiredChecks?: ReadonlyArray<string>;
 }
 
 export function decodePullRequestCoreJson(
@@ -2307,6 +2323,7 @@ export function decodePullRequestCoreJson(
   const repository = decoded.success.data.repository;
   const pr = repository.pullRequest;
   const contexts = pr.commits.nodes[0]?.commit.statusCheckRollup?.contexts;
+  const requiredContexts = pr.baseRef?.refUpdateRule?.requiredStatusCheckContexts;
   return Result.succeed({
     ...toDetail({
       ...pr,
@@ -2334,6 +2351,14 @@ export function decodePullRequestCoreJson(
             viewerCanUpdate: pr.viewerCanUpdateBranch,
           },
     checksTruncated: contexts?.pageInfo.hasNextPage === true,
+    ...(requiredContexts == null
+      ? {}
+      : {
+          requiredChecks: requiredContexts.flatMap((context) => {
+            const name = trimmed(context);
+            return name === null ? [] : [name];
+          }),
+        }),
   });
 }
 

@@ -20,7 +20,7 @@ export function ThreadHeader(
 ) {
   const navigation = useNavigation();
   const { layout, panes, toggleAuxiliaryPane } = useAdaptiveWorkspaceLayout();
-  const { onOpenTerminal, onMergeBack } = props.gitControls;
+  const { onOpenTerminal, onOpenDevServers, onMergeBack } = props.gitControls;
   const native = useThreadHeaderOptions(props);
   const androidHeaderActions = useMemo<ReadonlyArray<ScreenHeaderAction>>(() => {
     const actions: ScreenHeaderAction[] = [];
@@ -46,6 +46,11 @@ export function ThreadHeader(
         icon: "terminal",
         onPress: () => onOpenTerminal(null),
       });
+      actions.push({
+        accessibilityLabel: "Dev servers",
+        icon: "server.rack",
+        onPress: onOpenDevServers,
+      });
     }
     actions.push({
       accessibilityLabel: "Open git controls",
@@ -65,6 +70,7 @@ export function ThreadHeader(
     panes.auxiliaryPaneVisible,
     props.onOpenFilesInspector,
     onOpenTerminal,
+    onOpenDevServers,
     onMergeBack,
     props.onOpenGitInspector,
     toggleAuxiliaryPane,

@@ -4,6 +4,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import ChatView from "./ChatView";
+import { useRoutePivot } from "./pivot/PivotAppChrome";
+import { PivotView } from "./pivot/PivotView";
 import { resolveDraftPromotionNavigationTarget, threadHasStarted } from "./ChatView.logic";
 import { waitForDraftHeroTransition } from "./chat/draftHeroTransition";
 import { SidebarInset } from "./ui/sidebar";
@@ -38,6 +40,7 @@ import {
  */
 export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
   const navigate = useNavigate();
+  const routePivot = useRoutePivot();
   const draftId = target.kind === "draft" ? target.draftId : null;
   const draftSession = useComposerDraftStore((store) =>
     draftId === null ? null : store.getDraftSession(draftId),
@@ -165,6 +168,8 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
   }, [draftThread, serverThreadStarted, target]);
 
   let view: React.ReactNode = null;
+  // T3 Pivot: a Pivot opens in the view this device last used for it.
+  const pivotViewOpen = target.kind === "server" && routePivot.inPivotView;
   if (target.kind === "draft") {
     if (draftSession) {
       view = (
@@ -178,6 +183,11 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
         />
       );
     }
+  } else if (
+    pivotViewOpen &&
+    (renderState === "ready" || (renderState === "loading" && serverThreadShell !== null))
+  ) {
+    view = <PivotView pivot={target.threadRef} />;
   } else if (renderState === "ready" || (renderState === "loading" && serverThreadShell !== null)) {
     view = (
       <ChatView

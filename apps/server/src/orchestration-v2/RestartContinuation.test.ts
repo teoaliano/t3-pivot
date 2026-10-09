@@ -16,6 +16,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ServerSettings from "../serverSettings.ts";
+import * as RestartCarryOn from "./RestartCarryOn.ts";
 import { restartContinuationRun, continueRestartedRun } from "./RestartContinuation.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ProviderRuntimeRecovery from "./ProviderRuntimeRecoveryService.ts";
@@ -310,6 +311,75 @@ it.effect.each([
           sourceRunId: runId,
         });
     }),
+);
+
+// T3 Pivot: a Pivot and its teammates carry on after a restart whatever the setting says.
+it.effect("resumes a thread that carries on even with the setting off", () =>
+  Effect.gen(function* () {
+    let committed: Parameters<EventSink.EventSinkV2["Service"]["commitCommand"]>[0] | undefined;
+    const resuming: Array<string> = [];
+    const recovery = yield* ProviderRuntimeRecovery.make.pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          ServerSettings.layerTest({ continueThreadsAfterServerUpdate: false }),
+          Layer.mock(ProjectionStore.ProjectionStoreV2)({
+            getRecoveryThreadIds: () => Effect.succeed([threadId]),
+            getRuntimeRecoveryProjection: () => Effect.succeed(makeProjection()),
+          }),
+          Layer.mock(EventSink.EventSinkV2)({
+            commitCommand: (input) => {
+              committed = input;
+              return Effect.succeed({ committed: true, cancelledEffectCount: 1 } as never);
+            },
+          }),
+          IdAllocator.layer,
+          Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({
+            runRecoveryOnce: Effect.succeed(false),
+          }),
+          Layer.mock(EffectOutbox.EffectOutboxV2)({
+            reconcileAfterProcessLoss: Effect.succeed({ requeued: 0, cancelled: 0 }),
+          }),
+        ),
+      ),
+    );
+    yield* recovery.reconcile("startup").pipe(
+      Effect.provideService(RestartCarryOn.RestartCarryOn, {
+        carriesOn: (id) => Effect.succeed(id === threadId),
+        resuming: (id) => Effect.sync(() => void resuming.push(id)),
+      }),
+    );
+    assert.deepEqual(committed!.effects[0]?.request, {
+      type: "provider-runtime.continue",
+      sourceRunId: runId,
+    });
+    assert.deepEqual(resuming, [threadId]);
+
+    let projection = makeProjection();
+    projection = { ...projection, runs: [{ ...projection.runs[0]!, status: "cancelled" }] };
+    const commands: Parameters<
+      ThreadManagementService.ThreadManagementService["Service"]["dispatch"]
+    >[0][] = [];
+    yield* continueRestartedRun({ threadId, sourceRunId: runId }).pipe(
+      Effect.provide(
+        Layer.merge(
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            getThreadRecords: () => Effect.succeed(projection),
+            recoverDelegatedTask: () => Effect.void,
+            dispatch: (command) => {
+              commands.push(command);
+              return Effect.succeed({} as never);
+            },
+          }),
+          ServerSettings.layerTest({ continueThreadsAfterServerUpdate: false }),
+        ),
+      ),
+      Effect.provideService(RestartCarryOn.RestartCarryOn, {
+        carriesOn: () => Effect.succeed(true),
+        resuming: () => Effect.void,
+      }),
+    );
+    assert.isTrue(commands.some((command) => command.type === "message.dispatch"));
+  }),
 );
 
 it.effect("does not duplicate delivery and yields to newer user work or opt-out", () =>

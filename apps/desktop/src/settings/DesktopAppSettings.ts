@@ -57,7 +57,8 @@ export interface DesktopSettingsChange {
   readonly changed: boolean;
 }
 
-const DEFAULT_TAILSCALE_SERVE_PORT = 443;
+// T3 Pivot leaves Tailscale HTTPS 443 to T3 Code on the same machine.
+const DEFAULT_TAILSCALE_SERVE_PORT = 8444;
 const MIN_MAIN_WINDOW_SIZE = {
   width: 840,
   height: 620,

@@ -180,15 +180,9 @@ describe("getDesktopUpdateActionError", () => {
 });
 
 describe("desktop update UI helpers", () => {
-  it("builds the stable release URL for a downloaded version", () => {
-    expect(getDesktopUpdateReleaseUrl("0.0.30")).toBe(
-      "https://github.com/pingdotgg/t3code/releases/tag/v0.0.30",
-    );
-  });
-
-  it("builds the nightly release URL without dropping its version suffix", () => {
-    expect(getDesktopUpdateReleaseUrl("0.0.30-nightly.20260728.931")).toBe(
-      "https://github.com/pingdotgg/t3code/releases/tag/v0.0.30-nightly.20260728.931",
+  it("links a downloaded version to its T3 Pivot release tag", () => {
+    expect(getDesktopUpdateReleaseUrl("0.0.4201")).toBe(
+      "https://github.com/teoaliano/t3-pivot/releases/tag/pivot-v0.0.4201",
     );
   });
 
@@ -197,9 +191,9 @@ describe("desktop update UI helpers", () => {
     expect(getDesktopUpdateReleaseUrl("  ")).toBeNull();
   });
 
-  it("builds the release history URL", () => {
+  it("links the release history to the T3 Pivot releases page", () => {
     expect(getDesktopUpdateReleaseHistoryUrl()).toBe(
-      "https://github.com/pingdotgg/t3code/releases",
+      "https://github.com/teoaliano/t3-pivot/releases",
     );
   });
 
