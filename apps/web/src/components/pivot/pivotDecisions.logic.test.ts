@@ -1,7 +1,7 @@
 import { type PivotDecision, PivotDecisionId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { decisionLogEntry } from "./pivotDecisions.logic";
+import { decisionLogEntry, recommendedOption, userAnswerLabel } from "./pivotDecisions.logic";
 
 const decision = (overrides: Partial<PivotDecision> = {}): PivotDecision => ({
   decisionId: PivotDecisionId.make("d1"),
@@ -83,5 +83,35 @@ describe("decisionLogEntry", () => {
       label: "You answered; the Pivot is relaying it",
       text: "No",
     });
+  });
+});
+
+describe("recommendedOption", () => {
+  const options = ["Restart now", "Restart", "Wait until tonight"];
+
+  it("matches the option a recommendation is, ignoring case and closing punctuation", () => {
+    expect(recommendedOption(options, "wait until tonight.")).toBe("Wait until tonight");
+  });
+
+  it("matches the longest option a recommendation starts with", () => {
+    expect(recommendedOption(options, "Restart now, nothing is running")).toBe("Restart now");
+    expect(recommendedOption(options, "Restart: the build passed")).toBe("Restart");
+  });
+
+  it("does not match an option that is only a word prefix", () => {
+    expect(recommendedOption(["Merge"], "Merged already")).toBeNull();
+  });
+
+  it("is null when the recommendation names no option", () => {
+    expect(recommendedOption(options, "Ask the user first")).toBeNull();
+    expect(recommendedOption([], "Merge.")).toBeNull();
+  });
+});
+
+describe("userAnswerLabel", () => {
+  it("reads an approval's answer as approved or declined", () => {
+    expect(userAnswerLabel(true)).toBe("You approved");
+    expect(userAnswerLabel(false)).toBe("You declined");
+    expect(userAnswerLabel(null)).toBe("You answered");
   });
 });
