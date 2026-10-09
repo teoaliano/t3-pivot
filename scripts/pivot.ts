@@ -322,6 +322,8 @@ const release = Effect.gen(function* () {
   yield* run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", app]);
   yield* run("xcrun", ["stapler", "validate", app]);
   yield* run("spctl", ["--assess", "--type", "execute", "--verbose", app]);
+  // A leftover copy shows up next to the installed app in Spotlight and Launchpad.
+  yield* run("rm", ["-rf", verifyDir]);
 
   const releaseUrl = yield* run(
     "gh",
