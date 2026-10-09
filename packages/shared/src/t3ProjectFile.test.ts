@@ -48,6 +48,7 @@ describe("buildT3ProjectFileJsonSchema", () => {
       "async",
       "autoOpenPreview",
       "command",
+      "devServer",
       "icon",
       "name",
       "previewUrl",
