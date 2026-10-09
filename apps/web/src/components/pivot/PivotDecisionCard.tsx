@@ -269,7 +269,13 @@ function ApprovalDecision({
                     </span>
                   ) : null}
                 </span>
-                <span className="grid gap-0.5 text-xs wrap-anywhere">
+                {/* Scrolls inside itself like the composer's pending approval, so a long
+                    evidence never pushes the banner past the top of a short pane. */}
+                <span
+                  aria-label="Approval request"
+                  className="grid max-h-20 w-full min-w-0 gap-0.5 overflow-auto text-xs wrap-anywhere [scrollbar-width:thin] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+                  tabIndex={0}
+                >
                   {questionsOf(decision).map((question) => (
                     <span key={question} className="text-foreground">
                       {question}
