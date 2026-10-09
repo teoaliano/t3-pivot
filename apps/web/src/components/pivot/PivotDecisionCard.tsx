@@ -253,7 +253,7 @@ function ApprovalDecision({
     <DecisionComposer
       data-pivot-decision="approval"
       banner={
-        <ComposerBanner.Root variant="warning" density="spacious">
+        <ComposerBanner.Root density="spacious">
           <ComposerBanner.Row layout="approval">
             <ComposerBanner.Icon>
               <ShieldIcon />
