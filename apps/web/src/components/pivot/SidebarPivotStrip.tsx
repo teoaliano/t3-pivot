@@ -23,6 +23,9 @@ export function SidebarPivotSummary(props: {
   const count = group.live.length + group.finished.length;
   const Chevron = props.expanded ? ChevronDownIcon : ChevronRightIcon;
   const stop = (event: { stopPropagation: () => void }) => event.stopPropagation();
+  // Only the numbers show; the words stay in the tooltip and for screen readers.
+  const teammatesLabel = `${count} ${count === 1 ? "teammate" : "teammates"}`;
+  const needYouLabel = `${group.needYou} ${group.needYou === 1 ? "needs you" : "need you"}`;
   return (
     <span className="flex min-w-0 flex-1 items-center gap-1.5">
       <button
@@ -41,13 +44,15 @@ export function SidebarPivotSummary(props: {
         <Chevron className="size-3" />
       </button>
       <LayoutDashboardIcon aria-hidden className="size-3 shrink-0 text-muted-foreground" />
-      <span className="truncate text-muted-foreground">
+      <span className="truncate text-muted-foreground" title={teammatesLabel}>
         {group.retired ? "Retired · " : ""}
-        {count} {count === 1 ? "teammate" : "teammates"}
+        {count}
+        <span className="sr-only"> {count === 1 ? "teammate" : "teammates"}</span>
       </span>
       {group.needYou > 0 ? (
-        <Badge size="sm" variant="warning">
-          {group.needYou} {group.needYou === 1 ? "needs you" : "need you"}
+        <Badge size="sm" variant="warning" title={needYouLabel}>
+          {group.needYou}
+          <span className="sr-only"> {group.needYou === 1 ? "needs you" : "need you"}</span>
         </Badge>
       ) : null}
     </span>
