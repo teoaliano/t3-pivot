@@ -73,40 +73,30 @@ export function PivotViewSwitch(props: {
   );
 }
 
-/**
- * Stands in for the composer where Pivot mode takes typing away: a retired
- * Pivot is read-only history, and a teammate in the Pivot view is steered
- * through its Pivot.
- */
-export function PivotComposerBar(props: { environmentId: EnvironmentId; role: PivotChatRole }) {
+/** Stands in for the composer on a retired Pivot, which is read-only history. */
+export function PivotComposerBar(props: {
+  environmentId: EnvironmentId;
+  successorThreadId: ThreadId | null;
+}) {
   const navigate = useNavigate();
-  const { role } = props;
-  if (role.kind === "pivot" && role.retired) {
-    const successor = role.successorThreadId;
-    return (
-      <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm text-muted-foreground">
-        <span>This Pivot is retired. Its live work moved to the Pivot that took over.</span>
-        {successor !== null ? (
-          <Button
-            size="xs"
-            variant="outline"
-            onClick={() =>
-              void navigate({
-                to: "/$environmentId/$threadId",
-                params: buildThreadRouteParams(scopeThreadRef(props.environmentId, successor)),
-              })
-            }
-          >
-            Open the active Pivot
-          </Button>
-        ) : null}
-      </div>
-    );
-  }
+  const successor = props.successorThreadId;
   return (
-    <div className="px-4 py-3 text-sm text-muted-foreground">
-      Read-only here: steer this teammate through the Pivot, or open it from the sidebar to type to
-      it directly.
+    <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm text-muted-foreground">
+      <span>This Pivot is retired. Its live work moved to the Pivot that took over.</span>
+      {successor !== null ? (
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={() =>
+            void navigate({
+              to: "/$environmentId/$threadId",
+              params: buildThreadRouteParams(scopeThreadRef(props.environmentId, successor)),
+            })
+          }
+        >
+          Open the active Pivot
+        </Button>
+      ) : null}
     </div>
   );
 }

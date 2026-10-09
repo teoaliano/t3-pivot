@@ -42,10 +42,14 @@ export class PivotHome extends Context.Service<
   {
     /**
      * Creates the project's Pivot home if needed and brings `AGENTS.md` up to the
-     * shipped contract, then returns its absolute path. Idempotent. `preferences.md`
-     * is the user's and is created empty, never overwritten.
+     * shipped contract, with `teammateModels` (the project's teammate models from
+     * Settings, rendered) in its place, then returns its absolute path. Idempotent.
+     * `preferences.md` is the user's and is created empty, never overwritten.
      */
-    readonly ensure: (projectId: ProjectId) => Effect.Effect<string, PivotHomeError>;
+    readonly ensure: (
+      projectId: ProjectId,
+      teammateModels: string,
+    ) => Effect.Effect<string, PivotHomeError>;
   }
 >()("t3/pivot/PivotHome") {}
 
@@ -60,7 +64,10 @@ export const make = Effect.gen(function* () {
   // Concurrent ensures for one project would fight over git's index lock.
   const gate = yield* Semaphore.make(1);
 
-  const ensureOnce = Effect.fn("PivotHome.ensure")(function* (projectId: ProjectId) {
+  const ensureOnce = Effect.fn("PivotHome.ensure")(function* (
+    projectId: ProjectId,
+    teammateModels: string,
+  ) {
     const homePath = path.join(config.stateDir, "pivot-homes", projectId);
     const fail = (operation: string) => (cause: unknown) =>
       new PivotHomeError({ homePath, operation, cause });
@@ -102,7 +109,10 @@ export const make = Effect.gen(function* () {
       yield* git("config", "commit.gpgsign", "false");
       yield* git("config", "core.autocrlf", "false");
 
-      yield* writeIfChanged("AGENTS.md", contract);
+      yield* writeIfChanged(
+        "AGENTS.md",
+        contract.replace("{{teammateModels}}", () => teammateModels),
+      );
       yield* writeIfChanged("CLAUDE.md", CLAUDE_MD);
       const preferences = path.join(homePath, "preferences.md");
       if (!(yield* fs.exists(preferences))) yield* fs.writeFileString(preferences, "");
@@ -128,7 +138,10 @@ export const make = Effect.gen(function* () {
     return homePath;
   });
 
-  return PivotHome.of({ ensure: (projectId) => gate.withPermits(1)(ensureOnce(projectId)) });
+  return PivotHome.of({
+    ensure: (projectId, teammateModels) =>
+      gate.withPermits(1)(ensureOnce(projectId, teammateModels)),
+  });
 });
 
 export const layer = Layer.effect(PivotHome, make);

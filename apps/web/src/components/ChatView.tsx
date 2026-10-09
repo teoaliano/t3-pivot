@@ -98,6 +98,7 @@ import { useAcknowledgeThreadWoke, useThreadActions } from "../hooks/useThreadAc
 import {
   deriveProviderSubagentStatus,
   deriveReportedModelSelection,
+  runAsProviderSubagentStatus,
   formatModelSelectionEffort,
   deriveRunlessWorkStartedAt,
   deriveThreadActivityRun,
@@ -832,8 +833,6 @@ type ChatViewProps =
       onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
       forceExpandedMobileComposer?: boolean;
-      /** T3 Pivot: a teammate shown in the Pivot view, steered through its Pivot. */
-      pivotReadOnly?: boolean;
       routeKind: "server";
       draftId?: never;
     }
@@ -843,7 +842,6 @@ type ChatViewProps =
       onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
       forceExpandedMobileComposer?: boolean;
-      pivotReadOnly?: never;
       routeKind: "draft";
       draftId: DraftId;
     };
@@ -1581,7 +1579,6 @@ export default function ChatView(props: ChatViewProps) {
     onDiffPanelOpen,
     reserveTitleBarControlInset = true,
     forceExpandedMobileComposer = false,
-    pivotReadOnly = false,
   } = props;
   const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const canOperateTerminal = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
@@ -2162,10 +2159,13 @@ export default function ChatView(props: ChatViewProps) {
       ? run.id
       : null;
   }, [isServerThread, serverProjection, serverRuntime?.lastErrorClass]);
+  // A Pivot teammate reads like a subagent of its Pivot: it runs on its own,
+  // so its chat leads back to the Pivot instead of taking messages.
+  const pivotTeammateOf = pivotRole.kind === "teammate" ? pivotRole.pivotThreadId : null;
   const parentSubagentThreadId =
     activeThread?.lineage.relationshipToParent === "subagent"
       ? activeThread.lineage.parentThreadId
-      : null;
+      : pivotTeammateOf;
   const parentSubagentEnvironmentId = activeThread?.environmentId ?? null;
   const parentSubagentThreadRef = useMemo(() => {
     if (parentSubagentEnvironmentId === null || parentSubagentThreadId === null) {
@@ -2181,8 +2181,17 @@ export default function ChatView(props: ChatViewProps) {
         : {
             threadId: parentSubagentThreadRef.threadId,
             title: parentSubagentThread?.title ?? "Parent thread",
+            relation:
+              activeThread?.lineage.relationshipToParent !== "subagent" && pivotTeammateOf !== null
+                ? ("Teammate of" as const)
+                : ("Subagent of" as const),
           },
-    [parentSubagentThread?.title, parentSubagentThreadRef],
+    [
+      activeThread?.lineage.relationshipToParent,
+      parentSubagentThread?.title,
+      parentSubagentThreadRef,
+      pivotTeammateOf,
+    ],
   );
   const threadError = isServerThread
     ? (localServerError ?? serverRuntime?.lastError ?? null)
@@ -4274,13 +4283,17 @@ export default function ChatView(props: ChatViewProps) {
   // content-driven: Git/environment context or controls that actually fit.
   // A provider-native subagent cannot take messages: a status bar replaces the
   // composer and its strips. Its approvals and questions are asked on the
-  // top-level parent thread.
-  const showProviderSubagentBar = isProviderSubagent;
-  // T3 Pivot: a retired Pivot is read-only history, and a teammate in the Pivot view
-  // takes no typing, only answers to the approval or question it is held on.
-  const showPivotComposerBar =
-    (pivotRole.kind === "pivot" && pivotRole.retired) ||
-    (pivotReadOnly && pendingApprovals.length === 0 && pendingUserInputs.length === 0);
+  // top-level parent thread. A Pivot teammate gets the same bar, but its
+  // approvals and questions arrive in its own thread, so the composer returns
+  // only to answer them.
+  const showProviderSubagentBar =
+    isProviderSubagent ||
+    (pivotTeammateOf !== null && pendingApprovals.length === 0 && pendingUserInputs.length === 0);
+  const subagentBarStatus = isProviderSubagent
+    ? providerSubagentStatus
+    : runAsProviderSubagentStatus(activeActivityRun);
+  // T3 Pivot: a retired Pivot is read-only history.
+  const showPivotComposerBar = pivotRole.kind === "pivot" && pivotRole.retired;
   const composerMounted = !showProviderSubagentBar && !showPivotComposerBar;
   const providerSubagentModels = selectedProviderEntry?.models ?? EMPTY_PROVIDER_MODELS;
   // Providers can report a dated id or alias (claude-haiku-4-5-20251001).
@@ -11580,7 +11593,7 @@ export default function ChatView(props: ChatViewProps) {
                               }
                               modelLabel={providerSubagentModelLabel}
                               effortLabel={providerSubagentEffortLabel}
-                              status={providerSubagentStatus}
+                              status={subagentBarStatus}
                               onOpenParent={
                                 parentThreadLink
                                   ? () => onOpenRelatedThread(parentThreadLink.threadId)
@@ -11588,8 +11601,11 @@ export default function ChatView(props: ChatViewProps) {
                               }
                             />
                           ) : null}
-                          {showPivotComposerBar ? (
-                            <PivotComposerBar environmentId={environmentId} role={pivotRole} />
+                          {pivotRole.kind === "pivot" && pivotRole.retired ? (
+                            <PivotComposerBar
+                              environmentId={environmentId}
+                              successorThreadId={pivotRole.successorThreadId}
+                            />
                           ) : null}
                           {!composerMounted ? null : (
                             <ChatComposer

@@ -2,13 +2,15 @@ import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDownIcon, ChevronRightIcon, LayoutDashboardIcon } from "lucide-react";
-import { useState } from "react";
 
 import { cn } from "../../lib/utils";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import type { SidebarPivotGroup } from "../sidebar/pivotNesting.logic";
+import { SidebarStatusIcon, type SidebarStatusIconKind } from "../sidebar/SidebarStatusIcon";
+import { WorkingDuration } from "../sidebar/WorkingDuration";
 import { Badge } from "../ui/badge";
-import type { TeammateCard } from "./pivotCards.logic";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { TEAMMATE_TONE_CLASSES, type TeammateCard } from "./pivotCards.logic";
 
 /**
  * The last line of a Pivot's sidebar row: the fold toggle, how many teammates it
@@ -20,9 +22,12 @@ export function SidebarPivotSummary(props: {
   onToggle: () => void;
 }) {
   const { group } = props;
-  const count = group.live.length + group.finished.length;
+  const count = group.teammates.length;
   const Chevron = props.expanded ? ChevronDownIcon : ChevronRightIcon;
   const stop = (event: { stopPropagation: () => void }) => event.stopPropagation();
+  // Only the numbers show; the words stay in tooltips and for screen readers.
+  const teammatesLabel = `${count} ${count === 1 ? "teammate" : "teammates"}`;
+  const needYouLabel = `${group.needYou} ${group.needYou === 1 ? "needs you" : "need you"}`;
   return (
     <span className="flex min-w-0 flex-1 items-center gap-1.5">
       <button
@@ -41,63 +46,65 @@ export function SidebarPivotSummary(props: {
         <Chevron className="size-3" />
       </button>
       <LayoutDashboardIcon aria-hidden className="size-3 shrink-0 text-muted-foreground" />
-      <span className="truncate text-muted-foreground">
-        {group.retired ? "Retired · " : ""}
-        {count} {count === 1 ? "teammate" : "teammates"}
-      </span>
+      <Tooltip>
+        <TooltipTrigger render={<span className="truncate text-muted-foreground" />}>
+          {group.retired ? "Retired · " : ""}
+          {count}
+          <span className="sr-only"> {count === 1 ? "teammate" : "teammates"}</span>
+        </TooltipTrigger>
+        <TooltipPopup side="top">{teammatesLabel}</TooltipPopup>
+      </Tooltip>
       {group.needYou > 0 ? (
-        <Badge size="sm" variant="warning">
-          {group.needYou} {group.needYou === 1 ? "needs you" : "need you"}
-        </Badge>
+        <Tooltip>
+          <TooltipTrigger render={<Badge size="sm" variant="warning" />}>
+            {group.needYou}
+            <span className="sr-only"> {group.needYou === 1 ? "needs you" : "need you"}</span>
+          </TooltipTrigger>
+          <TooltipPopup side="top">{needYouLabel}</TooltipPopup>
+        </Tooltip>
       ) : null}
     </span>
   );
 }
 
 /**
- * A Pivot's teammates under its row: one line each, in dispatch order, finished ones
- * folded. Their lifecycle belongs to the Pivot, so the rows carry no settle or snooze.
+ * A Pivot's teammates under its row: one line each, in dispatch order. Settled ones
+ * are gone, as settled threads leave the inbox. Their lifecycle belongs to the Pivot,
+ * so the rows carry no settle or snooze.
  */
 export function SidebarTeammateList(props: {
   environmentId: EnvironmentId;
   group: SidebarPivotGroup;
   activeThreadId: ThreadId | null;
 }) {
-  const [showFinished, setShowFinished] = useState(false);
-  const { group } = props;
-  const finishedShown = showFinished || group.live.length === 0;
-  const row = (card: TeammateCard) => (
-    <SidebarTeammateRow
-      key={card.threadId}
-      environmentId={props.environmentId}
-      card={card}
-      active={card.threadId === props.activeThreadId}
-    />
-  );
   return (
     <li role="presentation">
-      <ul
-        role="presentation"
-        aria-label="Teammates"
-        className="mb-1 ml-4 flex flex-col gap-px border-l border-sidebar-border pl-1"
-      >
-        {group.live.map(row)}
-        {group.finished.length > 0 && group.live.length > 0 ? (
-          <li role="presentation">
-            <button
-              type="button"
-              aria-expanded={finishedShown}
-              onClick={() => setShowFinished((shown) => !shown)}
-              className="cursor-pointer rounded-md px-2 py-0.5 text-xs text-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-            >
-              {finishedShown ? "Hide finished" : `${group.finished.length} finished`}
-            </button>
-          </li>
-        ) : null}
-        {finishedShown ? group.finished.map(row) : null}
+      <ul role="presentation" aria-label="Teammates" className="mb-1 flex flex-col gap-px">
+        {props.group.teammates.map((card) => (
+          <SidebarTeammateRow
+            key={card.threadId}
+            environmentId={props.environmentId}
+            card={card}
+            active={card.threadId === props.activeThreadId}
+          />
+        ))}
       </ul>
     </li>
   );
+}
+
+/** The icon a normal thread row shows for the same state; paused rests like done. */
+function teammateStatusIcon(card: TeammateCard): SidebarStatusIconKind {
+  switch (card.tone) {
+    case "working":
+      return "working";
+    case "attention":
+      return card.status === "waiting" ? "approval" : card.needsYou ? "input" : "failed";
+    case "failed":
+      return "failed";
+    case "resting":
+      return "done";
+  }
 }
 
 function SidebarTeammateRow(props: {
@@ -107,15 +114,7 @@ function SidebarTeammateRow(props: {
 }) {
   const navigate = useNavigate();
   const { card } = props;
-  const tag = card.needsYou
-    ? "Needs you"
-    : card.attention || card.status === "paused"
-      ? card.label
-      : card.footer?.kind === "pull-request"
-        ? `#${card.footer.number}`
-        : card.footer?.kind === "scout"
-          ? "Scout"
-          : null;
+  const tone = TEAMMATE_TONE_CLASSES[card.tone];
   return (
     <li role="presentation">
       <button
@@ -132,28 +131,22 @@ function SidebarTeammateRow(props: {
           props.active && "bg-sidebar-row-hover text-sidebar-foreground",
         )}
       >
-        <span
-          aria-hidden
-          className={cn(
-            "size-2 shrink-0 rounded-full",
-            card.attention
-              ? "bg-warning"
-              : card.status === "working"
-                ? "bg-success"
-                : "bg-muted-foreground/50",
-          )}
-        />
+        {/* px-2 puts this icon's center under the Pivot row's chevron. */}
+        <span className={cn("inline-flex shrink-0", tone.text)}>
+          <SidebarStatusIcon kind={teammateStatusIcon(card)} />
+        </span>
         <span className="min-w-0 flex-1 truncate">{card.title}</span>
-        {tag !== null ? (
-          <span
-            className={cn(
-              "shrink-0 text-xs",
-              card.needsYou ? "text-warning-foreground" : "text-muted-foreground",
-            )}
-          >
-            {tag}
-          </span>
-        ) : null}
+        {/* The status as a normal thread row shows it, with the working time. */}
+        <span
+          className={cn("inline-flex shrink-0 items-center gap-1 text-xs font-medium", tone.text)}
+        >
+          <span role="status">{card.label}</span>
+          {card.tone === "working" ? (
+            <span aria-hidden>
+              <WorkingDuration startedAt={card.since} />
+            </span>
+          ) : null}
+        </span>
       </button>
     </li>
   );

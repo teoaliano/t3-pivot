@@ -37,6 +37,7 @@ const shell = (overrides: Partial<TeammateCardShell> = {}): TeammateCardShell =>
   latestRunStartedAt: "2026-10-06T10:01:00.000Z",
   latestRunCompletedAt: null,
   pullRequest: null,
+  settled: false,
   ...overrides,
 });
 
@@ -130,6 +131,34 @@ describe("teammate cards", () => {
     );
     expect(cards.live.map((card) => card.threadId)).toEqual(["running", "asking"]);
     expect(cards.finished.map((card) => card.threadId)).toEqual(["done", "gone"]);
+  });
+
+  it("wears the thread status colors and settles like a thread", () => {
+    const tone = (record: TeammateRecord, cardShell: TeammateCardShell | null) =>
+      teammateCard(record, cardShell).tone;
+    expect(tone(teammate(), shell())).toBe("working");
+    expect(tone(teammate(), shell({ pendingRuntimeRequest: { kind: "approval" } as never }))).toBe(
+      "attention",
+    );
+    expect(tone(teammate({ hasEscalatedDecision: true }), shell())).toBe("attention");
+    const paused = { ...report("done", "2026-10-06T11:00:00.000Z"), status: "paused" as const };
+    expect(tone(teammate({ report: paused }), shell({ status: "idle" }))).toBe("resting");
+    expect(
+      tone(
+        teammate({ report: report("done", "2026-10-06T11:00:00.000Z") }),
+        shell({ status: "idle" }),
+      ),
+    ).toBe("resting");
+    // Torn down, or its thread settled (a merged PR): finished for good.
+    expect(teammateCard(teammate({ tornDownAt: "2026-10-06T12:00:00.000Z" }), null).settled).toBe(
+      true,
+    );
+    expect(teammateCard(teammate(), shell({ status: "idle", settled: true })).settled).toBe(true);
+    expect(teammateCard(teammate(), shell({ status: "idle" })).settled).toBe(false);
+    // Anything asking for the user stays in view.
+    expect(
+      teammateCard(teammate({ hasEscalatedDecision: true }), shell({ settled: true })).settled,
+    ).toBe(false);
   });
 
   it("reads elapsed time to the minute", () => {

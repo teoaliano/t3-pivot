@@ -107,6 +107,7 @@ export type PivotCommand =
       readonly deliveryMode: PivotDeliveryMode;
       readonly intent: string;
       readonly spec: string;
+      readonly modelEntry: string | null;
     }
   | {
       readonly type: "teammate.promote";
@@ -250,6 +251,7 @@ export interface TeammateRow extends TeammateRecord {
   readonly deliveryMode: PivotDeliveryMode;
   readonly intent: ReadonlyArray<string>;
   readonly spec: string;
+  readonly modelEntry: string | null;
   readonly scoutReport: string | null;
   readonly observedStatus: TeammateStatus | null;
   readonly observedRunId: RunId | null;
@@ -332,6 +334,7 @@ interface TeammateSqlRow {
   readonly delivery_mode: string;
   readonly intent_json: string;
   readonly spec: string;
+  readonly model_entry: string | null;
   readonly report_json: string | null;
   readonly resume: string | null;
   readonly scout_report: string | null;
@@ -418,6 +421,7 @@ const toTeammate = (row: TeammateSqlRow): TeammateRow => ({
   deliveryMode: row.delivery_mode as PivotDeliveryMode,
   intent: decodeIntent(row.intent_json),
   spec: row.spec,
+  modelEntry: row.model_entry,
   scoutReport: row.scout_report,
   observedStatus: row.observed_status as TeammateStatus | null,
   observedRunId: row.observed_run_id as RunId | null,
@@ -670,6 +674,7 @@ export const make = Effect.gen(function* () {
           deliveryMode: command.deliveryMode,
           intent: command.intent,
           spec: command.spec,
+          modelEntry: command.modelEntry,
         });
         break;
       }
@@ -1032,11 +1037,12 @@ export const make = Effect.gen(function* () {
         yield* sql`
           INSERT INTO pivot_teammates (
             thread_id, pivot_thread_id, project_id, kind, title, branch, base_branch,
-            worktree_path, delivery_mode, intent_json, spec, dispatched_at
+            worktree_path, delivery_mode, intent_json, spec, model_entry, dispatched_at
           ) VALUES (
             ${event.threadId}, ${event.pivotThreadId}, ${event.projectId}, ${event.kind},
             ${event.title}, ${event.branch}, ${event.baseBranch}, ${event.worktreePath},
-            ${event.deliveryMode}, ${encodeIntent([event.intent])}, ${event.spec}, ${at}
+            ${event.deliveryMode}, ${encodeIntent([event.intent])}, ${event.spec},
+            ${event.modelEntry ?? null}, ${at}
           )
         `;
         return;

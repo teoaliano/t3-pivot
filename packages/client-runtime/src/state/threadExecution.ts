@@ -146,6 +146,21 @@ export function deriveProviderSubagentStatus(
   };
 }
 
+/**
+ * A run's status in the subagent bar's terms, for threads that also run on
+ * their own but through app runs, such as a Pivot teammate. Null with no run.
+ */
+export function runAsProviderSubagentStatus(
+  run: ThreadRunSummary | null,
+): ProviderSubagentStatus | null {
+  if (run === null) return null;
+  const status: OrchestrationV2ExecutionNode["status"] =
+    run.status === "preparing" || run.status === "queued" || run.status === "starting"
+      ? "pending"
+      : run.status;
+  return { status, startedAt: run.startedAt, completedAt: run.completedAt };
+}
+
 /** The observed selection belongs to the active provider thread, never a previous handoff. */
 export function deriveReportedModelSelection(
   projection: OrchestrationV2ThreadProjection,

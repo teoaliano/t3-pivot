@@ -8,11 +8,13 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProjectId, ProviderInstanceId } from "@t3tools/contracts";
+import { ProjectId, ProviderInstanceId, type ServerSettings } from "@t3tools/contracts";
+import type { DeepPartial } from "@t3tools/shared/Struct";
 import * as Layer from "effect/Layer";
 
 import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
+import * as ServerSettingsService from "../serverSettings.ts";
 import * as PivotDatabase from "./PivotDatabase.ts";
 import * as PivotGit from "./PivotGit.ts";
 import * as PivotHome from "./PivotHome.ts";
@@ -56,8 +58,9 @@ export const addWorktree = (repo: string, worktreePath: string, branch: string, 
   return worktreePath;
 };
 
-export const harness = (fake: FakeThreads.FakeV2) =>
+export const harness = (fake: FakeThreads.FakeV2, settings: DeepPartial<ServerSettings> = {}) =>
   PivotService.layer.pipe(
+    Layer.provideMerge(ServerSettingsService.layerTest(settings)),
     Layer.provideMerge(PivotStore.layer.pipe(Layer.provide(PivotDatabase.layerMemory))),
     Layer.provideMerge(FakeThreads.layer(fake)),
     Layer.provideMerge(PivotHome.layer),
@@ -67,12 +70,14 @@ export const harness = (fake: FakeThreads.FakeV2) =>
     Layer.provideMerge(NodeServices.layer),
   );
 
-export const setup = (options: { git?: boolean; remote?: boolean } = {}) => {
+export const setup = (
+  options: { git?: boolean; remote?: boolean; settings?: DeepPartial<ServerSettings> } = {},
+) => {
   const fake = FakeThreads.makeFakeV2();
   const workspaceRoot =
     options.git === false
       ? NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pivot-plain-"))
       : makeRepo({ remote: options.remote ?? false });
   fake.projects.set(projectId, { projectId, workspaceRoot, defaultModelSelection: null });
-  return { fake, workspaceRoot, layer: harness(fake) };
+  return { fake, workspaceRoot, layer: harness(fake, options.settings) };
 };

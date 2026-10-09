@@ -7,18 +7,14 @@ import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 
 import type { SidebarThreadStatus } from "../Sidebar.logic";
 
-import {
-  type TeammateCard,
-  type TeammateCardShell,
-  teammateCards,
-} from "../pivot/pivotCards.logic";
+import { type TeammateCard, type TeammateCardShell, teammateCard } from "../pivot/pivotCards.logic";
 
 /**
  * Pivot mode in the sidebar. A Pivot's teammates leave the shelves and sit under
- * their Pivot's row, in dispatch order, shown while the row is expanded. A
- * retired Pivot keeps the teammates it still owns: the ones it finished before a
- * takeover moved its live work on. A teammate whose Pivot is not in the list
- * stays a top-level row, so nothing becomes unreachable.
+ * their Pivot's row, in dispatch order, shown while the row is expanded. Settled
+ * teammates leave that list the way settled threads leave the inbox. A teammate
+ * whose Pivot is not in the list stays a top-level row, so nothing becomes
+ * unreachable.
  */
 
 interface ThreadRef {
@@ -97,10 +93,8 @@ export function interleavePivotTeammates<T extends ThreadRef>(
 
 export interface SidebarPivotGroup {
   readonly retired: boolean;
-  /** In dispatch order, as the Pivot view's cards. */
-  readonly live: ReadonlyArray<TeammateCard>;
-  /** Done or cleaned up, behind "N finished". Read from the records, so archived ones stay. */
-  readonly finished: ReadonlyArray<TeammateCard>;
+  /** Every teammate not settled, in dispatch order, as the Pivot view's cards. */
+  readonly teammates: ReadonlyArray<TeammateCard>;
   /** Teammates waiting on the user, plus decisions the Pivot holds about its own work. */
   readonly needYou: number;
 }
@@ -113,15 +107,16 @@ export function sidebarPivotGroup(
 ): SidebarPivotGroup | null {
   const pivot = pivotState?.pivots[pivotThreadId];
   if (pivotState == null || pivot === undefined) return null;
-  const cards = teammateCards(teammatesOfPivot(pivotState, pivotThreadId), shellOf);
+  const teammates = teammatesOfPivot(pivotState, pivotThreadId)
+    .map((teammate) => teammateCard(teammate, shellOf(teammate.threadId)))
+    .filter((card) => !card.settled);
   const ownDecisions = decisionsHeldBy(pivotState, pivotThreadId).filter(
     (decision) => decision.teammateThreadId === null,
   ).length;
   return {
     retired: pivot.retiredAt !== null,
-    live: cards.live,
-    finished: cards.finished,
-    needYou: cards.live.filter((card) => card.needsYou).length + ownDecisions,
+    teammates,
+    needYou: teammates.filter((card) => card.needsYou).length + ownDecisions,
   };
 }
 

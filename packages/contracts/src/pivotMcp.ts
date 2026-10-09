@@ -29,7 +29,12 @@ export const PivotMcpDispatchTeammateInput = Schema.Struct({
   spec: TrimmedNonEmptyString,
   /** Stack on another branch instead of the origin's default branch. */
   baseBranch: Schema.optional(TrimmedNonEmptyString),
-  /** Defaults to the project's default model, then the Pivot's own. */
+  /** A teammate model from Settings, by name. Without one, the default entry runs it. */
+  modelEntry: Schema.optional(TrimmedNonEmptyString),
+  /**
+   * Only for a model the user named; wins over `modelEntry`. With neither and no
+   * entries set up, the project's default model runs it, then the Pivot's own.
+   */
   modelSelection: Schema.optional(ModelSelection),
 });
 export type PivotMcpDispatchTeammateInput = typeof PivotMcpDispatchTeammateInput.Type;
@@ -42,6 +47,8 @@ export const PivotMcpDispatchTeammateResult = Schema.Struct({
   baseBranch: Schema.String,
   worktreePath: Schema.String,
   deliveryMode: PivotDeliveryMode,
+  /** The teammate model it runs on; null when a named model or a fallback chose it. */
+  modelEntry: Schema.NullOr(Schema.String),
   /** `failed` when setup failed; retry with relaunch_teammate or tear it down. */
   firstRun: Schema.Literals(["started", "failed"]),
   detail: Schema.NullOr(Schema.String),
@@ -124,6 +131,8 @@ export const PivotMcpTeammateLine = Schema.Struct({
   pullRequestUrl: Schema.NullOr(Schema.String),
   lastChangeAt: Schema.NullOr(IsoDateTime),
   worktreePath: Schema.String,
+  /** The teammate model it was dispatched on, if any. */
+  modelEntry: Schema.NullOr(Schema.String),
   tornDown: Schema.Boolean,
 });
 export type PivotMcpTeammateLine = typeof PivotMcpTeammateLine.Type;

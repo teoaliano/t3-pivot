@@ -9,6 +9,7 @@ import * as ServerConfig from "../config.ts";
 import * as PivotService from "./PivotService.ts";
 import { modelSelection, projectId, setup } from "./PivotService.testkit.ts";
 import * as PivotStore from "./PivotStore.ts";
+import { renderTeammateModels } from "./pivotTeammateModels.ts";
 import { loadPivotText } from "./pivotTexts.ts";
 
 const refusal = <A, R>(effect: Effect.Effect<A, PivotService.PivotServiceError, R>) =>
@@ -114,7 +115,7 @@ describe("PivotService.refreshHomes", () => {
 
       assert.strictEqual(
         NodeFS.readFileSync(NodePath.join(home, "AGENTS.md"), "utf8"),
-        yield* loadPivotText("AGENTS"),
+        (yield* loadPivotText("AGENTS")).replace("{{teammateModels}}", renderTeammateModels([])),
       );
       assert.strictEqual(
         NodeFS.readFileSync(NodePath.join(home, "preferences.md"), "utf8"),

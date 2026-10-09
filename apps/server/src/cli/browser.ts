@@ -118,9 +118,12 @@ const browserSetupCommand = Command.make("setup", { baseDir: baseDirFlag }).pipe
 
       const needsProfile = yield* PreviewBrowserHost.sandboxBlocked;
       const browser = yield* installedBrowser(yield* setupBaseDir(baseDir));
-      const missing = Option.isSome(browser)
-        ? yield* PreviewBrowserHost.missingLibraries(browser.value)
-        : [];
+      const missing = [
+        ...(Option.isSome(browser)
+          ? yield* PreviewBrowserHost.missingLibraries(browser.value)
+          : []),
+        ...((yield* PreviewBrowserHost.fontsMissing) ? ["fonts (fontconfig)"] : []),
+      ];
       const hasApt = yield* fs.exists("/usr/bin/apt-get").pipe(Effect.orElseSucceed(() => false));
 
       if (!needsProfile && missing.length === 0) {

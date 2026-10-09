@@ -48,7 +48,7 @@ const TEAMMATE_ONLY = "Teammates of a Pivot only.";
 
 const DispatchTeammateTool = Tool.make("dispatch_teammate", {
   ...pivotTool,
-  description: `${PIVOT_ONLY} Start a teammate on one task in its own worktree and branch, from the origin's default branch or baseBranch. intent is the user's words verbatim, spec your instructions. Returns once its first run started or failed.`,
+  description: `${PIVOT_ONLY} Start a teammate on one task in its own worktree and branch, from the origin's default branch or baseBranch. intent is the user's words verbatim, spec your instructions. modelEntry names a teammate model from your contract; omitted, the default runs. Returns once its first run started or failed.`,
   parameters: PivotMcpDispatchTeammateInput,
   success: PivotMcpDispatchTeammateResult,
 }).annotate(Tool.Title, "Dispatch a teammate");
@@ -97,7 +97,7 @@ const MarkDecisionMootTool = Tool.make("mark_decision_moot", {
 
 const ListTeammatesTool = Tool.make("list_teammates", {
   ...pivotTool,
-  description: `${PIVOT_ONLY} One line per teammate: title, kind, status, latest summary, branch, PR, last change and worktree.`,
+  description: `${PIVOT_ONLY} One line per teammate: title, kind, status, latest summary, branch, PR, last change, worktree and teammate model.`,
   parameters: PivotMcpListTeammatesInput,
   success: PivotMcpListTeammatesResult,
 })

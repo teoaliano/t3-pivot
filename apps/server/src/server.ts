@@ -574,9 +574,26 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   ),
   // Pivot mode: brings each active Pivot's home contract up to this release before
   // any Pivot runs, then records teammate changes from V2's events and wakes each Pivot.
+  // The contract lists the teammate models from Settings, so changing them rewrites it.
   Layer.effectDiscard(
     Effect.gen(function* () {
-      yield* (yield* PivotService.PivotService).refreshHomes;
+      const pivots = yield* PivotService.PivotService;
+      yield* pivots.refreshHomes;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      yield* settings.streamChanges.pipe(
+        Stream.map((next) =>
+          JSON.stringify([
+            next.teammateModels,
+            Object.entries(next.projectSettingsOverrides).map(([projectId, overrides]) => [
+              projectId,
+              overrides.teammateModels,
+            ]),
+          ]),
+        ),
+        Stream.changes,
+        Stream.runForEach(() => pivots.refreshHomes),
+        Effect.forkScoped,
+      );
       const supervisor = yield* PivotSupervisor.PivotSupervisor;
       yield* supervisor.start;
     }),

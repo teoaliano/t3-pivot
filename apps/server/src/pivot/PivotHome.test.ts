@@ -18,6 +18,8 @@ const TestLayer = PivotHome.layer.pipe(
 );
 
 const projectId = ProjectId.make("project-1");
+const MODELS = "- `research` (default): codex / gpt-5.4. Investigations.";
+const withModels = (contract: string) => contract.replace("{{teammateModels}}", MODELS);
 
 const git = (cwd: string, ...args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
@@ -43,10 +45,10 @@ it.layer(TestLayer)("PivotHome", (it) => {
         const config = yield* ServerConfig.ServerConfig;
         const path = yield* Path.Path;
 
-        const home = yield* pivotHome.ensure(projectId);
+        const home = yield* pivotHome.ensure(projectId, MODELS);
 
         expect(home).toBe(path.join(config.stateDir, "pivot-homes", projectId));
-        expect(yield* read(home, "AGENTS.md")).toBe(yield* loadPivotText("AGENTS"));
+        expect(yield* read(home, "AGENTS.md")).toBe(withModels(yield* loadPivotText("AGENTS")));
         expect(yield* read(home, "CLAUDE.md")).toBe("@AGENTS.md\n");
         expect(yield* read(home, "preferences.md")).toBe("");
         expect(yield* git(home, "status", "--porcelain")).toBe("");
@@ -58,10 +60,10 @@ it.layer(TestLayer)("PivotHome", (it) => {
   it.effect("is idempotent", () =>
     Effect.gen(function* () {
       const pivotHome = yield* PivotHome.PivotHome;
-      const first = yield* pivotHome.ensure(projectId);
+      const first = yield* pivotHome.ensure(projectId, MODELS);
       const head = yield* git(first, "rev-parse", "HEAD");
 
-      const second = yield* pivotHome.ensure(projectId);
+      const second = yield* pivotHome.ensure(projectId, MODELS);
 
       expect(second).toBe(first);
       expect(yield* git(second, "rev-parse", "HEAD")).toBe(head);
@@ -72,8 +74,8 @@ it.layer(TestLayer)("PivotHome", (it) => {
   it.effect("gives each project its own home", () =>
     Effect.gen(function* () {
       const pivotHome = yield* PivotHome.PivotHome;
-      const a = yield* pivotHome.ensure(ProjectId.make("project-a"));
-      const b = yield* pivotHome.ensure(ProjectId.make("project-b"));
+      const a = yield* pivotHome.ensure(ProjectId.make("project-a"), "");
+      const b = yield* pivotHome.ensure(ProjectId.make("project-b"), "");
       expect(a).not.toBe(b);
     }),
   );
@@ -83,7 +85,7 @@ it.layer(TestLayer)("PivotHome", (it) => {
       const pivotHome = yield* PivotHome.PivotHome;
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const home = yield* pivotHome.ensure(projectId);
+      const home = yield* pivotHome.ensure(projectId, MODELS);
 
       // An older release's contract, committed, plus rules the user wrote themselves.
       yield* fs.writeFileString(path.join(home, "AGENTS.md"), "# Old contract\n");
@@ -91,9 +93,9 @@ it.layer(TestLayer)("PivotHome", (it) => {
       yield* git(home, "add", "-A");
       yield* git(home, "commit", "-m", "older release");
 
-      yield* pivotHome.ensure(projectId);
+      yield* pivotHome.ensure(projectId, MODELS);
 
-      expect(yield* read(home, "AGENTS.md")).toBe(yield* loadPivotText("AGENTS"));
+      expect(yield* read(home, "AGENTS.md")).toBe(withModels(yield* loadPivotText("AGENTS")));
       expect(yield* read(home, "preferences.md")).toBe("Always answer in French.\n");
       expect(yield* git(home, "status", "--porcelain")).toBe("");
     }),
@@ -104,14 +106,14 @@ it.layer(TestLayer)("PivotHome", (it) => {
       const pivotHome = yield* PivotHome.PivotHome;
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const home = yield* pivotHome.ensure(projectId);
+      const home = yield* pivotHome.ensure(projectId, MODELS);
 
       yield* fs.writeFileString(path.join(home, "preferences.md"), "Never merge on Fridays.\n");
       yield* fs.writeFileString(path.join(home, "AGENTS.md"), "# Edited by hand\n");
 
-      yield* pivotHome.ensure(projectId);
+      yield* pivotHome.ensure(projectId, MODELS);
 
-      expect(yield* read(home, "AGENTS.md")).toBe(yield* loadPivotText("AGENTS"));
+      expect(yield* read(home, "AGENTS.md")).toBe(withModels(yield* loadPivotText("AGENTS")));
       expect(yield* read(home, "preferences.md")).toBe("Never merge on Fridays.\n");
       expect(yield* git(home, "status", "--porcelain")).toBe("");
     }),

@@ -46,6 +46,7 @@ const dispatchTeammate = (
     const store = yield* PivotStore.PivotStore;
     return yield* store.dispatch({
       type: "teammate.dispatch",
+      modelEntry: null,
       pivotThreadId: options.pivotThreadId ?? pivotA,
       threadId,
       projectId,
@@ -186,6 +187,7 @@ describe("PivotStore", () => {
         const elsewhere = yield* refusal(
           store.dispatch({
             type: "teammate.dispatch",
+            modelEntry: null,
             pivotThreadId: pivotB,
             threadId: shipA,
             projectId: ProjectId.make("project-2"),

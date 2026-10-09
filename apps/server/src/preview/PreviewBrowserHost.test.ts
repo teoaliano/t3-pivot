@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/process";
@@ -100,6 +101,44 @@ describe("diagnoseLaunchFailure", () => {
       const mac = yield* diagnose({ platform: "darwin", output: "crashed", ldd: "" });
       expect(mac.error).toBeUndefined();
       expect(mac.commands).toEqual([]);
+    }),
+  );
+});
+
+const fontsMissing = (input: {
+  platform: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+  files: ReadonlyArray<string>;
+}) =>
+  PreviewBrowserHost.fontsMissing.pipe(
+    Effect.provide(
+      FileSystem.layerNoop({ exists: (path) => Effect.succeed(input.files.includes(path)) }),
+    ),
+    Effect.provideService(HostProcessPlatform, input.platform),
+    Effect.provideService(HostProcessEnvironment, input.env ?? {}),
+  );
+
+describe("fontsMissing", () => {
+  // Homebox: a minimal Ubuntu with no fontconfig, where Skia aborts on the first text it draws.
+  it.effect("flags a Linux host without a fontconfig config", () =>
+    Effect.gen(function* () {
+      expect(yield* fontsMissing({ platform: "linux", files: [] })).toBe(true);
+      expect(yield* fontsMissing({ platform: "linux", files: ["/etc/fonts/fonts.conf"] })).toBe(
+        false,
+      );
+    }),
+  );
+
+  it.effect("trusts an explicit FONTCONFIG_FILE and other platforms", () =>
+    Effect.gen(function* () {
+      expect(
+        yield* fontsMissing({
+          platform: "linux",
+          env: { FONTCONFIG_FILE: "/opt/fonts.conf" },
+          files: [],
+        }),
+      ).toBe(false);
+      expect(yield* fontsMissing({ platform: "darwin", files: [] })).toBe(false);
     }),
   );
 });

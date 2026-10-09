@@ -82,9 +82,17 @@ never repeat those.
 
 Keep the two apart. Your constraints never go in the intent.
 
-**Model and effort.** Use the project's default model unless the user names one. Pick
-effort by the work: low for clear, well-understood changes, extra-high for ambiguous
-investigation or design, levels in between in proportion. Never max unless the user asks.
+**Model and effort.** The user set up these teammate models in Settings, each with its
+effort and when to use it:
+
+{{teammateModels}}
+
+Pick the entry whose description best fits the task and pass its name as `modelEntry`.
+When none fits, omit it and the default runs. A model the user names wins: pass it as
+`modelSelection` instead, with effort by the work, low for clear changes up to extra-high
+for ambiguous investigation or design, never max unless the user asks. Tell the user in
+one line which entry you used. Settings can change while you run; a refused name lists
+the current entries.
 
 ## While teammates work
 

@@ -9,7 +9,7 @@ import { usePivotState } from "../../state/pivot";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { resolveThreadRouteRef } from "../../threadRoutes";
 import { useEnvironmentIds } from "../../state/environments";
-import { NewPivotDialogHost, openNewPivotDialog } from "./NewPivotDialog";
+import { NewPivotHost, startNewPivot } from "./NewPivot";
 import { PivotStateSync } from "./pivotStatesStore";
 import { usePivotViewMode, usePivotViewStore } from "./pivotViewStore";
 
@@ -56,7 +56,7 @@ export function PivotAppChrome() {
         isNewPivotShortcut(event, keybindings)
       ) {
         event.preventDefault();
-        openNewPivotDialog({ environmentId: projectEnvironmentId, projectId });
+        startNewPivot({ environmentId: projectEnvironmentId, projectId });
       }
     };
     window.addEventListener("keydown", handler);
@@ -65,7 +65,7 @@ export function PivotAppChrome() {
 
   return (
     <>
-      <NewPivotDialogHost />
+      <NewPivotHost />
       {environmentIds.map((environmentId) => (
         <PivotStateSync key={environmentId} environmentId={environmentId} />
       ))}

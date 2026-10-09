@@ -13,6 +13,7 @@ import {
   useState,
 } from "react";
 
+import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
 import {
   deriveProviderEntriesByEnvironment,
@@ -26,6 +27,7 @@ import {
   primaryServerKeybindingsAtom,
   serverEnvironment,
 } from "../../state/server";
+import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import ChatView from "../ChatView";
 import { ProjectFavicon } from "../ProjectFavicon";
 import {
@@ -49,7 +51,7 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { toastManager } from "../ui/toast";
-import { openNewPivotDialog } from "./NewPivotDialog";
+import { startNewPivot } from "./NewPivot";
 import { PivotViewSwitch } from "./PivotChatChrome";
 import {
   hidePane,
@@ -162,12 +164,15 @@ export function PivotView(props: { pivot: ScopedThreadRef }) {
       node.teammate === undefined ? null : scopeThreadRef(pivot.environmentId, node.teammate);
     switch (node.kind) {
       case "pivot-chat":
+        // ChatView sizes itself as a flex item, so it needs a flex column to stay bounded.
         return (
-          <ChatView
-            environmentId={pivot.environmentId}
-            threadId={pivot.threadId}
-            routeKind="server"
-          />
+          <div className="flex size-full min-h-0 flex-col">
+            <ChatView
+              environmentId={pivot.environmentId}
+              threadId={pivot.threadId}
+              routeKind="server"
+            />
+          </div>
         );
       case "teammates":
         return (
@@ -223,7 +228,15 @@ export function PivotView(props: { pivot: ScopedThreadRef }) {
             />
           </>
         ) : null}
-        <header className="relative flex h-[var(--workspace-topbar-height)] shrink-0 items-center gap-3 bg-background px-3">
+        {/* Mirrors the Chat header's titlebar handling: a window drag region, and clearance
+            for the native window controls when the sidebar is collapsed. */}
+        <header
+          className={cn(
+            "relative flex h-[var(--workspace-topbar-height)] shrink-0 items-center gap-3 bg-background px-3 [[data-panel-animations=true]_&]:motion-safe:transition-[padding-left] [[data-panel-animations=true]_&]:motion-safe:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:motion-safe:ease-out",
+            isElectron && "drag-region wco:pr-(--workspace-native-controls-inset)",
+            COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
+          )}
+        >
           {/* The same project / title breadcrumb as Chat mode, so the project stays in view. */}
           <WorkspaceBreadcrumb ariaLabel="Pivot breadcrumb" className="flex-1">
             {project ? (
@@ -258,7 +271,7 @@ export function PivotView(props: { pivot: ScopedThreadRef }) {
                 {pivotShell !== null && record?.retiredAt === null ? (
                   <MenuItem
                     onClick={() =>
-                      openNewPivotDialog({
+                      startNewPivot({
                         environmentId: pivot.environmentId,
                         projectId: pivotShell.projectId,
                       })
@@ -375,13 +388,12 @@ function TeammatePaneBody(props: {
       return (
         <div className="flex size-full min-h-0 flex-col">
           {props.hasScoutReport ? <ScoutReport teammateRef={teammateRef} /> : null}
-          <div className="relative min-h-0 flex-1">
+          <div className="relative flex min-h-0 flex-1 flex-col">
             <ChatView
               key={teammateRef.threadId}
               environmentId={teammateRef.environmentId}
               threadId={teammateRef.threadId}
               routeKind="server"
-              pivotReadOnly
             />
           </div>
         </div>

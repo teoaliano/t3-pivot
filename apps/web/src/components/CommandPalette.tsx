@@ -1,6 +1,6 @@
 "use client";
 
-import { openNewPivotDialog, usePivotProjectReadiness } from "./pivot/NewPivotDialog";
+import { startNewPivot, usePivotProjectReadiness } from "./pivot/NewPivot";
 import { usePivotModeSupported } from "../state/pivot";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
@@ -1938,7 +1938,7 @@ function OpenCommandPaletteDialog(props: {
         disabled: !pivotReadiness.ready,
         icon: <LayoutDashboardIcon className={ITEM_ICON_CLASS} />,
         shortcutCommand: "pivot.new",
-        run: async () => openNewPivotDialog(pivotTarget),
+        run: async () => startNewPivot(pivotTarget),
       });
     }
 
