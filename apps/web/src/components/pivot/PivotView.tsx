@@ -13,6 +13,7 @@ import {
   useState,
 } from "react";
 
+import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
 import {
   deriveProviderEntriesByEnvironment,
@@ -26,6 +27,7 @@ import {
   primaryServerKeybindingsAtom,
   serverEnvironment,
 } from "../../state/server";
+import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import ChatView from "../ChatView";
 import { ProjectFavicon } from "../ProjectFavicon";
 import {
@@ -223,7 +225,15 @@ export function PivotView(props: { pivot: ScopedThreadRef }) {
             />
           </>
         ) : null}
-        <header className="relative flex h-[var(--workspace-topbar-height)] shrink-0 items-center gap-3 bg-background px-3">
+        {/* Mirrors the Chat header's titlebar handling: a window drag region, and clearance
+            for the native window controls when the sidebar is collapsed. */}
+        <header
+          className={cn(
+            "relative flex h-[var(--workspace-topbar-height)] shrink-0 items-center gap-3 bg-background px-3 [[data-panel-animations=true]_&]:motion-safe:transition-[padding-left] [[data-panel-animations=true]_&]:motion-safe:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:motion-safe:ease-out",
+            isElectron && "drag-region wco:pr-(--workspace-native-controls-inset)",
+            COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
+          )}
+        >
           {/* The same project / title breadcrumb as Chat mode, so the project stays in view. */}
           <WorkspaceBreadcrumb ariaLabel="Pivot breadcrumb" className="flex-1">
             {project ? (
