@@ -2131,6 +2131,11 @@ const make = Effect.gen(function* () {
       `This host blocks the sandbox T3's browser runs in, so browser tabs and HTML previews will not start. Run \`${setupCommand}\` once to allow it.`,
     );
   }
+  if (yield* PreviewBrowserHost.fontsMissing) {
+    yield* Effect.logWarning(
+      `This host has no fonts, so T3's browser crashes on the first page with text. Run \`${setupCommand}\` once to install them.`,
+    );
+  }
   // The desktop took its page back (closed, swapped, crashed, or devtools opened).
   // The session stays; the next viewer or agent reconnects when it re-attaches.
   yield* desktopChannel.detached.pipe(
