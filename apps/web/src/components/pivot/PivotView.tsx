@@ -27,7 +27,6 @@ import {
   primaryServerKeybindingsAtom,
   serverEnvironment,
 } from "../../state/server";
-import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import ChatView from "../ChatView";
 import { ProjectFavicon } from "../ProjectFavicon";
 import {
@@ -228,13 +227,13 @@ export function PivotView(props: { pivot: ScopedThreadRef }) {
             />
           </>
         ) : null}
-        {/* Mirrors the Chat header's titlebar handling: a window drag region, and clearance
-            for the native window controls when the sidebar is collapsed. */}
+        {/* Pivot view hides the sidebar and its toggle whatever the sidebar's open state, so
+            the header always starts where the sidebar toggle would: past the macOS traffic
+            lights, or at the plain gutter in fullscreen and on the web. */}
         <header
           className={cn(
-            "relative flex h-[var(--workspace-topbar-height)] shrink-0 items-center gap-3 bg-background px-3 [[data-panel-animations=true]_&]:motion-safe:transition-[padding-left] [[data-panel-animations=true]_&]:motion-safe:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:motion-safe:ease-out",
+            "relative flex h-[var(--workspace-topbar-height)] shrink-0 items-center gap-3 bg-background pr-3 pl-(--workspace-controls-left)",
             isElectron && "drag-region wco:pr-(--workspace-native-controls-inset)",
-            COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
           )}
         >
           {/* The same project / title breadcrumb as Chat mode, so the project stays in view. */}
