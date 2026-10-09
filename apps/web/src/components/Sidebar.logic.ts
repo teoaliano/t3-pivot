@@ -158,6 +158,9 @@ export type SidebarListMarker =
   | "settled-placeholder"
   /** The boundary between pinned and active rows. */
   | "pinned-divider"
+  /** Group headers inside the active section; they never change a row's section. */
+  | "pivots-header"
+  | "threads-header"
   | "working-header"
   | "snoozed-header"
   | "settled-header";
