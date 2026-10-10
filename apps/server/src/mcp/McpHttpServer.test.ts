@@ -28,6 +28,9 @@ import {
 
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerConfig from "../config.ts";
+import * as ManagedProcesses from "../managedProcess/ManagedProcesses.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
 import * as McpToolAccessTestkit from "./McpToolAccess.testkit.ts";
@@ -66,6 +69,13 @@ const client = McpSchema.McpServerClient.of({
 });
 const layerTest = McpHttpServer.layerPreviewToolkit.pipe(
   Layer.provideMerge(McpServer.McpServer.layer),
+  Layer.provide(
+    Layer.mergeAll(
+      Layer.mock(ManagedProcesses.ManagedProcesses)({}),
+      Layer.mock(ProjectStore.ProjectStoreV2)({}),
+      Layer.mock(ServerSettings.ServerSettingsService)({}),
+    ),
+  ),
   Layer.provideMerge(McpToolAccessTestkit.liveThreadsLayer),
   Layer.provideMerge(PreviewAutomationBroker.layer),
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-http-server-test-" })),
