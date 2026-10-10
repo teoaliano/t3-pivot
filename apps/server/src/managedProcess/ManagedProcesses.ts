@@ -47,7 +47,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
-import { writeFileStringAtomically } from "../atomicWrite.ts";
+import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { BackgroundPolicy } from "../background/BackgroundPolicy.ts";
 import * as ServerConfig from "../config.ts";
 import { ThreadManagementService } from "../orchestration-v2/ThreadManagementService.ts";
