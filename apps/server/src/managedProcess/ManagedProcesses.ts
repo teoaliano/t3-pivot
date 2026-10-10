@@ -14,6 +14,7 @@
  * outlived a killed server can be found and stopped. Nothing is event-sourced.
  * See docs/internals/managed-processes.md.
  */
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NodeCrypto from "node:crypto";
 
 import {
@@ -28,7 +29,6 @@ import {
   type ManagedProcessTarget,
   type TerminalEvent,
 } from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -229,7 +229,7 @@ export const make = Effect.fn("ManagedProcesses.make")(function* (
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const serviceScope = yield* Effect.scope;
-  const platform = yield* HostProcessPlatform;
+  const platform = yield* HostProcess.Platform;
 
   const idleThresholdMs = Math.max(1, options.idleThresholdMs ?? DEFAULT_IDLE_THRESHOLD_MS);
   const registryLock = yield* Semaphore.make(1);

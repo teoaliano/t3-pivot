@@ -25,7 +25,7 @@ export function ComposerOptionRow(props: {
       aria-pressed={selected}
       onClick={onSelect}
       className={cn(
-        "group flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-primary/25",
+        "group flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/25",
         selected
           ? "bg-muted/55 text-foreground"
           : "bg-transparent text-foreground/85 hover:bg-muted/30",

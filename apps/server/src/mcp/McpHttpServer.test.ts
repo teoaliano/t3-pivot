@@ -17,11 +17,20 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { McpProtocol, McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
-import { HttpBody, HttpClient, HttpRouter, HttpServerResponse } from "effect/http";
+import { McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
+import {
+  HttpBody,
+  HttpClient,
+  HttpClientRequest,
+  HttpRouter,
+  HttpServerResponse,
+} from "effect/http";
 
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerConfig from "../config.ts";
+import * as ManagedProcesses from "../managedProcess/ManagedProcesses.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
 import * as McpToolAccessTestkit from "./McpToolAccess.testkit.ts";
@@ -60,6 +69,13 @@ const client = McpSchema.McpServerClient.of({
 });
 const layerTest = McpHttpServer.layerPreviewToolkit.pipe(
   Layer.provideMerge(McpServer.McpServer.layer),
+  Layer.provide(
+    Layer.mergeAll(
+      Layer.mock(ManagedProcesses.ManagedProcesses)({}),
+      Layer.mock(ProjectStore.ProjectStoreV2)({}),
+      Layer.mock(ServerSettings.ServerSettingsService)({}),
+    ),
+  ),
   Layer.provideMerge(McpToolAccessTestkit.liveThreadsLayer),
   Layer.provideMerge(PreviewAutomationBroker.layer),
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-http-server-test-" })),
@@ -746,17 +762,38 @@ it.effect("sheds log entries before locators when every list is full", () =>
 it.effect("terminates HTTP MCP sessions with DELETE", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const layerServer = McpServer.layerHttp({
-        name: "MCP termination test",
-        version: "1.0.0",
-        path: "/mcp",
-        protocols: [McpProtocol.v2025_06_18],
-      });
+      const token = "providerTokenWithoutDots";
+      const scope: McpInvocationContext.McpInvocationScope = {
+        environmentId,
+        requestNamespace: "provider-session",
+        thread: {
+          threadId: ThreadId.make("thread-provider"),
+          providerSessionId: "provider-session",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+        client: undefined,
+        capabilities: new Set(["orchestration"]),
+        issuedAt: 1,
+      };
+      const layerServer = McpHttpServer.layerMcpTransport.pipe(
+        Layer.provide(
+          Layer.mock(McpSessionRegistry.McpSessionRegistry)({
+            resolve: (presented) =>
+              Effect.succeed(
+                presented === token
+                  ? (scope as McpInvocationContext.McpThreadInvocationScope)
+                  : undefined,
+              ),
+          }),
+        ),
+      );
       yield* HttpRouter.serve(layerServer, {
         disableListenLog: true,
         disableLogger: true,
       }).pipe(Layer.build);
-      const httpClient = yield* HttpClient.HttpClient;
+      const httpClient = (yield* HttpClient.HttpClient).pipe(
+        HttpClient.mapRequest(HttpClientRequest.bearerToken(token)),
+      );
 
       const initializeResponse = yield* httpClient.post("/mcp", {
         headers: { accept: "application/json, text/event-stream" },

@@ -1,4 +1,4 @@
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -23,7 +23,7 @@ export class ProcessInspector extends Context.Service<
 
 export const make = Effect.gen(function* () {
   const runner = yield* ProcessRunner.ProcessRunner;
-  const platform = yield* HostProcessPlatform;
+  const platform = yield* HostProcess.Platform;
 
   const commandLine: ProcessInspector["Service"]["commandLine"] = (pid) =>
     runner
