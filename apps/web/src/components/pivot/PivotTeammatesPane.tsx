@@ -221,7 +221,7 @@ function TeammateCardBody(props: TeammateCardProps) {
       className={cn(
         SUBAGENT_ROW_CLASS,
         SUBAGENT_ROW_INTERACTIVE_CLASS,
-        "w-72 rounded-lg border bg-background/90",
+        "relative w-72 rounded-lg border bg-background/90",
         card.attention ? "border-warning/60" : "border-border",
       )}
     >
@@ -240,53 +240,58 @@ function TeammateCardBody(props: TeammateCardProps) {
         }
         title={card.title}
         statusLabel={card.label}
-        // The status takes the second line, as in a subagent row with no detail; the
+        // The title gets the card's width: status and time share the second line, and the
         // report, setup progress or error stays in the tooltip.
         showStatus
         detail={null}
         failed={card.status === "failed"}
-        trailing={elapsedLabel(card.since, props.nowMs)}
+        trailing={null}
+        statusSuffix={elapsedLabel(card.since, props.nowMs)}
         wrapTitle
-        actions={
-          <Menu>
-            <MenuTrigger
-              render={
-                <Button
-                  size="icon-micro"
-                  variant="ghost-muted"
-                  aria-label="Teammate actions"
-                  onClick={(event) => event.stopPropagation()}
-                />
-              }
-            >
-              <EllipsisIcon />
-            </MenuTrigger>
-            <MenuPopup side="bottom" align="end">
-              {OPEN_ACTIONS.map((action) => (
-                <MenuItem
-                  key={action.kind}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    props.onOpen(action.kind, card.threadId);
-                  }}
-                >
-                  {action.label}
-                </MenuItem>
-              ))}
-            </MenuPopup>
-          </Menu>
-        }
-        chevron
+        chevron={false}
       />
+      {/* Over the card's corner, beside the short status line, shown on hover or focus. */}
+      <span className="absolute right-1.5 bottom-1.5 inline-flex opacity-0 group-hover/subagent:opacity-100 focus-within:opacity-100 has-data-[popup-open]:opacity-100">
+        <Menu>
+          <MenuTrigger
+            render={
+              <Button
+                size="icon-micro"
+                variant="ghost-muted"
+                aria-label="Teammate actions"
+                onClick={(event) => event.stopPropagation()}
+              />
+            }
+          >
+            <EllipsisIcon />
+          </MenuTrigger>
+          <MenuPopup side="bottom" align="end">
+            {OPEN_ACTIONS.map((action) => (
+              <MenuItem
+                key={action.kind}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  props.onOpen(action.kind, card.threadId);
+                }}
+              >
+                {action.label}
+              </MenuItem>
+            ))}
+          </MenuPopup>
+        </Menu>
+      </span>
     </div>
   );
-  // The report, setup progress or error, which the card leaves to its tooltip.
-  return props.detail === null ? (
-    element
-  ) : (
+  // The full title, which two lines can cut short, then the report, setup progress or error.
+  return (
     <Tooltip>
       <TooltipTrigger delay={200} render={element} />
-      <TooltipPopup side="bottom">{props.detail}</TooltipPopup>
+      <TooltipPopup side="bottom">
+        <span className="block font-medium">{card.title}</span>
+        {props.detail !== null ? (
+          <span className="mt-1 block text-muted-foreground">{props.detail}</span>
+        ) : null}
+      </TooltipPopup>
     </Tooltip>
   );
 }
