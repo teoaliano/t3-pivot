@@ -200,6 +200,16 @@ const RPC_AGGREGATES = {
   [WS_METHODS.subscribeServerLifecycle]: "server",
   [WS_METHODS.subscribeAuthAccess]: "auth",
   [WS_METHODS.subscribeBackgroundPolicy]: "server",
+  [WS_METHODS.subscribeManagedProcesses]: "managed-process",
+  [WS_METHODS.subscribeManagedProcessOverview]: "managed-process",
+  [WS_METHODS.managedProcessStart]: "managed-process",
+  [WS_METHODS.managedProcessStop]: "managed-process",
+  [WS_METHODS.managedProcessSetPinned]: "managed-process",
+  [WS_METHODS.pivotSubscribe]: "pivot",
+  [WS_METHODS.pivotCreate]: "pivot",
+  [WS_METHODS.pivotAnswerDecision]: "pivot",
+  [WS_METHODS.pivotTeammateDetail]: "pivot",
+  [WS_METHODS.pivotDecisionLog]: "pivot",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";

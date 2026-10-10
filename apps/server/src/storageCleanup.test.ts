@@ -78,6 +78,11 @@ describe("V2 storage cleanup eligibility", () => {
     expect(storageCleanupThreadIdle(shell(), NOW_MS)).toBe(false);
   });
 
+  it("never removes a Pivot home, which a Pivot runs in without a branch", () => {
+    const pivot = shell({ worktreePath: "/home/.t3/userdata/pivot-homes/project-1" });
+    expect(storageCleanupThreadIdle(pivot, NOW_MS)).toBe(false);
+  });
+
   it.each(["running", "starting", "preparing", "waiting", "queued"] as const)(
     "retains a worktree while its thread is %s",
     (status) => {

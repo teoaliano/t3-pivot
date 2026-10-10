@@ -1,7 +1,9 @@
 import { presentThreadShell } from "@t3tools/client-runtime/state/models";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate, useParams } from "@tanstack/react-router";
+import type { PivotState } from "@t3tools/client-runtime/pivot-state";
 import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
+import { pivotTurnAnswersUser } from "@t3tools/shared/teammateStatus";
 import * as Option from "effect/Option";
 import {
   CircleAlertIcon,
@@ -9,7 +11,7 @@ import {
   MessageCircleQuestionIcon,
   ShieldQuestionIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useRef } from "react";
+import { type ReactNode, useCallback, useEffect, useRef } from "react";
 
 import { getClientSettings, useClientSettings } from "../hooks/useSettings";
 import { useEnvironmentIds } from "../state/environments";
@@ -21,7 +23,10 @@ import {
   setNotificationBadge,
   unlockNotificationAudio,
 } from "../threadNotifications";
+import { usePivotState } from "../state/pivot";
 import { resolveSidebarThreadStatus } from "./Sidebar.logic";
+import { pivotNoticesBetween } from "./pivot/pivotNotifications.logic";
+import { threadNotifiesUser } from "./sidebar/pivotNesting.logic";
 import { toastManager } from "./ui/toast";
 
 export function ThreadNotificationCoordinator() {
@@ -115,6 +120,82 @@ function EnvironmentNotifications({
     strict: false,
   });
   const previous = useRef(new Map<ThreadId, NotificationState>());
+  const pivotState = usePivotState(environmentId);
+
+  /** Plays the sound, then shows a toast while focused elsewhere, or a desktop notification. */
+  const emit = useCallback(
+    (notice: {
+      readonly kind: "input" | "completion";
+      readonly title: string;
+      readonly threadId: ThreadId;
+      readonly description: string;
+      readonly tone: "success" | "error" | "warning";
+      readonly icon: ReactNode;
+    }) => {
+      const open = () =>
+        void navigate({
+          to: "/$environmentId/$threadId",
+          params: { environmentId, threadId: notice.threadId },
+        });
+      if (hasNotificationSound(mode)) {
+        void playNotificationSound(notice.kind, () =>
+          hasNotificationSound(getClientSettings().notificationMode),
+        );
+      }
+      if (
+        inAppNotificationsEnabled &&
+        document.visibilityState === "visible" &&
+        document.hasFocus() &&
+        (activeEnvironmentId !== environmentId || activeThreadId !== notice.threadId)
+      ) {
+        const toastId = toastManager.add({
+          type: notice.tone,
+          title: notice.title,
+          description: notice.description,
+          data: { hideCopyButton: true, leadingIcon: notice.icon },
+          actionProps: {
+            children: "Open thread",
+            onClick: () => {
+              toastManager.close(toastId);
+              open();
+            },
+          },
+        });
+        return;
+      }
+      if (
+        !hasDesktopNotifications(mode) ||
+        (document.visibilityState === "visible" && document.hasFocus()) ||
+        typeof Notification === "undefined" ||
+        Notification.permission !== "granted"
+      )
+        return;
+      try {
+        const notification = new Notification(notice.title, {
+          body: notice.description,
+          tag: `${environmentId}:${notice.threadId}`,
+          silent: true,
+        });
+        onNotification(environmentId, notification);
+        notification.addEventListener("click", () => {
+          notification.close();
+          window.focus();
+          open();
+        });
+      } catch {
+        // Some browsers expose Notification but reject desktop presentation.
+      }
+    },
+    [
+      activeEnvironmentId,
+      activeThreadId,
+      environmentId,
+      inAppNotificationsEnabled,
+      mode,
+      navigate,
+      onNotification,
+    ],
+  );
 
   useEffect(() => {
     if (threads === null) {
@@ -131,6 +212,7 @@ function EnvironmentNotifications({
         continue;
       }
       const thread = presentThreadShell(environmentId, rawThread);
+      const isPivot = pivotState?.pivots[rawThread.id] !== undefined;
       let status = resolveSidebarThreadStatus(thread);
       if (status === "ready" && thread.latestRun?.status === "failed") status = "failed";
       const attention =
@@ -154,6 +236,11 @@ function EnvironmentNotifications({
             ? "completion"
             : null;
       if (!kind) continue;
+      // A teammate's news reaches the user through its Pivot, unless it holds for them.
+      if (!threadNotifiesUser(thread.id, pivotState, kind === "completion" ? "ready" : status))
+        continue;
+      // A Pivot finishing a turn the user did not start (a teammate wake) is not news.
+      if (kind === "completion" && isPivot && !pivotTurnAnswersUser(rawThread)) continue;
       const title =
         kind === "completion"
           ? "Thread completed"
@@ -164,84 +251,63 @@ function EnvironmentNotifications({
               : status === "failed"
                 ? "Thread failed"
                 : "Input needed";
-      if (hasNotificationSound(mode)) {
-        void playNotificationSound(kind, () =>
-          hasNotificationSound(getClientSettings().notificationMode),
-        );
-      }
-      if (
-        inAppNotificationsEnabled &&
-        document.visibilityState === "visible" &&
-        document.hasFocus() &&
-        (activeEnvironmentId !== environmentId || activeThreadId !== thread.id)
-      ) {
-        const toastId = toastManager.add({
-          type: kind === "completion" ? "success" : status === "failed" ? "error" : "warning",
-          title,
-          description: thread.title,
-          data: {
-            hideCopyButton: true,
-            leadingIcon:
-              kind === "completion" ? (
-                <CircleCheckIcon aria-hidden className="size-4 text-success-foreground" />
-              ) : status === "approval" ? (
-                <ShieldQuestionIcon aria-hidden className="size-4 text-warning-foreground" />
-              ) : status === "failed" ? (
-                <CircleAlertIcon aria-hidden className="size-4 text-destructive-foreground" />
-              ) : (
-                <MessageCircleQuestionIcon aria-hidden className="size-4 text-info-foreground" />
-              ),
-          },
-          actionProps: {
-            children: "Open thread",
-            onClick: () => {
-              toastManager.close(toastId);
-              void navigate({
-                to: "/$environmentId/$threadId",
-                params: { environmentId, threadId: thread.id },
-              });
-            },
-          },
-        });
-        continue;
-      }
-      if (
-        !hasDesktopNotifications(mode) ||
-        (document.visibilityState === "visible" && document.hasFocus()) ||
-        typeof Notification === "undefined" ||
-        Notification.permission !== "granted"
-      )
-        continue;
-      try {
-        const notification = new Notification(title, {
-          body: thread.title,
-          tag: `${environmentId}:${thread.id}`,
-          silent: true,
-        });
-        onNotification(environmentId, notification);
-        notification.addEventListener("click", () => {
-          notification.close();
-          window.focus();
-          void navigate({
-            to: "/$environmentId/$threadId",
-            params: { environmentId, threadId: thread.id },
-          });
-        });
-      } catch {
-        // Some browsers expose Notification but reject desktop presentation.
-      }
+      emit({
+        kind,
+        title,
+        threadId: thread.id,
+        description: thread.title,
+        tone: kind === "completion" ? "success" : status === "failed" ? "error" : "warning",
+        icon:
+          kind === "completion" ? (
+            <CircleCheckIcon aria-hidden className="size-4 text-success-foreground" />
+          ) : status === "approval" ? (
+            <ShieldQuestionIcon aria-hidden className="size-4 text-warning-foreground" />
+          ) : status === "failed" ? (
+            <CircleAlertIcon aria-hidden className="size-4 text-destructive-foreground" />
+          ) : (
+            <MessageCircleQuestionIcon aria-hidden className="size-4 text-info-foreground" />
+          ),
+      });
     }
     previous.current = next;
-  }, [
-    activeEnvironmentId,
-    activeThreadId,
-    environmentId,
-    inAppNotificationsEnabled,
-    mode,
-    navigate,
-    onNotification,
-    threads,
-  ]);
+  }, [emit, environmentId, pivotState, threads]);
+
+  // A Pivot also speaks up when it holds a decision for the user or a scout's
+  // findings are in.
+  const previousPivotState = useRef<PivotState | null>(null);
+  useEffect(() => {
+    if (pivotState === null) {
+      previousPivotState.current = null;
+      return;
+    }
+    const notices = pivotNoticesBetween(previousPivotState.current, pivotState);
+    previousPivotState.current = pivotState;
+    const titleOf = (pivotThreadId: ThreadId) =>
+      threads?.find((thread) => thread.id === pivotThreadId)?.title ?? "Pivot";
+    for (const notice of notices) {
+      emit(
+        notice.kind === "decision"
+          ? {
+              kind: "input",
+              title: "The Pivot needs you",
+              threadId: notice.pivotThreadId,
+              description: titleOf(notice.pivotThreadId),
+              tone: "warning",
+              icon: (
+                <MessageCircleQuestionIcon aria-hidden className="size-4 text-info-foreground" />
+              ),
+            }
+          : {
+              kind: "completion",
+              title: "Scout findings ready",
+              threadId: notice.pivotThreadId,
+              description: notice.teammateTitle,
+              tone: "success",
+              icon: <CircleCheckIcon aria-hidden className="size-4 text-success-foreground" />,
+            },
+      );
+    }
+  }, [emit, pivotState, threads]);
 
   return null;
 }

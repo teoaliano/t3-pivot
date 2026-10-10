@@ -325,6 +325,8 @@ export class GitLabPullRequestCli extends Context.Service<
       readonly number: number;
       readonly action: PullRequestAction;
       readonly mergeMethod?: PullRequestMergeMethod;
+      /** For `merge`: passed as `--sha`, so a moved head refuses. */
+      readonly expectedHeadSha?: string;
     }) => Effect.Effect<void, GitLabPullRequestCliError>;
 
     /** Whichever of the two is given is sent. GitLab calls a merge request's body its description. */
@@ -1374,10 +1376,22 @@ export const make = Effect.gen(function* () {
         }).pipe(Effect.asVoid);
       }
       const [subcommand, ...flags] = actionArgs(input.action, input.mergeMethod);
+      const pinned =
+        input.action === "merge" && input.expectedHeadSha !== undefined
+          ? ["--sha", input.expectedHeadSha]
+          : [];
       return gitlab
         .execute({
           cwd: input.cwd,
-          args: ["mr", subcommand!, String(input.number), "--repo", input.repository, ...flags],
+          args: [
+            "mr",
+            subcommand!,
+            String(input.number),
+            "--repo",
+            input.repository,
+            ...flags,
+            ...pinned,
+          ],
         })
         .pipe(Effect.asVoid);
     },

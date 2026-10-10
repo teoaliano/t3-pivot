@@ -26,6 +26,7 @@ import {
   formatProviderSubagentStatus,
   deriveRunlessWorkStartedAt,
   deriveThreadActivityRun,
+  runAsProviderSubagentStatus,
   deriveThreadRuntime,
   threadRuntimeHasInterruptibleRun,
 } from "./threadExecution.ts";
@@ -404,6 +405,30 @@ describe("deriveProviderSubagentStatus", () => {
   it("leaves T3 delegated tasks and ordinary threads alone", () => {
     expect(deriveProviderSubagentStatus(child("mcp"))).toBeNull();
     expect(deriveProviderSubagentStatus({ ...v2Projection, nodes: [root] })).toBeNull();
+  });
+});
+
+describe("runAsProviderSubagentStatus", () => {
+  it("shows a teammate's run in the subagent bar's terms", () => {
+    const run = {
+      runId: RunId.make("run-1"),
+      requestedAt: null,
+      startedAt: "2026-01-01T00:00:00.000Z",
+      completedAt: null,
+      assistantMessageId: null,
+    };
+    expect(runAsProviderSubagentStatus(null)).toBeNull();
+    expect(runAsProviderSubagentStatus({ ...run, status: "starting" })?.status).toBe("pending");
+    expect(
+      formatProviderSubagentStatus(
+        runAsProviderSubagentStatus({
+          ...run,
+          status: "completed",
+          completedAt: "2026-01-01T00:00:34.000Z",
+        }),
+        0,
+      ),
+    ).toBe("Completed in 34s");
   });
 });
 

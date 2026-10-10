@@ -55,6 +55,8 @@ export const BackgroundScope = Schema.Union([
   Schema.Struct({ type: Schema.Literal("git-refs"), cwd: Schema.String }),
   Schema.Struct({ type: Schema.Literal("diagnostics") }),
   Schema.Struct({ type: Schema.Literal("thread"), threadId: ThreadId }),
+  /** A preview is looking at this checkout, so its managed processes are in use. */
+  Schema.Struct({ type: Schema.Literal("managed-process"), checkoutPath: Schema.String }),
 ]);
 export type BackgroundScope = typeof BackgroundScope.Type;
 

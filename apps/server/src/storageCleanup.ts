@@ -36,6 +36,7 @@ import { forkParked } from "./serverActivation.ts";
 import * as Settings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import { isFilesystemRoot, managedWorktreesDirectories } from "./worktreesDirectory.ts";
+import * as ManagedProcesses from "./managedProcess/ManagedProcesses.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import { withWorkspaceLease } from "./workspace/workspaceLease.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -148,6 +149,7 @@ export const make = Effect.gen(function* () {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const gitManager = yield* GitManager.GitManager;
   const terminals = yield* TerminalManager.TerminalManager;
+  const managedProcesses = yield* ManagedProcesses.ManagedProcesses;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const liveTerminals = new Map<string, Map<string, TerminalSummary>>();
@@ -425,6 +427,8 @@ export const make = Effect.gen(function* () {
           )
         )
           return;
+        // The reservation stays: the checkout comes back at this path on resume.
+        yield* managedProcesses.stopAllForCheckout(worktreePath);
         yield* git.removeWorktree({ cwd: project.workspaceRoot, path: worktreePath, force: false });
         yield* gitManager.invalidateStatus(project.workspaceRoot);
         // Preserve branch and path: ProviderTurnStartService recreates the checkout

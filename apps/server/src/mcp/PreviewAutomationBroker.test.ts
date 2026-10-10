@@ -1364,6 +1364,38 @@ it.effect("discards buffered actions before completing an evicted host stream", 
   ),
 );
 
+it.effect("keeps the server's own browser connected when one of its requests times out", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const requests = requestsFrom(yield* broker.connect(makeHost(), { preferred: true }));
+      // A waitFor whose condition never holds answers after the broker gives up.
+      yield* Stream.runForEach(requests, (request) =>
+        request.operation === "waitFor"
+          ? Effect.void
+          : broker.respond({
+              clientId: "client-1",
+              connectionId: request.connectionId,
+              requestId: request.requestId,
+              ok: true,
+              result: { operation: request.operation },
+            }),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+
+      const timedOut = yield* broker
+        .invoke<void>({ scope, operation: "waitFor", input: {}, timeoutMs: 3_000 })
+        .pipe(Effect.flip, Effect.forkScoped);
+      yield* TestClock.adjust(3_000);
+      expect(yield* Fiber.join(timedOut)).toMatchObject({ _tag: "PreviewAutomationTimeoutError" });
+
+      expect(yield* broker.invoke({ scope, operation: "click", input: {} })).toEqual({
+        operation: "click",
+      });
+    }),
+  ),
+);
+
 it.effect("rejects a routed action when its generation is evicted before delivery", () =>
   Effect.scoped(
     Effect.gen(function* () {

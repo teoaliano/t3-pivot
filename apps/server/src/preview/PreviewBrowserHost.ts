@@ -44,9 +44,14 @@ profile t3-chrome-headless-shell /**/tools/chrome-headless-shell/*/*/chrome-head
 }
 `;
 
+/** Where fontconfig reads its config unless `FONTCONFIG_FILE` points elsewhere. */
+const FONTCONFIG_FILE = "/etc/fonts/fonts.conf";
+
 /**
  * Chrome's Debian dependencies that minimal images leave out, from the headless
- * shell's deb.deps. Ubuntu 24.04 and Debian 13 renamed some with a `t64`
+ * shell's deb.deps, plus fontconfig for its config. The shell links fontconfig
+ * in, so `ldd` never reports it, but without a config and fonts Skia aborts the
+ * first time a page draws text. Ubuntu 24.04 and Debian 13 renamed some with a `t64`
  * suffix; setup installs whichever name the host's apt offers.
  */
 export const DEBIAN_PACKAGES: ReadonlyArray<ReadonlyArray<string>> = [
@@ -67,6 +72,8 @@ export const DEBIAN_PACKAGES: ReadonlyArray<ReadonlyArray<string>> = [
   ["libgbm1"],
   ["libasound2t64", "libasound2"],
   ["libexpat1"],
+  ["fontconfig"],
+  ["fonts-liberation"],
 ];
 
 export class PreviewBrowserSandboxError extends Schema.TaggedError<PreviewBrowserSandboxError>()(
@@ -156,3 +163,14 @@ export const sandboxBlocked = Effect.gen(function* () {
   if (!restricted) return false;
   return !(yield* fs.exists(APPARMOR_PROFILE_PATH).pipe(Effect.orElseSucceed(() => false)));
 }).pipe(Effect.withSpan("PreviewBrowserHost.sandboxBlocked"));
+
+/**
+ * Whether this host has no fonts for Chrome: no fontconfig config, so the
+ * browser launches and then aborts on the first page that draws text.
+ */
+export const fontsMissing = Effect.gen(function* () {
+  if ((yield* HostProcess.Platform) !== "linux") return false;
+  if ((yield* HostProcess.Environment).FONTCONFIG_FILE) return false;
+  const fs = yield* FileSystem.FileSystem;
+  return !(yield* fs.exists(FONTCONFIG_FILE).pipe(Effect.orElseSucceed(() => true)));
+}).pipe(Effect.withSpan("PreviewBrowserHost.fontsMissing"));

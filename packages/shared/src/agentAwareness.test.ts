@@ -25,6 +25,8 @@ describe("projectThreadAwarenessV2", () => {
         OrchestrationV2ThreadShell,
         | "activityRunStatus"
         | "status"
+        | "latestRunRequestedAt"
+        | "latestUserAuthoredMessageAt"
         | "pendingBackgroundTasks"
         | "pendingRuntimeRequest"
         | "lineage"
@@ -74,6 +76,71 @@ describe("projectThreadAwarenessV2", () => {
       ).toBeNull();
     },
   );
+
+  it.each(["running", "completed", "failed"] as const)(
+    "publishes nothing for a %s T3 Pivot teammate",
+    (status) => {
+      expect(
+        projectThreadAwarenessV2({
+          environmentId: "env-1" as EnvironmentId,
+          project,
+          thread: v2Thread({ status }),
+          pivotRole: { kind: "teammate" },
+        }),
+      ).toBeNull();
+    },
+  );
+
+  it("publishes a T3 Pivot teammate held on the user's answer", () => {
+    const teammate = (kind: "user_input" | "command") =>
+      projectThreadAwarenessV2({
+        environmentId: "env-1" as EnvironmentId,
+        project,
+        thread: v2Thread({
+          status: "waiting",
+          pendingRuntimeRequest: {
+            id: RuntimeRequestId.make("request-1"),
+            kind,
+            createdAt: updatedAt,
+          },
+        }),
+        pivotRole: { kind: "teammate" },
+      });
+    expect(teammate("user_input")).toMatchObject({ phase: "waiting_for_input" });
+    expect(teammate("command")).toMatchObject({ phase: "waiting_for_approval" });
+  });
+
+  it("reads a Pivot holding decisions for the user as waiting for input", () => {
+    const pivot = (escalatedDecisions: number) =>
+      projectThreadAwarenessV2({
+        environmentId: "env-1" as EnvironmentId,
+        project,
+        thread: v2Thread({ status: "idle" }),
+        pivotRole: { kind: "pivot", escalatedDecisions },
+      });
+    expect(pivot(1)).toMatchObject({ phase: "waiting_for_input" });
+    expect(pivot(0)).toBeNull();
+  });
+
+  it("reports a Pivot finishing only a turn that answered the user", () => {
+    const at = (iso: string) => DateTime.makeUnsafe(iso);
+    const pivot = (requestedAt: string, authoredAt: string) =>
+      projectThreadAwarenessV2({
+        environmentId: "env-1" as EnvironmentId,
+        project,
+        thread: v2Thread({
+          status: "completed",
+          latestRunRequestedAt: at(requestedAt),
+          latestUserAuthoredMessageAt: at(authoredAt),
+        }),
+        pivotRole: { kind: "pivot", escalatedDecisions: 0 },
+      });
+    expect(pivot("2026-10-06T10:00:00.000Z", "2026-10-06T10:00:00.000Z")).toMatchObject({
+      phase: "completed",
+    });
+    // A wake started the run after the user's last message.
+    expect(pivot("2026-10-06T11:00:00.000Z", "2026-10-06T10:00:00.000Z")).toBeNull();
+  });
 
   it("keeps an older activity run visible over a newer cancelled run", () => {
     expect(

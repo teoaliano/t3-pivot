@@ -1,5 +1,8 @@
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import * as ManagedProcesses from "../managedProcess/ManagedProcesses.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import { expect, it } from "@effect/vitest";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -67,6 +70,14 @@ const client = McpSchema.McpServerClient.of({
 const layerTest = McpHttpServer.layerPreviewToolkit.pipe(
   Layer.provideMerge(McpServer.McpServer.layer),
   Layer.provideMerge(McpToolAccessTestkit.liveThreadsLayer),
+  // The managed-process tools registered beside the preview ones; unused here.
+  Layer.provide(
+    Layer.mergeAll(
+      Layer.mock(ManagedProcesses.ManagedProcesses)({}),
+      Layer.mock(ProjectStore.ProjectStoreV2)({}),
+      Layer.mock(ServerSettings.ServerSettingsService)({}),
+    ),
+  ),
   Layer.provideMerge(PreviewAutomationBroker.layer),
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-http-server-test-" })),
   Layer.provideMerge(NodeServices.layer),

@@ -1466,3 +1466,57 @@ it.layer(layerTest)("delegated tasks across a server restart", (it) => {
     }),
   );
 });
+
+// T3 Pivot: a teammate wake is routed like a delegated task's result, and joins one
+// still queued so changes that land before delivery reach the Pivot as one notice.
+it.layer(layerTest)("teammate wakes", (it) => {
+  const wake = (threadId: ThreadId, name: string, teammateThreadIds: ReadonlyArray<ThreadId>) =>
+    Effect.flatMap(Orchestrator.OrchestratorV2, (orchestrator) =>
+      orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make(`command:teammate-wake:${name}`),
+        threadId,
+        messageId: MessageId.make(`message:teammate-wake:${name}`),
+        text: `Teammates changed: ${teammateThreadIds.join(", ")}`,
+        notification: {
+          source: { kind: "teammate", teammateThreadIds },
+          outcome: "updated",
+          summary: `${teammateThreadIds.length} teammates changed`,
+        },
+        attachments: [],
+        dispatchMode: { type: "queue_after_active" },
+        createdBy: "agent",
+        creationSource: "server",
+      }),
+    );
+
+  it.effect("a wake queued behind a running turn absorbs the next one", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("teammate-wake-join");
+      yield* seedParentWithTerminalTask({
+        threadId,
+        projectId: ProjectId.make("teammate-wake-project"),
+        runId: RunId.make("teammate-wake-running"),
+        rootNodeId: NodeId.make("teammate-wake-root"),
+        taskId: NodeId.make("teammate-wake-task"),
+        deliveryState: "delivered",
+        now,
+      });
+
+      yield* wake(threadId, "first", [ThreadId.make("teammate-a")]);
+      yield* wake(threadId, "second", [ThreadId.make("teammate-a"), ThreadId.make("teammate-b")]);
+
+      const projection = yield* orchestrator.getThreadProjection(threadId);
+      const queued = projection.runs.filter((run) => run.status === "queued");
+      assert.equal(queued.length, 1);
+      const message = projection.messages.find((row) => row.id === queued[0]?.userMessageId);
+      assert.equal(message?.text, "Teammates changed: teammate-a, teammate-b");
+      assert.deepEqual(message?.notification?.source, {
+        kind: "teammate",
+        teammateThreadIds: [ThreadId.make("teammate-a"), ThreadId.make("teammate-b")],
+      });
+    }),
+  );
+});

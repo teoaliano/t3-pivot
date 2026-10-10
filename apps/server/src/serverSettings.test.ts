@@ -549,6 +549,60 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     ).pipe(Effect.provide(layerServerSettings())),
   );
 
+  it.effect("persists the Pivot model and teammate models, globally and per project", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const serverConfig = yield* ServerConfig.ServerConfig;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+        const pivotModel = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" };
+        const research = {
+          name: "research",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5.4",
+            options: [{ id: "reasoningEffort", value: "high" }],
+          },
+          description: "Investigations.",
+          isDefault: true,
+        };
+        const quickFix = {
+          name: "quick-fix",
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4-mini" },
+          description: "",
+          isDefault: false,
+        };
+        const projectId = ProjectId.make("project-1");
+
+        yield* serverSettings.updateSettings({
+          pivotModelSelection: pivotModel,
+          teammateModels: [research, quickFix],
+          projectSettingsOverrides: { [projectId]: { teammateModels: [quickFix] } },
+        });
+        // A shorter list replaces the old one instead of merging into it.
+        const next = yield* serverSettings.updateSettings({ teammateModels: [quickFix] });
+        const persisted = JSON.parse(
+          yield* fileSystem.readFileString(serverConfig.settingsPath),
+        ) as Record<string, any>;
+
+        assert.deepStrictEqual(next.pivotModelSelection, pivotModel);
+        assert.deepStrictEqual(next.teammateModels, [quickFix]);
+        assert.deepStrictEqual(persisted.pivotModelSelection, pivotModel);
+        assert.deepStrictEqual(persisted.teammateModels, [quickFix]);
+        assert.deepStrictEqual(persisted.projectSettingsOverrides[projectId].teammateModels, [
+          quickFix,
+        ]);
+
+        const cleared = yield* serverSettings.updateSettings({
+          pivotModelSelection: null,
+          teammateModels: [],
+        });
+        assert.isNull(cleared.pivotModelSelection);
+        assert.deepStrictEqual(cleared.teammateModels, []);
+      }),
+    ).pipe(Effect.provide(layerServerSettings())),
+  );
+
   it.effect("preserves model when switching providers via textGenerationModelSelection", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;

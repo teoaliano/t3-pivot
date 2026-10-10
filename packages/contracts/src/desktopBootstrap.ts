@@ -33,6 +33,14 @@ export const DesktopBackendBootstrap = Schema.Struct({
 
 export type DesktopBackendBootstrap = typeof DesktopBackendBootstrap.Type;
 
+// The server exits with this code when another live server already owns its
+// T3 home. The desktop stops restarting the backend and tells the user.
+export const DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE = 75;
+
+// The server exits with this code when a newer build already migrated its
+// database. The desktop stops and tells the user.
+export const DESKTOP_BACKEND_DATABASE_NEWER_EXIT_CODE = 76;
+
 /** Written to `<t3Home>/runtime` just before the desktop app stops its
     backend to install an update. The updated app starts a new backend right
     away, so a backend that sees a fresh marker at shutdown keeps its managed

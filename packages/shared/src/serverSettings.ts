@@ -385,6 +385,10 @@ export function applyServerSettingsPatch(
     ...(patch.defaultProjectScripts !== undefined
       ? { defaultProjectScripts: patch.defaultProjectScripts }
       : {}),
+    ...(patch.pivotModelSelection !== undefined
+      ? { pivotModelSelection: patch.pivotModelSelection }
+      : {}),
+    ...(patch.teammateModels !== undefined ? { teammateModels: patch.teammateModels } : {}),
     ...(usageLimitSourcesPatch !== undefined
       ? {
           usageLimitSources: mergeSettingsEntries(

@@ -1,0 +1,71 @@
+import {
+  ManagedProcessScriptNotFoundError,
+  ManagedProcessThreadNotFoundError,
+  type ThreadId,
+} from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
+import { isDevProjectScript, resolveProjectScripts } from "@t3tools/shared/projectScripts";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+
+import { ThreadManagementService } from "../orchestration-v2/ThreadManagementService.ts";
+import { ProjectStoreV2 } from "../orchestration-v2/ProjectStore.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
+import { DETECTED_DEV_SCRIPT_ID, readDetectedDevScript } from "./detectDevScript.ts";
+import type { ManagedScriptTarget } from "./ManagedProcesses.ts";
+
+/** Names an agent is likely to use for the detected script. */
+const DETECTED_SCRIPT_NAMES = new Set([DETECTED_DEV_SCRIPT_ID, "dev", "dev server"]);
+
+/**
+ * Resolves a thread and one of its project's scripts to what the managed
+ * process service runs. The checkout is the thread's worktree, or the
+ * project's root for a thread that runs in the main checkout. `scriptId`
+ * also matches a script's name, which is what an agent is likely to know.
+ * Without one, the first dev action is the server. A project with no dev
+ * action falls back to the checkout's detected `package.json` dev script.
+ */
+export const resolveManagedScriptTarget = Effect.fn("resolveManagedScriptTarget")(function* (
+  threadId: ThreadId,
+  scriptId: string | undefined,
+) {
+  const threads = yield* ThreadManagementService;
+  const projects = yield* ProjectStoreV2;
+  const settings = yield* ServerSettingsService;
+  const thread = yield* threads.getThreadShell(threadId).pipe(Effect.orDie);
+  const project =
+    thread === null ? Option.none() : yield* projects.getShell(thread.projectId).pipe(Effect.orDie);
+  if (thread === null || Option.isNone(project)) {
+    return yield* new ManagedProcessThreadNotFoundError({ threadId });
+  }
+  const scripts = resolveProjectScripts(
+    yield* settings.getSettings.pipe(Effect.orDie),
+    project.value,
+  );
+  const checkoutPath = thread.worktreePath ?? project.value.workspaceRoot;
+  const named =
+    scriptId === undefined
+      ? scripts.find(isDevProjectScript)
+      : (scripts.find((candidate) => candidate.id === scriptId) ??
+        scripts.find((candidate) => candidate.name.toLowerCase() === scriptId.toLowerCase()));
+  const wantsDetected =
+    !scripts.some(isDevProjectScript) &&
+    (scriptId === undefined || DETECTED_SCRIPT_NAMES.has(scriptId.toLowerCase()));
+  const script =
+    named ??
+    (wantsDetected
+      ? yield* readDetectedDevScript(checkoutPath, yield* HostProcess.Platform)
+      : null);
+  if (!script) {
+    return yield* new ManagedProcessScriptNotFoundError({
+      scriptId: scriptId ?? "",
+      availableScripts: scripts.map((candidate) => candidate.name),
+    });
+  }
+  return {
+    checkoutPath,
+    projectRoot: project.value.workspaceRoot,
+    worktreePath: thread.worktreePath,
+    script: { id: script.id, name: script.name, command: script.command },
+  } satisfies ManagedScriptTarget;
+});

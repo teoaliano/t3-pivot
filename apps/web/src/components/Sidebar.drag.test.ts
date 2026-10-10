@@ -253,6 +253,32 @@ describe("sidebar collision detection", () => {
 });
 
 describe("sidebar drag projection", () => {
+  it("keeps a thread dragged over a Pivot under the Threads header", () => {
+    const items = [
+      pinnedHeader,
+      divider,
+      marker("active-placeholder"),
+      marker("pivots-header"),
+      thread("pivot", "active"),
+      marker("threads-header"),
+      thread("t1", "active"),
+      thread("t2", "active"),
+      settledHeader,
+      marker("settled-placeholder"),
+    ];
+    const result = preview(
+      { items, settledOrder: [], settledExpanded: true, pivotKeys: new Set(["pivot"]) },
+      "t2",
+      "pivot",
+    );
+    // The headers and the Pivot shift together (only the empty placeholder
+    // drops out); t2 only moves within Threads, so t1 slides one card down.
+    const shift = result.get("pivot")?.y ?? Number.NaN;
+    expect(result.get(sidebarMarkerId("pivots-header"))?.y).toBe(shift);
+    expect(result.get(sidebarMarkerId("threads-header"))?.y).toBe(shift);
+    expect(result.get("t1")?.y).toBe(shift + 83);
+  });
+
   it.each([
     ["a2", "a1"],
     ["p", "a1"],

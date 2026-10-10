@@ -269,6 +269,9 @@ export const make = Effect.gen(function* () {
           number: input.number,
           action: input.action,
           ...(input.mergeMethod === undefined ? {} : { mergeMethod: input.mergeMethod }),
+          ...(input.expectedHeadSha === undefined
+            ? {}
+            : { expectedHeadSha: input.expectedHeadSha }),
         })
         .pipe(Effect.mapError(fail("runAction"))),
 

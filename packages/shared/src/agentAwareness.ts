@@ -7,6 +7,7 @@ import type {
 import * as DateTime from "effect/DateTime";
 
 import { backgroundWorkHoldsCompletion } from "./orchestrationV2PendingBackgroundWork.ts";
+import { pivotTurnAnswersUser } from "./teammateStatus.ts";
 
 export type AgentAwarenessPhase =
   | "starting"
@@ -37,13 +38,25 @@ function buildAgentAwarenessDeepLink(input: {
   return `/threads/${encodeURIComponent(input.environmentId)}/${encodeURIComponent(input.threadId)}`;
 }
 
+/**
+ * A thread's role in T3 Pivot's Pivot mode. A teammate publishes only while a question
+ * or approval holds it for the user; the rest of its news reaches the user through its
+ * Pivot. A Pivot holding decisions for the user is waiting for their input.
+ */
+export type ThreadAwarenessPivotRole =
+  | { readonly kind: "teammate" }
+  | { readonly kind: "pivot"; readonly escalatedDecisions: number };
+
 export interface ProjectThreadAwarenessV2Input {
   readonly environmentId: EnvironmentId;
+  readonly pivotRole?: ThreadAwarenessPivotRole | null;
   readonly project: Pick<Project, "title">;
   readonly thread: Pick<
     OrchestrationV2ThreadShell,
     | "activityRunStatus"
     | "id"
+    | "latestRunRequestedAt"
+    | "latestUserAuthoredMessageAt"
     | "lineage"
     | "modelSelection"
     | "pendingBackgroundTasks"
@@ -60,8 +73,23 @@ export function projectThreadAwarenessV2(
 ): AgentAwarenessState | null {
   const { environmentId, project, thread } = input;
   if (thread.lineage.relationshipToParent === "subagent") return null;
-  const phase = resolveThreadAwarenessPhaseV2(thread);
+  const phase = resolveThreadAwarenessPhaseV2(
+    thread,
+    input.pivotRole?.kind === "pivot" && input.pivotRole.escalatedDecisions > 0,
+  );
   if (phase === null) {
+    return null;
+  }
+  if (
+    input.pivotRole?.kind === "teammate" &&
+    phase !== "waiting_for_input" &&
+    phase !== "waiting_for_approval"
+  ) {
+    return null;
+  }
+  // A Pivot reports finishing only a turn that answered the user, not one spent on
+  // teammate news: in Pivot mode the user hears what needs them, not every wake.
+  if (phase === "completed" && input.pivotRole?.kind === "pivot" && !pivotTurnAnswersUser(thread)) {
     return null;
   }
   const detail =
@@ -86,6 +114,7 @@ export function projectThreadAwarenessV2(
 
 function resolveThreadAwarenessPhaseV2(
   thread: ProjectThreadAwarenessV2Input["thread"],
+  holdsDecisionsForUser = false,
 ): AgentAwarenessPhase | null {
   if (thread.pendingRuntimeRequest?.kind === "user_input") {
     return "waiting_for_input";
@@ -96,6 +125,8 @@ function resolveThreadAwarenessPhaseV2(
   ) {
     return "waiting_for_approval";
   }
+  // An escalated decision is a question for the user, whatever the run is doing.
+  if (holdsDecisionsForUser) return "waiting_for_input";
   switch (thread.activityRunStatus ?? thread.status) {
     case "preparing":
     case "starting":

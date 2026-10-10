@@ -56,7 +56,11 @@ import { Command, Flag } from "effect/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
-const DESKTOP_APP_ID = "com.t3tools.t3code";
+// T3 Pivot's identity. electron-builder derives the updater cache directory
+// from the staged package name (`t3pivot-updater`), so both stay distinct
+// from Alpha's and the two apps install side by side.
+const DESKTOP_APP_ID = "com.teoaliano.t3pivot";
+const DESKTOP_PACKAGE_NAME = "t3pivot";
 const APPLE_TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/u;
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
@@ -947,6 +951,8 @@ interface StagePackageJson {
   readonly buildVersion: string;
   readonly t3codeCommitHash: string;
   readonly t3codeWebAuthn?: MacWebAuthnEntitlements;
+  /** T3 Pivot only: the upstream nightly tag this build is based on. */
+  readonly t3codeUpstreamBaseTag?: string;
   readonly private: true;
   readonly packageManager: string;
   readonly description: string;
@@ -1397,6 +1403,28 @@ export function renderMacPasskeyEntitlements(
     <array>
 ${associatedDomains}
     </array>${keychainAccessGroups}${browserPasskeys}
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+  </dict>
+</plist>
+`;
+}
+
+/**
+ * Entitlements for T3 Pivot's Developer ID builds. T3 Connect's passkey domain
+ * names upstream's team, so the fork drops the associated-domain entitlements
+ * and the provisioning profile they need, keeping only the hardened-runtime
+ * exceptions Electron and the bundled server require.
+ */
+export function renderMacHardenedRuntimeEntitlements(): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
@@ -2749,7 +2777,8 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   macPasskeySigning:
     | {
         readonly entitlementsPath: string;
-        readonly provisioningProfilePath: string;
+        // Absent in Developer ID mode, which carries no passkey entitlements.
+        readonly provisioningProfilePath?: string;
       }
     | undefined,
   // Windows only, and false when no Linux CLI archive was handed to the build:
@@ -2761,7 +2790,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_APP_ID,
     productName: resolveDesktopProductName(version),
-    artifactName: "T3-Code-${version}-${arch}.${ext}",
+    artifactName: "T3-Pivot-${version}-${arch}.${ext}",
     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
     files: [
       ...DESKTOP_FILE_EXCLUSIONS,
@@ -2838,11 +2867,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         },
       ],
       ...(signed ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") } : {}),
-      ...(macPasskeySigning
-        ? {
-            entitlements: macPasskeySigning.entitlementsPath,
-            provisioningProfile: macPasskeySigning.provisioningProfilePath,
-          }
+      ...(macPasskeySigning ? { entitlements: macPasskeySigning.entitlementsPath } : {}),
+      ...(macPasskeySigning?.provisioningProfilePath
+        ? { provisioningProfile: macPasskeySigning.provisioningProfilePath }
         : {}),
     };
   }
@@ -3575,6 +3602,10 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const appVersion = options.version ?? serverPackageJson.version;
   const iconAssets = resolveDesktopBuildIconAssets(appVersion);
   const commitHash = yield* resolveGitCommitHash(repoRoot);
+  // Set by `pivot release`; the app compares it with upstream's newest nightly.
+  const upstreamBaseTag = Option.getOrUndefined(
+    yield* Config.String("T3CODE_UPSTREAM_BASE_TAG").pipe(Config.option),
+  )?.trim();
   const mkdir = options.keepStage ? fs.makeTempDirectory : fs.makeTempDirectoryScoped;
   const stageRoot = yield* mkdir({
     prefix: `t3code-desktop-${options.platform}-stage-`,
@@ -3761,8 +3792,14 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const stageProdResourcesDir = path.join(stageAppDir, "apps/desktop/prod-resources");
   yield* fs.copy(stageResourcesDir, stageProdResourcesDir);
 
+  // T3 Pivot signs with a plain Developer ID and no passkey entitlements; see
+  // renderMacHardenedRuntimeEntitlements.
+  const macDeveloperIdSigning =
+    options.platform === "mac" &&
+    options.signed &&
+    loadRepoEnv({ repoRoot }).T3CODE_MACOS_SIGNING_MODE?.trim() === "developer-id";
   const configuredMacPasskeySigning =
-    options.platform === "mac" && options.signed
+    options.platform === "mac" && options.signed && !macDeveloperIdSigning
       ? yield* Effect.try({
           try: () => resolveMacPasskeySigningConfiguration(loadRepoEnv({ repoRoot })),
           catch: MacPasskeySigningConfigurationResolutionError.fromCause,
@@ -3777,9 +3814,13 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         ),
       }
     : undefined;
-  const macEntitlementsPath = macPasskeySigning
-    ? path.join(stageAppDir, "entitlements.mac.plist")
-    : undefined;
+  const macEntitlementsPath =
+    macPasskeySigning || macDeveloperIdSigning
+      ? path.join(stageAppDir, "entitlements.mac.plist")
+      : undefined;
+  if (macDeveloperIdSigning && macEntitlementsPath) {
+    yield* fs.writeFileString(macEntitlementsPath, renderMacHardenedRuntimeEntitlements());
+  }
   let macWebAuthn: MacWebAuthnEntitlements | undefined;
   if (macPasskeySigning && macEntitlementsPath) {
     if (!(yield* fs.exists(macPasskeySigning.provisioningProfilePath))) {
@@ -3823,12 +3864,13 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       ? path.join(stageAppDir, WINDOWS_SERVER_RESOURCE_SOURCE_DIR, WINDOWS_SERVER_ASAR_RESOURCE)
       : undefined;
   const stagePackageJson: StagePackageJson = {
-    name: "t3code",
+    name: DESKTOP_PACKAGE_NAME,
     version: appVersion,
     buildVersion: appVersion,
     t3codeCommitHash: commitHash,
     // Read by apps/desktop/src/preview/Passkeys.ts; must match the signed entitlements.
     ...(macWebAuthn ? { t3codeWebAuthn: macWebAuthn } : {}),
+    ...(upstreamBaseTag ? { t3codeUpstreamBaseTag: upstreamBaseTag } : {}),
     private: true,
     packageManager: rootPackageJson.packageManager,
     description:
@@ -3850,7 +3892,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
             entitlementsPath: macEntitlementsPath,
             provisioningProfilePath: macPasskeySigning.provisioningProfilePath,
           }
-        : undefined,
+        : macDeveloperIdSigning && macEntitlementsPath
+          ? { entitlementsPath: macEntitlementsPath }
+          : undefined,
       bundlesWslRuntime({ platform: options.platform, runtimeArchivePath: options.wslRuntime }),
       options.arch,
     ),

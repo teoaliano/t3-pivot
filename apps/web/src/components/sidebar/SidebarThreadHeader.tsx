@@ -35,6 +35,8 @@ export interface SidebarThreadHeaderProps {
   /** Receives the click so Shift+click can skip the project picker. */
   onNewThread: (event: ReactMouseEvent) => void;
   newThreadDisabled: boolean;
+  /** T3 Pivot: the New Pivot button, beside new thread. */
+  newPivot?: ReactNode;
   newThreadShortcutLabel: string | null | undefined;
   newThreadInProjectShortcutLabel: string | null | undefined;
   /** Shift+click only matters once there is more than one project to pick. */
@@ -56,6 +58,7 @@ export function SidebarThreadHeader({
   onNewProject,
   onNewThread,
   newThreadDisabled,
+  newPivot,
   newThreadShortcutLabel,
   newThreadInProjectShortcutLabel,
   showNewThreadInProjectHint,
@@ -132,6 +135,7 @@ export function SidebarThreadHeader({
             </SidebarHeaderIconButton>
           </>
         ) : null}
+        {newPivot}
         <SidebarHeaderIconButton
           label="New thread"
           tooltip={

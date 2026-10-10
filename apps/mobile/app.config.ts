@@ -113,6 +113,12 @@ const variant = VARIANT_CONFIG[APP_VARIANT];
 const iosBundleIdentifier = isIosPersonalTeamBuild
   ? personalTeamBundleIdentifier!
   : variant.iosBundleIdentifier;
+// Personal Team builds are T3 Pivot, never the store app: show the fork's name and keep
+// upstream's OTA updates from replacing the bundled JS.
+const appName = isIosPersonalTeamBuild
+  ? variant.appName.replace("T3 Code", "T3 Pivot")
+  : variant.appName;
+const updatesEnabled = !isIosPersonalTeamBuild && repoEnv.T3CODE_MOBILE_UPDATES_ENABLED !== "0";
 
 const dmSansFonts = {
   regular: "@expo-google-fonts/dm-sans/400Regular/DMSans_400Regular.ttf",
@@ -225,7 +231,7 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
 // family names without waiting for runtime font loading.
 
 const config: ExpoConfig = {
-  name: variant.appName,
+  name: appName,
   slug: "t3-code",
   platforms: ["ios", "android"],
   scheme: variant.scheme,
@@ -240,7 +246,7 @@ const config: ExpoConfig = {
   icon: variant.assets.appIcon,
   userInterfaceStyle: "automatic",
   updates: {
-    enabled: repoEnv.T3CODE_MOBILE_UPDATES_ENABLED !== "0",
+    enabled: updatesEnabled,
     url: "https://u.expo.dev/d763fcb8-d37c-41ea-a773-b54a0ab4a454",
     checkAutomatically: "ON_LOAD",
     fallbackToCacheTimeout: 0,
