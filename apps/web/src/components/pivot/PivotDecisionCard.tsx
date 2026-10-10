@@ -1,5 +1,5 @@
 import type { PivotDecision } from "@t3tools/contracts";
-import { CheckIcon, ShieldIcon, SplitIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, ShieldIcon, SplitIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 
 import { cn } from "~/lib/utils";
@@ -31,10 +31,88 @@ export interface PivotDecisionCardProps {
  */
 export function PivotDecisionCard(props: PivotDecisionCardProps) {
   if (props.decision.userAnswer !== null) return <AnsweredDecision {...props} />;
-  return props.decision.escalation?.asksApproval === true ? (
-    <ApprovalDecision {...props} />
-  ) : (
-    <QuestionDecision {...props} />
+  return <OpenDecision {...props} />;
+}
+
+/** Decisions the user minimized, remembered for the session; a new decision opens expanded. */
+const minimizedDecisions = new Set<string>();
+
+/**
+ * An open decision, or the slim row it minimizes to. Minimizing neither answers nor
+ * dismisses it, and the expanded box stays mounted underneath so a half-typed answer
+ * survives.
+ */
+function OpenDecision(props: PivotDecisionCardProps) {
+  const id = props.decision.decisionId;
+  const [minimized, setMinimizedState] = useState(() => minimizedDecisions.has(id));
+  const setMinimized = (next: boolean) => {
+    if (next) minimizedDecisions.add(id);
+    else minimizedDecisions.delete(id);
+    setMinimizedState(next);
+  };
+  const approval = props.decision.escalation?.asksApproval === true;
+  return (
+    <>
+      {minimized ? (
+        <MinimizedDecision {...props} approval={approval} onExpand={() => setMinimized(false)} />
+      ) : null}
+      <div hidden={minimized}>
+        {approval ? (
+          <ApprovalDecision {...props} onMinimize={() => setMinimized(true)} />
+        ) : (
+          <QuestionDecision {...props} active={!minimized} onMinimize={() => setMinimized(true)} />
+        )}
+      </div>
+    </>
+  );
+}
+
+/** One row that still says a decision waits: its kind, the question, and where it sits. */
+function MinimizedDecision({
+  decision,
+  asker,
+  position,
+  approval,
+  onExpand,
+}: PivotDecisionCardProps & { approval: boolean; onExpand: () => void }) {
+  return (
+    <ComposerBanner.Root placement="floating" className="mb-2" data-pivot-decision="minimized">
+      <ComposerBanner.Row render={<button type="button" />} title="Expand" onClick={onExpand}>
+        <ComposerBanner.Icon className={approval ? "text-warning" : undefined}>
+          {approval ? <ShieldIcon /> : <SplitIcon />}
+        </ComposerBanner.Icon>
+        <ComposerBanner.Content>
+          <span
+            className={cn(
+              "shrink-0 font-medium",
+              approval ? "text-warning" : "text-muted-foreground",
+            )}
+          >
+            {approval ? "Approval" : `${asker} asks`}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-foreground">
+            {questionsOf(decision).join(" ")}
+          </span>
+        </ComposerBanner.Content>
+        <ComposerBanner.Actions>
+          {position !== null ? (
+            <span className="text-3xs font-medium text-muted-foreground tabular-nums">
+              {position.index + 1}/{position.total}
+            </span>
+          ) : null}
+          <ComposerBanner.ToggleIcon expanded={false} />
+        </ComposerBanner.Actions>
+      </ComposerBanner.Row>
+    </ComposerBanner.Root>
+  );
+}
+
+/** The expanded box's minimize control, in the banner's own icon-button style. */
+function MinimizeButton(props: { onMinimize: () => void }) {
+  return (
+    <ComposerBanner.Dismiss aria-label="Minimize" title="Minimize" onClick={props.onMinimize}>
+      <ChevronDownIcon className="size-3.5" />
+    </ComposerBanner.Dismiss>
   );
 }
 
@@ -88,12 +166,13 @@ function QuestionDecision({
   sending,
   bodyMaxHeight,
   onAnswer,
-}: PivotDecisionCardProps) {
+  active,
+  onMinimize,
+}: PivotDecisionCardProps & { active: boolean; onMinimize: () => void }) {
   const escalation = decision.escalation;
   const options = escalation?.options ?? [];
   const recommended =
     escalation === null ? null : recommendedOption(options, escalation.recommendation);
-  const [collapsed, setCollapsed] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [text, setText] = useState("");
   // Typing an answer of their own replaces the picked option, as in the composer.
@@ -106,7 +185,7 @@ function QuestionDecision({
 
   // Number keys pick an option while focus is outside editable fields, like provider questions.
   useEffect(() => {
-    if (collapsed || sending || options.length === 0) return;
+    if (!active || sending || options.length === 0) return;
     const handler = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target;
@@ -126,89 +205,73 @@ function QuestionDecision({
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [collapsed, sending, options]);
+  }, [active, sending, options]);
 
   return (
     <DecisionComposer
       data-pivot-decision="question"
       banner={
         <ComposerBanner.Root>
-          <Collapsible open={!collapsed} onOpenChange={(open) => setCollapsed(!open)}>
-            <CollapsibleTrigger
-              render={<ComposerBanner.Row render={<button type="button" />} />}
-              title={
-                collapsed
-                  ? "Show the question and its options"
-                  : "Hide the question and its options"
-              }
-            >
-              <ComposerBanner.Icon>
-                <SplitIcon />
-              </ComposerBanner.Icon>
-              <ComposerBanner.Content>
-                <span className="shrink-0 font-medium text-muted-foreground">{asker} asks</span>
-                {collapsed ? (
-                  <span className="min-w-0 flex-1 truncate text-secondary-label">
-                    {questionsOf(decision).join(" ")}
-                  </span>
-                ) : null}
-              </ComposerBanner.Content>
-              <ComposerBanner.Actions>
-                {position !== null ? (
-                  <span className="text-3xs font-medium text-muted-foreground tabular-nums">
-                    {position.index + 1}/{position.total}
-                  </span>
-                ) : null}
-                <ComposerBanner.ToggleIcon expanded={!collapsed} />
-              </ComposerBanner.Actions>
-            </CollapsibleTrigger>
-            <CollapsiblePanel>
-              <ComposerBanner.Scroll
-                style={bodyMaxHeight ? { maxHeight: bodyMaxHeight } : undefined}
-              >
-                <ComposerBanner.Body className="pe-1 pb-1 wrap-anywhere">
-                  {questionsOf(decision).map((question) => (
-                    <p key={question} className="text-sm text-foreground/85">
-                      {question}
-                    </p>
+          <ComposerBanner.Row
+            render={<button type="button" />}
+            title="Minimize"
+            onClick={onMinimize}
+          >
+            <ComposerBanner.Icon>
+              <SplitIcon />
+            </ComposerBanner.Icon>
+            <ComposerBanner.Content>
+              <span className="shrink-0 font-medium text-muted-foreground">{asker} asks</span>
+            </ComposerBanner.Content>
+            <ComposerBanner.Actions>
+              {position !== null ? (
+                <span className="text-3xs font-medium text-muted-foreground tabular-nums">
+                  {position.index + 1}/{position.total}
+                </span>
+              ) : null}
+              <ComposerBanner.ToggleIcon expanded />
+            </ComposerBanner.Actions>
+          </ComposerBanner.Row>
+          <ComposerBanner.Scroll style={bodyMaxHeight ? { maxHeight: bodyMaxHeight } : undefined}>
+            <ComposerBanner.Body className="pe-1 pb-1 wrap-anywhere">
+              {questionsOf(decision).map((question) => (
+                <p key={question} className="text-sm text-foreground/85">
+                  {question}
+                </p>
+              ))}
+              {escalation !== null ? (
+                <div className="mt-1 grid gap-0.5 text-secondary-label">
+                  <p>{escalation.evidence}</p>
+                  <p>{escalation.consequence}</p>
+                  {recommended === null ? <p>Recommended: {escalation.recommendation}</p> : null}
+                </div>
+              ) : null}
+              {options.length > 0 ? (
+                <div className="mt-2 space-y-0.5">
+                  {options.map((option, index) => (
+                    <ComposerOptionRow
+                      key={option}
+                      label={option}
+                      badge={
+                        option === recommended ? (
+                          <Badge size="sm" variant="info">
+                            Recommended
+                          </Badge>
+                        ) : null
+                      }
+                      selected={!typed && selected === option}
+                      shortcutKey={index < 9 ? index + 1 : null}
+                      disabled={sending}
+                      onSelect={() => {
+                        setSelected(option);
+                        setText("");
+                      }}
+                    />
                   ))}
-                  {escalation !== null ? (
-                    <div className="mt-1 grid gap-0.5 text-secondary-label">
-                      <p>{escalation.evidence}</p>
-                      <p>{escalation.consequence}</p>
-                      {recommended === null ? (
-                        <p>Recommended: {escalation.recommendation}</p>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  {options.length > 0 ? (
-                    <div className="mt-2 space-y-0.5">
-                      {options.map((option, index) => (
-                        <ComposerOptionRow
-                          key={option}
-                          label={option}
-                          badge={
-                            option === recommended ? (
-                              <Badge size="sm" variant="info">
-                                Recommended
-                              </Badge>
-                            ) : null
-                          }
-                          selected={!typed && selected === option}
-                          shortcutKey={index < 9 ? index + 1 : null}
-                          disabled={sending}
-                          onSelect={() => {
-                            setSelected(option);
-                            setText("");
-                          }}
-                        />
-                      ))}
-                    </div>
-                  ) : null}
-                </ComposerBanner.Body>
-              </ComposerBanner.Scroll>
-            </CollapsiblePanel>
-          </Collapsible>
+                </div>
+              ) : null}
+            </ComposerBanner.Body>
+          </ComposerBanner.Scroll>
         </ComposerBanner.Root>
       }
       label="Your answer"
@@ -241,7 +304,8 @@ function ApprovalDecision({
   position,
   sending,
   onAnswer,
-}: PivotDecisionCardProps) {
+  onMinimize,
+}: PivotDecisionCardProps & { onMinimize: () => void }) {
   const escalation = decision.escalation;
   const [note, setNote] = useState("");
   // A yes or no, recorded as such, with the user's own words when they add any.
@@ -294,6 +358,7 @@ function ApprovalDecision({
               </span>
             </ComposerBanner.Content>
             <ComposerBanner.Actions>
+              <MinimizeButton onMinimize={onMinimize} />
               <Button size="xs" variant="outline" disabled={sending} onClick={() => respond(false)}>
                 Decline
               </Button>
