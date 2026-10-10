@@ -120,6 +120,10 @@ export function sidebarPivotGroup(
   };
 }
 
+/** Whether a Pivot's row has teammates to count and fold; with none, it shows no count. */
+export const pivotGroupHasTeammates = (group: SidebarPivotGroup): boolean =>
+  group.teammates.length > 0 || group.needYou > 0;
+
 /**
  * Whether a thread entering `status` notifies the user. A teammate does only while a
  * question or approval holds it for the user; the rest of its news reaches the user

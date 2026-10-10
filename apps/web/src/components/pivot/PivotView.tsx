@@ -2,7 +2,7 @@ import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environ
 import { teammatesOfPivot } from "@t3tools/client-runtime/pivot-state";
 import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { EllipsisIcon } from "lucide-react";
+import { EllipsisIcon, XIcon } from "lucide-react";
 import {
   type PointerEvent as ReactPointerEvent,
   lazy,
@@ -27,7 +27,6 @@ import {
   primaryServerKeybindingsAtom,
   serverEnvironment,
 } from "../../state/server";
-import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import ChatView from "../ChatView";
 import { ProjectFavicon } from "../ProjectFavicon";
 import {
@@ -228,13 +227,13 @@ export function PivotView(props: { pivot: ScopedThreadRef }) {
             />
           </>
         ) : null}
-        {/* Mirrors the Chat header's titlebar handling: a window drag region, and clearance
-            for the native window controls when the sidebar is collapsed. */}
+        {/* Pivot view hides the sidebar and its toggle whatever the sidebar's open state, so
+            the header always starts where the sidebar toggle would: past the macOS traffic
+            lights, or at the plain gutter in fullscreen and on the web. */}
         <header
           className={cn(
-            "relative flex h-[var(--workspace-topbar-height)] shrink-0 items-center gap-3 bg-background px-3 [[data-panel-animations=true]_&]:motion-safe:transition-[padding-left] [[data-panel-animations=true]_&]:motion-safe:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:motion-safe:ease-out",
+            "relative flex h-[var(--workspace-topbar-height)] shrink-0 items-center gap-3 bg-background pr-3 pl-(--workspace-controls-left)",
             isElectron && "drag-region wco:pr-(--workspace-native-controls-inset)",
-            COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
           )}
         >
           {/* The same project / title breadcrumb as Chat mode, so the project stays in view. */}
@@ -469,6 +468,11 @@ function ScoutReport(props: { teammateRef: ScopedThreadRef }) {
   );
 }
 
+/**
+ * The chrome around a pane. The teammate cards sit straight on the view and the
+ * Pivot's chat is one plain box; only panes opened on demand get a title bar, to
+ * say whose material they show and to move or close them.
+ */
 function PaneFrame(props: {
   node: Extract<LayoutNode, { type: "pane" }>;
   single: boolean;
@@ -478,15 +482,31 @@ function PaneFrame(props: {
   children: ReactNode;
 }) {
   const { node } = props;
-  // The Teammates pane is see-through, so a wallpaper shows behind the cards.
-  const solid = node.kind !== "teammates";
+  if (node.kind === "teammates") {
+    return (
+      // Sized by its rows when fitted, so it flexes rather than filling a set height.
+      <section
+        aria-label={PANE_TITLES[node.kind]}
+        className="flex min-h-0 min-w-0 flex-auto flex-col"
+      >
+        {props.children}
+      </section>
+    );
+  }
+  if (node.kind === "pivot-chat") {
+    return (
+      <section
+        aria-label={PANE_TITLES[node.kind]}
+        className="relative flex size-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background"
+      >
+        {props.children}
+      </section>
+    );
+  }
   return (
     <section
       aria-label={PANE_TITLES[node.kind]}
-      className={cn(
-        "flex size-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-border",
-        solid ? "bg-background" : "bg-background/40",
-      )}
+      className="flex size-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background"
     >
       <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border px-2 text-xs">
         <span className="font-medium">{PANE_TITLES[node.kind]}</span>
@@ -512,12 +532,17 @@ function PaneFrame(props: {
                 {label}
               </MenuItem>
             ))}
-            <MenuSeparator />
-            <MenuItem disabled={props.single} onClick={props.onHide}>
-              Hide pane
-            </MenuItem>
           </MenuPopup>
         </Menu>
+        <Button
+          size="icon-micro"
+          variant="ghost-muted"
+          aria-label={`Close ${PANE_TITLES[node.kind]}`}
+          disabled={props.single}
+          onClick={props.onHide}
+        >
+          <XIcon />
+        </Button>
       </div>
       <div className="relative min-h-0 flex-1">{props.children}</div>
     </section>
@@ -536,8 +561,21 @@ function LayoutNodeView(props: {
   // While dragging, sizes live here and commit to the stored tree on release.
   const [dragSizes, setDragSizes] = useState<ReadonlyArray<number> | null>(null);
   if (node.type === "pane") return <>{props.renderPane(node)}</>;
-  const sizes = dragSizes ?? node.sizes;
   const horizontal = node.type === "row";
+  // The teammate cards in a column fit their rows until the user drags their height.
+  const fits = node.children.map(
+    (child) =>
+      !horizontal &&
+      dragSizes === null &&
+      child.type === "pane" &&
+      child.kind === "teammates" &&
+      child.sized !== true,
+  );
+  const stored = dragSizes ?? node.sizes;
+  // Flex hands out only a fraction of the free space when the grows sum below 1, so the
+  // slots left sharing it split it whole.
+  const shared = stored.reduce((sum, size, index) => (fits[index] ? sum : sum + size), 0);
+  const sizes = stored.map((size) => (shared > 0 ? size / shared : size));
 
   const startDrag = (index: number, event: ReactPointerEvent<HTMLDivElement>) => {
     const element = container.current;
@@ -546,7 +584,16 @@ function LayoutNodeView(props: {
     const rect = element.getBoundingClientRect();
     const extent = horizontal ? rect.width : rect.height;
     const origin = horizontal ? event.clientX : event.clientY;
-    const start = [...node.sizes];
+    // Start from what is on screen: cards fitted to their rows don't take their stored share.
+    const extents = Array.from(element.children, (child) => {
+      const box = child.getBoundingClientRect();
+      return horizontal ? box.width : box.height;
+    });
+    const total = extents.reduce((sum, value) => sum + value, 0);
+    const start =
+      extents.length === node.sizes.length && total > 0
+        ? extents.map((value) => value / total)
+        : [...node.sizes];
     let latest: ReadonlyArray<number> = start;
     const move = (moveEvent: PointerEvent) => {
       const delta = ((horizontal ? moveEvent.clientX : moveEvent.clientY) - origin) / extent;
@@ -573,7 +620,7 @@ function LayoutNodeView(props: {
       className={cn("flex size-full min-h-0 min-w-0", horizontal ? "flex-row" : "flex-col")}
     >
       {node.children.map((child, index) => (
-        <PaneSlot key={paneKey(child, index)} grow={sizes[index] ?? 1}>
+        <PaneSlot key={paneKey(child, index)} grow={sizes[index] ?? 1} fit={fits[index] === true}>
           <LayoutNodeView
             node={child}
             path={[...props.path, index]}
@@ -581,17 +628,27 @@ function LayoutNodeView(props: {
             renderPane={props.renderPane}
           />
           {index < node.children.length - 1 ? (
+            // Invisible until hovered or dragged: a thin line shows where the drag grabs.
             <div
               role="separator"
               aria-orientation={horizontal ? "vertical" : "horizontal"}
+              data-dragging={dragSizes !== null ? "true" : undefined}
               onPointerDown={(event) => startDrag(index, event)}
               className={cn(
-                "absolute z-10 bg-transparent hover:bg-border",
+                "group/divider absolute z-10 flex items-center justify-center",
                 horizontal
                   ? "top-0 -right-1.5 h-full w-1.5 cursor-col-resize"
                   : "-bottom-1.5 left-0 h-1.5 w-full cursor-row-resize",
               )}
-            />
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  "rounded-full bg-muted-foreground/50 opacity-0 transition-opacity group-hover/divider:opacity-100 group-data-[dragging=true]/divider:opacity-100",
+                  horizontal ? "h-10 w-0.5" : "h-0.5 w-10",
+                )}
+              />
+            </div>
           ) : null}
         </PaneSlot>
       ))}
@@ -599,9 +656,16 @@ function LayoutNodeView(props: {
   );
 }
 
-function PaneSlot(props: { grow: number; children: ReactNode }) {
+/**
+ * One child of a split. A fitted slot is as tall as its content, up to a cap, and the
+ * rest of the split shares what is left; any other slot takes its share.
+ */
+function PaneSlot(props: { grow: number; fit: boolean; children: ReactNode }) {
   return (
-    <div className="relative min-h-0 min-w-0 p-0.75" style={{ flex: `${props.grow} 1 0` }}>
+    <div
+      className="relative flex min-h-0 min-w-0 flex-col p-0.75"
+      style={props.fit ? { flex: "0 0 auto", maxHeight: "45%" } : { flex: `${props.grow} 1 0` }}
+    >
       {props.children}
     </div>
   );

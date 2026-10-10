@@ -393,6 +393,17 @@ export const make = Effect.gen(function* () {
             takeover: input.takeover,
           })
           .pipe(Effect.tapError(() => threads.archive(threadId).pipe(Effect.ignore)));
+        // A retired Pivot's work moved to its successor, so it leaves the inbox.
+        if (active !== null) {
+          yield* threads.settle(active.threadId).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Retired Pivot did not settle", {
+                threadId: active.threadId,
+                cause,
+              }),
+            ),
+          );
+        }
         return { threadId, predecessorThreadId: active?.threadId ?? null };
       }),
     );

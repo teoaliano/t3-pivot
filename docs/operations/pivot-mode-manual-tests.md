@@ -35,14 +35,14 @@ and teammate run is small.
 
 ## 1. Creating a Pivot
 
-| #   | Story | Steps                                                                                            | Expect                                                                                                               |
-| --- | ----- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| 1.1 | 1, 2  | On an existing pivot-demo thread, click the sidebar's **New Pivot** icon.                        | Dialog "New Pivot in pivot-demo". The picker lists Claude Code, Codex and Cursor models only.                        |
-| 1.2 | 1     | Open a new-thread draft in pivot-demo, then click **New Pivot**.                                 | The dialog names pivot-demo, not another project.                                                                    |
-| 1.3 | 1     | From that draft press **⌥⌘P**, then cancel. Open the command palette (⌘K) and type "pivot".      | The shortcut opens the dialog for pivot-demo. The palette shows "New Pivot in pivot-demo".                           |
-| 1.4 | 1     | Click **Create Pivot**.                                                                          | You land in the new Pivot's chat, not on a blank draft. The sidebar shows the Pivot row with a Pivot strip under it. |
-| 1.5 | 3     | Add a folder that is not a git repo as a project, then try New Pivot there (icon, palette, ⌥⌘P). | Disabled everywhere, with the reason in the tooltip or dialog.                                                       |
-| 1.6 | 22    | Look at the Pivot's right panel and its workspace path.                                          | The workspace is the Pivot home under `.t3/userdata/pivot-homes/<projectId>`, not your project.                      |
+| #   | Story | Steps                                                                                         | Expect                                                                                                               |
+| --- | ----- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| 1.1 | 1, 2  | On an existing pivot-demo thread, click the sidebar's **New Pivot** icon.                     | The palette opens on "New Pivot in..." with projects only, pivot-demo first. No model picker.                        |
+| 1.2 | 1     | Press **⌥⌘P**, then Escape. Open the command palette (⌘K) and type "pivot".                   | The shortcut opens the same picker. The palette shows "New Pivot in pivot-demo" and "New Pivot in...".               |
+| 1.3 | 1     | Pick pivot-demo.                                                                              | You land in the new Pivot's chat, not on a blank draft. The sidebar shows the Pivot row with a Pivot strip under it. |
+| 1.4 | 5     | Start another Pivot in pivot-demo, cancel the confirmation, then start one again and confirm. | Cancel creates nothing. Confirm replaces it: the old Pivot retires and its teammates and decisions move over.        |
+| 1.5 | 3     | Add a folder that is not a git repo as a project, then try New Pivot there.                   | Creation fails with the reason in a toast.                                                                           |
+| 1.6 | 22    | Look at the Pivot's right panel and its workspace path.                                       | The workspace is the Pivot home under `.t3/userdata/pivot-homes/<projectId>`, not your project.                      |
 
 ## 2. Dispatching work
 

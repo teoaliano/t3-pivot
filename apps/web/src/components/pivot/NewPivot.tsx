@@ -20,7 +20,9 @@ import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { vcsEnvironment } from "../../state/vcs";
 import { buildThreadRouteParams } from "../../threadRoutes";
+import { readLocalApi } from "../../localApi";
 import { toastManager } from "../ui/toast";
+import { decideNewPivot, replacePivotPrompt } from "./newPivot.logic";
 import { pivotDefaultModel } from "./pivotModel.logic";
 import { usePivotViewStore } from "./pivotViewStore";
 
@@ -35,8 +37,9 @@ const useNewPivotStore = create<{
 }>()((set) => ({ target: null, setTarget: (target) => set({ target }) }));
 
 /**
- * Creates a Pivot in a project on its Pivot model from Settings, then opens it.
- * Every entry point goes through here; a creation already under way wins.
+ * Creates a Pivot in a project on its Pivot model from Settings, then opens it,
+ * asking first when it would replace the project's unsettled Pivot. Every entry
+ * point goes through here; a creation already under way wins.
  */
 export const startNewPivot = (target: NewPivotTarget) => {
   const store = useNewPivotStore.getState();
@@ -94,13 +97,22 @@ function NewPivotCreation(props: { target: NewPivotTarget; onDone: () => void })
   );
   const createPivot = useAtomCommand(serverEnvironment.createPivot, { reportFailure: false });
   const setMode = usePivotViewStore((state) => state.setMode);
-  // Runs once per request, including under StrictMode's double effects.
+  // Runs once per request, including under StrictMode's double effects, and
+  // only once the project's Pivots have loaded so a replacement is never missed.
   const started = useRef(false);
 
   useEffect(() => {
-    if (started.current) return;
+    if (started.current || pivotState === null) return;
     started.current = true;
     void (async () => {
+      const decision = await decideNewPivot(
+        takeover,
+        async () =>
+          (await readLocalApi()?.dialogs.confirm(
+            replacePivotPrompt(project?.title ?? "this project", takeover!),
+          )) ?? false,
+      );
+      if (decision === "cancel") return props.onDone();
       if (modelSelection === null) {
         toastManager.add({
           type: "error",
@@ -111,7 +123,7 @@ function NewPivotCreation(props: { target: NewPivotTarget; onDone: () => void })
       }
       const result = await createPivot({
         environmentId,
-        input: { projectId, modelSelection, takeover: takeover !== null },
+        input: { projectId, modelSelection, takeover: decision === "replace" },
       });
       if (result._tag !== "Success") {
         const failure = result._tag === "Failure" ? squashAtomCommandFailure(result) : null;

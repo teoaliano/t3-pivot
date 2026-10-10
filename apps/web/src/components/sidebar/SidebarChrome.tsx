@@ -27,11 +27,7 @@ import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPr
 import { isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
 import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
-import {
-  SidebarUpdateArchitectureWarning,
-  SidebarUpdatePill,
-  SidebarUpstreamNightlyNotice,
-} from "./SidebarUpdatePill";
+import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
@@ -137,7 +133,7 @@ function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
           onBackdrop ? "text-white/70" : "text-muted-foreground",
         )}
       >
-        Code
+        Pivot
       </span>
     </span>
   );
@@ -246,7 +242,6 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
       <SidebarThreadUndoNotice />
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
-      <SidebarUpstreamNightlyNotice />
       <SidebarUtilityMenu />
     </SidebarFooter>
   );
