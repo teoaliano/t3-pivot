@@ -7,7 +7,7 @@
  * gets the command instead, and only the operator's explicit
  * `T3CODE_SERVER_BROWSER_SANDBOX=0` launches without it.
  */
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
@@ -115,7 +115,7 @@ export const diagnoseLaunchFailure = Effect.fn("PreviewBrowserHost.diagnoseLaunc
     if (input.output.includes(NO_SANDBOX_SIGNATURE)) {
       return new PreviewBrowserSandboxError({ setupCommand });
     }
-    if ((yield* HostProcessPlatform) !== "linux") return undefined;
+    if ((yield* HostProcess.Platform) !== "linux") return undefined;
     const libraries = yield* missingLibraries(input.executable);
     return libraries.length === 0
       ? undefined
@@ -154,7 +154,7 @@ export const missingLibraries = Effect.fn("PreviewBrowserHost.missingLibraries")
  * root, so the server checks it at startup.
  */
 export const sandboxBlocked = Effect.gen(function* () {
-  if ((yield* HostProcessPlatform) !== "linux") return false;
+  if ((yield* HostProcess.Platform) !== "linux") return false;
   const fs = yield* FileSystem.FileSystem;
   const restricted = yield* fs.readFileString(USERNS_RESTRICTION).pipe(
     Effect.map((value) => value.trim() === "1"),
@@ -169,8 +169,8 @@ export const sandboxBlocked = Effect.gen(function* () {
  * browser launches and then aborts on the first page that draws text.
  */
 export const fontsMissing = Effect.gen(function* () {
-  if ((yield* HostProcessPlatform) !== "linux") return false;
-  if ((yield* HostProcessEnvironment).FONTCONFIG_FILE) return false;
+  if ((yield* HostProcess.Platform) !== "linux") return false;
+  if ((yield* HostProcess.Environment).FONTCONFIG_FILE) return false;
   const fs = yield* FileSystem.FileSystem;
   return !(yield* fs.exists(FONTCONFIG_FILE).pipe(Effect.orElseSucceed(() => true)));
 }).pipe(Effect.withSpan("PreviewBrowserHost.fontsMissing"));
