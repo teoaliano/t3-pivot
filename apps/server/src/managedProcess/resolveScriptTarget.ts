@@ -1,9 +1,9 @@
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
   ManagedProcessScriptNotFoundError,
   ManagedProcessThreadNotFoundError,
   type ThreadId,
 } from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { isDevProjectScript, resolveProjectScripts } from "@t3tools/shared/projectScripts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -53,7 +53,9 @@ export const resolveManagedScriptTarget = Effect.fn("resolveManagedScriptTarget"
     (scriptId === undefined || DETECTED_SCRIPT_NAMES.has(scriptId.toLowerCase()));
   const script =
     named ??
-    (wantsDetected ? yield* readDetectedDevScript(checkoutPath, yield* HostProcessPlatform) : null);
+    (wantsDetected
+      ? yield* readDetectedDevScript(checkoutPath, yield* HostProcess.Platform)
+      : null);
   if (!script) {
     return yield* new ManagedProcessScriptNotFoundError({
       scriptId: scriptId ?? "",
