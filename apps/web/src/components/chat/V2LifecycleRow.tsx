@@ -421,6 +421,8 @@ export function SubagentRowContent(props: {
   readonly trailing: ReactNode;
   readonly actions?: ReactNode;
   readonly chevron: boolean;
+  /** Wrap a long title instead of cutting it to one line, for rows laid out as cards. */
+  readonly wrapTitle?: boolean;
 }) {
   const { detail, failed } = props;
   return (
@@ -428,7 +430,12 @@ export function SubagentRowContent(props: {
       {props.avatar}
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-2">
-          <span className="min-w-0 truncate text-xs font-medium text-foreground">
+          <span
+            className={cn(
+              "min-w-0 text-xs font-medium text-foreground",
+              props.wrapTitle ? "break-words" : "truncate",
+            )}
+          >
             {props.title}
           </span>
           {detail !== null && props.showStatus ? (

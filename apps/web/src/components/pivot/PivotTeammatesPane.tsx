@@ -1,14 +1,25 @@
-import type { EnvironmentId, TeammateRecord, ThreadId } from "@t3tools/contracts";
-import { BotIcon, EllipsisIcon, FolderIcon } from "lucide-react";
+import type {
+  EnvironmentId,
+  OrchestrationV2TurnItem,
+  TeammateRecord,
+  TeammateStatus,
+  ThreadId,
+} from "@t3tools/contracts";
+import { EllipsisIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { cn } from "../../lib/utils";
 import type { ProviderInstanceEntry } from "../../providerInstances";
-import { useProjects, useThreadShells } from "../../state/entities";
+import { useThreadShells } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import { vcsEnvironment } from "../../state/vcs";
-import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
+import {
+  SUBAGENT_ROW_CLASS,
+  SUBAGENT_ROW_INTERACTIVE_CLASS,
+  SubagentAvatar,
+  SubagentRowContent,
+} from "../chat/V2LifecycleRow";
 import { SidebarStatusIcon } from "../sidebar/SidebarStatusIcon";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -34,7 +45,7 @@ const OPEN_ACTIONS: ReadonlyArray<{ readonly kind: TeammatePaneKind; readonly la
 ];
 
 /**
- * The Pivot's teammates as a strip of small cards in dispatch order, wrapping onto
+ * The Pivot's teammates as a strip of cards in dispatch order, wrapping onto
  * centered rows, with finished ones folded into one chip at the end. Nothing here
  * animates; elapsed times move once a minute.
  */
@@ -47,31 +58,17 @@ export function PivotTeammatesPane(props: {
   const nowMinute = useNowMinute();
   const nowMs = useMemo(() => Date.parse(`${nowMinute}:00.000Z`), [nowMinute]);
   const shells = useThreadShells();
-  const projects = useProjects();
-  const { cards, projectTitles } = useMemo(() => {
+  const cards = useMemo(() => {
     const byId = new Map(
       shells
         .filter((shell) => shell.environmentId === props.environmentId)
         .map((shell) => [shell.id as string, shell] as const),
     );
-    const projectTitleById = new Map(
-      projects
-        .filter((project) => project.environmentId === props.environmentId)
-        .map((project) => [project.id as string, project.title] as const),
-    );
-    const titles = new Map<string, string>();
-    for (const [threadId, shell] of byId) {
-      const title = projectTitleById.get(shell.projectId);
-      if (title !== undefined) titles.set(threadId, title);
-    }
-    return {
-      cards: teammateCards(props.teammates, (threadId) => {
-        const shell = byId.get(threadId);
-        return shell === undefined ? null : teammateCardShellOf(shell.source, shell.pullRequests);
-      }),
-      projectTitles: titles,
-    };
-  }, [projects, props.environmentId, props.teammates, shells]);
+    return teammateCards(props.teammates, (threadId) => {
+      const shell = byId.get(threadId);
+      return shell === undefined ? null : teammateCardShellOf(shell.source, shell.pullRequests);
+    });
+  }, [props.environmentId, props.teammates, shells]);
 
   if (props.teammates.length === 0) {
     return (
@@ -83,13 +80,12 @@ export function PivotTeammatesPane(props: {
   return (
     // Centered in the strip; m-auto rather than centering keeps an overflowing top reachable.
     <div className="flex min-h-0 flex-auto overflow-y-auto p-1 scrollbar-gutter-both">
-      <div className="m-auto flex flex-wrap items-center justify-center gap-2">
+      <div className="m-auto flex flex-wrap items-stretch justify-center gap-2">
         {cards.live.map((card) => (
           <PivotTeammateCard
             key={card.threadId}
             environmentId={props.environmentId}
             card={card}
-            projectTitle={projectTitles.get(card.threadId) ?? null}
             nowMs={nowMs}
             providerEntries={props.providerEntries}
             onOpen={props.onOpen}
@@ -117,7 +113,7 @@ function FinishedChip(props: {
         render={
           <button
             type="button"
-            className="h-9 cursor-pointer rounded-lg border border-border bg-background/90 px-3 text-sm font-medium transition-colors hover:bg-accent"
+            className="h-9 cursor-pointer self-center rounded-lg border border-border bg-background/90 px-3 text-sm font-medium transition-colors hover:bg-accent"
           />
         }
       >
@@ -156,7 +152,6 @@ function FinishedChip(props: {
 type TeammateCardProps = {
   environmentId: EnvironmentId;
   card: TeammateCard;
-  projectTitle: string | null;
   detail: string | null;
   nowMs: number;
   providerEntries: ReadonlyMap<string, ProviderInstanceEntry>;
@@ -188,21 +183,25 @@ const PivotTeammateCard = memo(function PivotTeammateCard(
   );
 });
 
-/** One teammate as a small card: project and status, title, then PR and provider. */
+/** Teammate states as subagent states; the dot takes the teammate's thread status color. */
+const SUBAGENT_STATUS: Record<TeammateStatus, OrchestrationV2TurnItem["status"]> = {
+  working: "running",
+  waiting: "waiting",
+  "needs-decision": "waiting",
+  blocked: "waiting",
+  paused: "idle",
+  done: "completed",
+  failed: "failed",
+  unreported: "cancelled",
+};
+
+/** One teammate as a card holding the subagent row a normal thread shows, title wrapping. */
 function TeammateCardBody(props: TeammateCardProps) {
   const { card } = props;
-  const tone = TEAMMATE_TONE_CLASSES[card.tone];
-  const elapsed = elapsedLabel(card.since, props.nowMs);
   const provider =
     card.providerInstanceId === null
       ? null
       : (props.providerEntries.get(card.providerInstanceId) ?? null);
-  const tag =
-    card.footer?.kind === "pull-request"
-      ? `PR#${card.footer.number}`
-      : card.footer?.kind === "scout"
-        ? "Scout"
-        : null;
   const element = (
     <div
       role="button"
@@ -220,28 +219,35 @@ function TeammateCardBody(props: TeammateCardProps) {
         }
       }}
       className={cn(
-        "group/card flex w-52 cursor-pointer flex-col gap-1 rounded-lg border bg-background/90 px-2.5 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
+        SUBAGENT_ROW_CLASS,
+        SUBAGENT_ROW_INTERACTIVE_CLASS,
+        "w-72 rounded-lg border bg-background/90",
         card.attention ? "border-warning/60" : "border-border",
       )}
     >
-      <span className="flex min-w-0 items-center gap-2 text-xs">
-        <span className="flex min-w-0 flex-1 items-center gap-1 text-muted-foreground">
-          <FolderIcon aria-hidden className="size-3.5 shrink-0" />
-          <span className="truncate">{props.projectTitle ?? ""}</span>
-        </span>
-        <span className={cn("inline-flex shrink-0 items-center gap-1 font-medium", tone.text)}>
-          <span className="inline-flex [&_svg]:size-3.5">
-            <SidebarStatusIcon kind={teammateStatusIcon(card)} />
-          </span>
-          {elapsed !== null ? <span className="tabular-nums">{elapsed}</span> : null}
-          <span role="status">{card.label}</span>
-        </span>
-      </span>
-      <span className="truncate text-sm font-medium text-foreground">{card.title}</span>
-      <span className="flex h-5 min-w-0 items-center gap-1 text-xs text-muted-foreground">
-        <span className="min-w-0 flex-1 truncate tabular-nums">{tag ?? ""}</span>
-        {/* Shown while the card is hovered, focused within, or its menu is open. */}
-        <span className="inline-flex opacity-0 group-hover/card:opacity-100 focus-within:opacity-100 has-data-[popup-open]:opacity-100">
+      <SubagentRowContent
+        avatar={
+          <SubagentAvatar
+            driver={provider?.driverKind}
+            provider={
+              provider === null
+                ? undefined
+                : { displayName: provider.displayName, iconUrl: provider.acpRegistryIconUrl }
+            }
+            status={SUBAGENT_STATUS[card.status]}
+            dotClassName={TEAMMATE_TONE_CLASSES[card.tone].dot}
+          />
+        }
+        title={card.title}
+        statusLabel={card.label}
+        // The status takes the second line, as in a subagent row with no detail; the
+        // report, setup progress or error stays in the tooltip.
+        showStatus
+        detail={null}
+        failed={card.status === "failed"}
+        trailing={elapsedLabel(card.since, props.nowMs)}
+        wrapTitle
+        actions={
           <Menu>
             <MenuTrigger
               render={
@@ -269,21 +275,12 @@ function TeammateCardBody(props: TeammateCardProps) {
               ))}
             </MenuPopup>
           </Menu>
-        </span>
-        {provider !== null ? (
-          <ProviderInstanceIcon
-            driverKind={provider.driverKind}
-            displayName={provider.displayName}
-            acpRegistryIconUrl={provider.acpRegistryIconUrl}
-            iconClassName="size-3.5"
-          />
-        ) : (
-          <BotIcon aria-hidden className="size-3.5 shrink-0" />
-        )}
-      </span>
+        }
+        chevron
+      />
     </div>
   );
-  // The report, setup progress or error, which the small card has no room for.
+  // The report, setup progress or error, which the card leaves to its tooltip.
   return props.detail === null ? (
     element
   ) : (

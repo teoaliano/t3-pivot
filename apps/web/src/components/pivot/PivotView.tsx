@@ -664,7 +664,7 @@ function PaneSlot(props: { grow: number; fit: boolean; children: ReactNode }) {
   return (
     <div
       className="relative flex min-h-0 min-w-0 flex-col p-0.75"
-      style={props.fit ? { flex: "0 0 auto", maxHeight: "40%" } : { flex: `${props.grow} 1 0` }}
+      style={props.fit ? { flex: "0 0 auto", maxHeight: "45%" } : { flex: `${props.grow} 1 0` }}
     >
       {props.children}
     </div>
