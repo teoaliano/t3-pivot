@@ -105,7 +105,8 @@ export const expandHomePath = Effect.fn(function* (input: string) {
 export const resolveBaseDir = Effect.fn(function* (raw: string | undefined) {
   const { join, resolve } = yield* Path.Path;
   if (!raw || raw.trim().length === 0) {
-    return join(yield* HostProcess.HomeDirectory, ".t3");
+    // T3 Pivot's own home, so a server started without one never opens T3 Code's data.
+    return join(yield* HostProcess.HomeDirectory, ".t3-pivot");
   }
   return resolve(yield* expandHomePath(raw.trim()));
 });
