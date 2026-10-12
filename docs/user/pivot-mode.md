@@ -8,11 +8,11 @@ work that is ready for review. Pivot mode needs the project to be a git reposito
 ## Start a Pivot
 
 Choose **New Pivot** from the sidebar header, the command palette or its shortcut, then pick the
-Pivot's agent: Claude Code, Codex or Cursor. A project has one active Pivot at a time. Starting
-a new one while one is active takes over its work. The dialog tells you how many live teammates
-and open decisions move. The old Pivot stays as read-only history, and the new one can read its
-conversation, so plans you only mentioned there are not lost. Do this when a long Pivot
-conversation gets unwieldy. You don't need to for automatic compaction: the Pivot keeps going
+project. The Pivot runs on the Pivot model set in Settings. A project has one active Pivot at a
+time. Starting a new one while one is active asks first, telling you how many live teammates and
+open decisions the new Pivot takes over. The old Pivot stays as read-only history, and the new
+one can read its conversation, so plans you only mentioned there are not lost. Do this when a
+long Pivot conversation gets unwieldy. You don't need to for automatic compaction: the Pivot keeps going
 through it.
 
 ## Working with it

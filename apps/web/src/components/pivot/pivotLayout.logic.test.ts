@@ -34,7 +34,7 @@ const beta = ThreadId.make("beta");
 describe("pivotLayoutPreset", () => {
   it("teammates on top with the Pivot chat below", () => {
     expect(pivotLayoutPreset("teammates-top")).toEqual(
-      col([0.3, 0.7], pane("teammates"), pane("pivot-chat")),
+      col([0.2, 0.8], pane("teammates"), pane("pivot-chat")),
     );
   });
 
@@ -123,7 +123,7 @@ describe("showPane", () => {
 
   it("wraps a column root in a row and gives the new pane a third", () => {
     expect(showPane(pivotLayoutPreset("teammates-top"), "preview")).toEqual(
-      row([2 / 3, 1 / 3], col([0.3, 0.7], pane("teammates"), pane("pivot-chat")), pane("preview")),
+      row([2 / 3, 1 / 3], col([0.2, 0.8], pane("teammates"), pane("pivot-chat")), pane("preview")),
     );
   });
 
@@ -223,6 +223,17 @@ describe("resizeSplit", () => {
     );
   });
 
+  it("marks the teammate cards in a resized column as sized", () => {
+    const cards = col([0.2, 0.8], pane("teammates"), pane("pivot-chat"));
+    expect(resizeSplit(cards, [], [0.4, 0.6])).toEqual(
+      col([0.4, 0.6], { type: "pane", kind: "teammates", sized: true }, pane("pivot-chat")),
+    );
+    // A row split doesn't set the cards' height, so it leaves them fitting their rows.
+    expect(resizeSplit(tree, [0], [0.75, 0.25])).toEqual(
+      col([0.5, 0.5], row([0.75, 0.25], pane("pivot-chat"), pane("teammates")), pane("preview")),
+    );
+  });
+
   it("normalizes sizes to sum to 1", () => {
     expect(resizeSplit(tree, [], [1, 3])).toEqual(
       col([0.25, 0.75], row([0.5, 0.5], pane("pivot-chat"), pane("teammates")), pane("preview")),
@@ -274,6 +285,15 @@ describe("openTeammatePane", () => {
 });
 
 describe("serializePivotLayout / parsePivotLayout", () => {
+  it("round-trips sized teammate cards", () => {
+    const tree = col(
+      [0.4, 0.6],
+      { type: "pane", kind: "teammates", sized: true },
+      pane("pivot-chat"),
+    );
+    expect(parsePivotLayout(serializePivotLayout(tree))).toEqual(tree);
+  });
+
   it("round-trips a tree", () => {
     const tree = col(
       [0.3, 0.7],

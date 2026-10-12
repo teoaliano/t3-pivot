@@ -1,7 +1,8 @@
 "use client";
 
 import { startNewPivot, usePivotProjectReadiness } from "./pivot/NewPivot";
-import { usePivotModeSupported } from "../state/pivot";
+import { resolveNewPivotProjectRef } from "./pivot/newPivot.logic";
+import { usePivotModeEnvironmentIds, usePivotModeSupported } from "../state/pivot";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
@@ -487,6 +488,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   );
   const openAddProject = useCallback(() => dispatch({ _tag: "OpenAddProject" }), []);
   const openNewThreadIn = useCallback(() => dispatch({ _tag: "OpenNewThreadIn" }), []);
+  const openNewPivotIn = useCallback(() => dispatch({ _tag: "OpenNewPivotIn" }), []);
   const clearOpenIntent = useCallback(() => dispatch({ _tag: "ClearOpenIntent" }), []);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { theme, themeHalves, resolvedTheme, appearanceMode, setAppearanceMode } = useTheme();
@@ -603,6 +605,8 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       onOpenCommandPalette((detail) => {
         if (detail.open === "new-thread-in") {
           openNewThreadIn();
+        } else if (detail.open === "new-pivot-in") {
+          openNewPivotIn();
         } else if (detail.open === "add-project") {
           openAddProject();
         } else if (detail.query !== undefined) {
@@ -615,7 +619,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           setOpen(true);
         }
       }),
-    [openAddProject, openNewThreadIn, setOpen],
+    [openAddProject, openNewPivotIn, openNewThreadIn, setOpen],
   );
 
   return (
@@ -1423,6 +1427,73 @@ function OpenCommandPaletteDialog(props: {
     startScratchThread,
   ]);
 
+  // T3 Pivot: the same project picker, limited to projects on an environment
+  // that runs Pivot mode. Whether the project is a git repository is checked
+  // when the Pivot is created.
+  const pivotEnvironmentIds = usePivotModeEnvironmentIds();
+  const projectPivotItems = useMemo(() => {
+    const isScratch = (project: CommandPaletteProject) =>
+      isScratchProject(project, scratchWorkspaceRootFor(project.environmentId));
+    const targets = pickerProjects.flatMap((project) => {
+      if (isScratch(project)) return [];
+      const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
+      const target = resolveNewPivotProjectRef({
+        targetRef: scopeProjectRef(project.environmentId, project.id),
+        memberRefs: group?.memberProjectRefs ?? [],
+        contextualRef: contextualProjectRef,
+        supportsPivot: (environmentId) => pivotEnvironmentIds.has(environmentId),
+      });
+      return target === null ? [] : [{ project, target }];
+    });
+    const targetByKey = new Map(
+      targets.map(({ project, target }) => [`${project.environmentId}:${project.id}`, target]),
+    );
+    return enumerateCommandPaletteItems(
+      buildProjectActionItems({
+        projects: targets.map(({ project }) => project),
+        valuePrefix: "new-pivot-in",
+        searchTerms: (project) => {
+          const location = projectEnvironmentLocationById.get(project.environmentId);
+          return location ? [location.label] : [];
+        },
+        renderDescription: (project) => {
+          const target = targetByKey.get(`${project.environmentId}:${project.id}`);
+          const location = projectEnvironmentLocationById.get(
+            target?.environmentId ?? project.environmentId,
+          ) ?? { kind: "remote", label: "Remote", machine: "server" as const };
+          return (
+            <span className="flex min-w-0 items-center gap-1">
+              <span className="inline-flex min-w-0 items-center gap-1">
+                {location.kind === "remote" ? (
+                  <EnvironmentMachineIcon
+                    aria-hidden
+                    kind={location.machine}
+                    className={COMMAND_PALETTE_META_ICON_CLASS}
+                  />
+                ) : null}
+                <span className="truncate">{location.label}</span>
+              </span>
+              <CommandPaletteMetaDot />
+              <span className="truncate">{project.workspaceRoot}</span>
+            </span>
+          );
+        },
+        icon: projectFaviconIcon,
+        runProject: async (project) => {
+          const target = targetByKey.get(`${project.environmentId}:${project.id}`);
+          if (target !== undefined) startNewPivot(target);
+        },
+      }),
+    );
+  }, [
+    contextualProjectRef,
+    pickerProjects,
+    pivotEnvironmentIds,
+    projectEnvironmentLocationById,
+    projectGroupByTargetKey,
+    scratchWorkspaceRootFor,
+  ]);
+
   const allThreadItems = useMemo(
     () =>
       buildThreadActionItems({
@@ -1885,6 +1956,22 @@ function OpenCommandPaletteDialog(props: {
     });
   }, [clearOpenIntent, browseNavigation, openIntent, projectThreadItems, pushPaletteView]);
 
+  useLayoutEffect(() => {
+    if (openIntent?.kind !== "new-pivot-in" || projectPivotItems.length === 0) {
+      return;
+    }
+    clearOpenIntent();
+    browseNavigation.invalidate();
+    setAddProjectCloneFlow(null);
+    setNewProjectFlow(null);
+    setViewStack([]);
+    setQuery("");
+    pushPaletteView({
+      addonIcon: <LayoutDashboardIcon className={ADDON_ICON_CLASS} />,
+      groups: [{ value: "projects", label: "Projects", items: projectPivotItems }],
+    });
+  }, [clearOpenIntent, browseNavigation, openIntent, projectPivotItems, pushPaletteView]);
+
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
   if (projects.length > 0) {
@@ -1937,8 +2024,20 @@ function OpenCommandPaletteDialog(props: {
         ...(pivotReadiness.reason === null ? {} : { description: pivotReadiness.reason }),
         disabled: !pivotReadiness.ready,
         icon: <LayoutDashboardIcon className={ITEM_ICON_CLASS} />,
-        shortcutCommand: "pivot.new",
         run: async () => startNewPivot(pivotTarget),
+      });
+    }
+
+    if (projectPivotItems.length > 0) {
+      actionItems.push({
+        kind: "submenu",
+        value: "action:new-pivot-in",
+        searchTerms: ["new pivot", "pivot", "project", "pick", "choose", "select", "teammates"],
+        title: "New Pivot in...",
+        icon: <LayoutDashboardIcon className={ITEM_ICON_CLASS} />,
+        addonIcon: <LayoutDashboardIcon className={ADDON_ICON_CLASS} />,
+        shortcutCommand: "pivot.new",
+        groups: [{ value: "projects", label: "Projects", items: projectPivotItems }],
       });
     }
 

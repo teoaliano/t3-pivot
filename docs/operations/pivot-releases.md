@@ -119,8 +119,6 @@ Mac and iPhone the next morning.
   keeps `~/.t3` and Tailscale HTTPS 443. T3 Pivot has its own data in `~/.t3-pivot` and
   defaults to Tailscale HTTPS port 8444, so on the Mac it is
   `https://mbp-aliano.<tailnet>.ts.net:8444`. Projects are added to each app separately.
-- T3 Code updates itself; T3 Pivot doesn't. A release records the upstream nightly it was
-  built on, and each update check compares it with the newest nightly on upstream's release
-  feed. When upstream is ahead, the sidebar says so next to the update button. That usually
-  means a `sync/<tag>` PR is waiting.
+- T3 Code updates itself; T3 Pivot follows upstream through the nightly sync above. When
+  T3 Code is ahead of T3 Pivot, a `sync/<tag>` PR is usually waiting.
 - Pivot mode's own records live in `~/.t3-pivot/userdata/pivot.sqlite`.

@@ -85,8 +85,8 @@ describe("PivotService.create", () => {
     }).pipe(Effect.provide(layer));
   });
 
-  it.effect("a takeover retires the active Pivot", () => {
-    const { layer } = setup();
+  it.effect("a takeover retires and settles the active Pivot", () => {
+    const { fake, layer } = setup();
     return Effect.gen(function* () {
       const pivots = yield* PivotService.PivotService;
       const store = yield* PivotStore.PivotStore;
@@ -95,6 +95,8 @@ describe("PivotService.create", () => {
       assert.strictEqual(second.predecessorThreadId, first.threadId);
       assert.isNotNull((yield* store.getPivot(first.threadId))?.retiredAt);
       assert.strictEqual((yield* store.getActivePivot(projectId))?.threadId, second.threadId);
+      assert.isTrue(fake.threads.get(first.threadId)?.settled);
+      assert.isFalse(fake.threads.get(second.threadId)?.settled);
     }).pipe(Effect.provide(layer));
   });
 });

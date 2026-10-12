@@ -108,25 +108,6 @@ function SidebarUpdateArchitectureWarningContent() {
   );
 }
 
-/** T3 Pivot: says when upstream T3 Code has a newer nightly than this build's base. */
-export function SidebarUpstreamNightlyNotice() {
-  return isElectron ? <SidebarUpstreamNightlyNoticeContent /> : null;
-}
-
-function SidebarUpstreamNightlyNoticeContent() {
-  const notice = useDesktopUpdateState()?.upstreamNightly;
-  if (!notice) return null;
-
-  return (
-    <Alert role="status" variant="sidebar">
-      <AlertDescription>
-        T3 Code {notice.latestVersion} is out. This T3 Pivot is on {notice.baseVersion}. Run
-        pivot:sync and pivot:release before opening T3 Code.
-      </AlertDescription>
-    </Alert>
-  );
-}
-
 export function SidebarUpdatePill() {
   return isElectron ? <SidebarUpdateControl /> : null;
 }

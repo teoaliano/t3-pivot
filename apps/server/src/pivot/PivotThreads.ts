@@ -148,6 +148,8 @@ export class PivotThreads extends Context.Service<
     /** Retries a teammate whose launch failed, reusing its recorded worktree. */
     readonly retryLaunch: (threadId: ThreadId) => Effect.Effect<RunStart, PivotThreadsError>;
     readonly archive: (threadId: ThreadId) => Effect.Effect<void, PivotThreadsError>;
+    /** Settles the thread as the user would, or once its running turn ends. */
+    readonly settle: (threadId: ThreadId) => Effect.Effect<void, PivotThreadsError>;
     /** A message from `senderThreadId`, queued behind the active turn or steered into it. */
     readonly send: (input: {
       readonly threadId: ThreadId;
@@ -374,6 +376,16 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* lifecycle.archive({ commandId: yield* commandId("archive"), threadId });
       }).pipe(Effect.mapError(fail("archive", threadId))),
+
+    settle: (threadId) =>
+      Effect.gen(function* () {
+        // A turn still running settles the thread when it ends, as an agent settling itself does.
+        yield* threads.settleThread({
+          threadId,
+          commandId: yield* commandId("settle"),
+          byOwnAgent: true,
+        });
+      }).pipe(Effect.mapError(fail("settle", threadId))),
 
     send: ({ threadId, senderThreadId, text, mode }) =>
       Effect.gen(function* () {

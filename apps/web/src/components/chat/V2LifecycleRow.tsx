@@ -421,6 +421,10 @@ export function SubagentRowContent(props: {
   readonly trailing: ReactNode;
   readonly actions?: ReactNode;
   readonly chevron: boolean;
+  /** Wrap a long title onto two lines before cutting it, for rows laid out as cards. */
+  readonly wrapTitle?: boolean;
+  /** Shown after the status on its own line, as "Status · suffix", for cards without `trailing`. */
+  readonly statusSuffix?: ReactNode;
 }) {
   const { detail, failed } = props;
   return (
@@ -428,7 +432,12 @@ export function SubagentRowContent(props: {
       {props.avatar}
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-2">
-          <span className="min-w-0 truncate text-xs font-medium text-foreground">
+          <span
+            className={cn(
+              "min-w-0 text-xs font-medium text-foreground",
+              props.wrapTitle ? "line-clamp-2 break-words" : "truncate",
+            )}
+          >
             {props.title}
           </span>
           {detail !== null && props.showStatus ? (
@@ -449,7 +458,10 @@ export function SubagentRowContent(props: {
           )}
         >
           {detail === null ? (
-            props.statusLabel
+            <>
+              {props.statusLabel}
+              {props.statusSuffix != null ? <> · {props.statusSuffix}</> : null}
+            </>
           ) : detail.includes("/") && !detail.includes(" ") ? (
             <MiddleTruncate value={detail} showTitle={false} className="flex" />
           ) : (
@@ -457,7 +469,11 @@ export function SubagentRowContent(props: {
           )}
         </span>
       </span>
-      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{props.trailing}</span>
+      {props.trailing != null ? (
+        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+          {props.trailing}
+        </span>
+      ) : null}
       {props.actions}
       {props.chevron ? (
         <ChevronRightIcon

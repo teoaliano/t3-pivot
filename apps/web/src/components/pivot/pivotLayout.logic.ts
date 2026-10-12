@@ -26,7 +26,16 @@ export type PaneKind =
   | "diff";
 
 export type LayoutNode =
-  | { type: "pane"; kind: PaneKind; teammate?: ThreadId }
+  | {
+      type: "pane";
+      kind: PaneKind;
+      teammate?: ThreadId;
+      /**
+       * The user dragged this pane's height. Until then, the teammate cards in a column
+       * size to their wrapped rows instead of taking their share.
+       */
+      sized?: true;
+    }
   | { type: "row" | "col"; children: LayoutNode[]; sizes: number[] };
 
 type SplitNode = Extract<LayoutNode, { type: "row" | "col" }>;
@@ -69,7 +78,7 @@ const PRESETS = {
   "teammates-top": (): LayoutNode => ({
     type: "col",
     children: [leaf("teammates"), leaf("pivot-chat")],
-    sizes: [0.3, 0.7],
+    sizes: [0.2, 0.8],
   }),
   "chat-left": (): LayoutNode => ({
     type: "row",
@@ -229,7 +238,17 @@ export function resizeSplit(
   if (path.length === 0) {
     if (root.type === "pane" || sizes.length !== root.children.length) return root;
     const next = clampSizes(sizes);
-    return next ? { ...root, sizes: next } : root;
+    if (!next) return root;
+    // Resizing a column fixes the cards' height there from now on.
+    const children =
+      root.type === "col"
+        ? root.children.map((child) =>
+            child.type === "pane" && child.kind === "teammates" && child.sized !== true
+              ? { ...child, sized: true as const }
+              : child,
+          )
+        : root.children;
+    return { ...root, children, sizes: next };
   }
   if (root.type === "pane") return root;
   const [index, ...rest] = path;
@@ -331,6 +350,7 @@ function readNode(value: unknown): LayoutNode | null {
 function readPane(value: Record<string, unknown>): LayoutNode | null {
   const { kind, teammate } = value;
   if (!isPaneKind(kind)) return null;
+  if (kind === "teammates" && value.sized === true) return { type: "pane", kind, sized: true };
   if (!isTeammatePaneKind(kind) || teammate === undefined) return { type: "pane", kind };
   return isThreadId(teammate) ? { type: "pane", kind, teammate } : null;
 }

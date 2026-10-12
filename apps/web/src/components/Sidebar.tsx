@@ -5255,9 +5255,9 @@ export default function Sidebar() {
               newThreadDisabled={projects.length === 0}
               newPivot={
                 <SidebarNewPivotButton
-                  projectRef={
-                    newThreadContext.routeProjectRef ?? newThreadContext.defaultProjectRef
-                  }
+                  onOpen={() => {
+                    if (isMobile) setOpenMobile(false);
+                  }}
                 />
               }
               newThreadShortcutLabel={newThreadShortcutLabel}

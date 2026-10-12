@@ -13,6 +13,7 @@ import type { TeammateCardShell } from "../pivot/pivotCards.logic";
 import {
   interleavePivotTeammates,
   nestPivotTeammates,
+  pivotGroupHasTeammates,
   sidebarPivotGroup,
   threadNotifiesUser,
 } from "./pivotNesting.logic";
@@ -166,6 +167,12 @@ describe("Pivot nesting in the sidebar", () => {
     };
     const retired = sidebarPivotGroup(afterTakeover, ThreadId.make("retired"), () => null);
     expect(retired).toMatchObject({ retired: true, teammates: [], needYou: 0 });
+    // So the retired row reads "Retired" with no zero count, as an empty active Pivot shows none.
+    expect(pivotGroupHasTeammates(retired!)).toBe(false);
+    expect(pivotGroupHasTeammates({ retired: false, teammates: [], needYou: 0 })).toBe(false);
+    expect(pivotGroupHasTeammates(group!)).toBe(true);
+    // A decision the Pivot holds for the user still shows, with no teammates.
+    expect(pivotGroupHasTeammates({ retired: false, teammates: [], needYou: 1 })).toBe(true);
     expect(sidebarPivotGroup(state, ThreadId.make("first"), () => null)).toBeNull();
   });
 
