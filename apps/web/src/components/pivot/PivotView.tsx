@@ -469,9 +469,9 @@ function ScoutReport(props: { teammateRef: ScopedThreadRef }) {
 }
 
 /**
- * The chrome around a pane. The teammate cards sit straight on the view and the
- * Pivot's chat is one plain box; only panes opened on demand get a title bar, to
- * say whose material they show and to move or close them.
+ * The chrome around a pane. The teammate cards and the Pivot's chat sit straight on
+ * the view, one continuous surface; only panes opened on demand get a framed box with
+ * a title bar, to say whose material they show and to move or close them.
  */
 function PaneFrame(props: {
   node: Extract<LayoutNode, { type: "pane" }>;
@@ -497,7 +497,7 @@ function PaneFrame(props: {
     return (
       <section
         aria-label={PANE_TITLES[node.kind]}
-        className="relative flex size-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background"
+        className="relative flex size-full min-h-0 min-w-0 flex-col overflow-hidden"
       >
         {props.children}
       </section>
