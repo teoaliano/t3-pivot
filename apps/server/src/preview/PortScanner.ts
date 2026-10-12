@@ -8,8 +8,8 @@
  * Linux without lsof: reads listening sockets from `/proc/net/tcp{,6}` and
  * finds their processes through `/proc/<pid>/fd`.
  *
- * Windows listener failures, or neither source: checks a curated list of
- * common dev ports through the shared Net service.
+ * Only listeners owned by T3 terminal processes and explicitly configured
+ * URLs receive probes. Without listener ownership, only configured URLs do.
  *
  * Listening ports are published only after a bounded HTTP(S) probe finds a
  * successful HTML document or a redirect to one.
@@ -19,8 +19,9 @@
  * Polling is reference-counted via scoped `retain`. A single layer-scoped fiber
  * polls forever, but each tick is a no-op when the retain count is zero.
  *
- * Managed-process ports sit outside the curated list, so the managed process
- * service registers them and the fallback probes them too.
+ * Managed processes run in T3 terminals, so their listeners count as owned.
+ * The managed process service also registers their ports, which receive probes
+ * when the platform cannot report listener ownership.
  */
 import {
   CONFIGURED_LOCAL_SERVER_URLS_MAX_ITEMS,
@@ -82,7 +83,7 @@ export class PortDiscovery extends Context.Service<
      * platform could only tell that the port is held.
      */
     readonly listenerOn: (port: number) => Effect.Effect<Option.Option<PortListener>>;
-    /** Replaces the managed-process ports probed alongside the curated list. */
+    /** Replaces the managed-process ports probed when listener ownership is unknown. */
     readonly setManagedPorts: (ports: ReadonlyArray<number>) => Effect.Effect<void>;
   }
 >()("t3/preview/PortScanner/PortDiscovery") {}
@@ -91,10 +92,6 @@ export interface PortListener {
   readonly pid: number | null;
   readonly processName: string | null;
 }
-
-export const COMMON_DEV_PORTS: ReadonlyArray<number> = Object.freeze([
-  3000, 3001, 3333, 4173, 4200, 4321, 5000, 5173, 5174, 5175, 5500, 8000, 8080, 8081, 8888, 9000,
-]);
 
 const POLL_INTERVAL = Duration.seconds(3);
 const LSOF_TIMEOUT_MS = 5_000;
@@ -240,14 +237,20 @@ const parseLsofOutput = (
       if (portMatch == null) continue;
       const url = `http://localhost:${portMatch}`;
       const key = `localhost:${portMatch}`;
-      if (seen.has(key)) continue;
+      const terminal = pid === null ? null : (terminalByProcessId.get(pid) ?? null);
+      const existing = seen.get(key);
+      // A port receives probes only when T3 terminals own all of its listeners.
+      if (existing) {
+        if (terminal === null) seen.set(key, { ...existing, terminal: null });
+        continue;
+      }
       seen.set(key, {
         host: "localhost",
         port: portMatch,
         url,
         processName,
         pid,
-        terminal: pid === null ? null : (terminalByProcessId.get(pid) ?? null),
+        terminal,
       });
     }
   }
@@ -283,14 +286,20 @@ const parseWindowsListenerOutput = (
     const pid = Number(pidRaw);
     if (!Number.isInteger(port) || port <= 0 || port >= 65536) continue;
     const normalizedPid = Number.isInteger(pid) && pid > 0 ? pid : null;
-    if (seen.has(port)) continue;
+    const terminal =
+      normalizedPid === null ? null : (terminalByProcessId.get(normalizedPid) ?? null);
+    const existing = seen.get(port);
+    if (existing) {
+      if (terminal === null) seen.set(port, { ...existing, terminal: null });
+      continue;
+    }
     seen.set(port, {
       host: "localhost",
       port,
       url: `http://localhost:${port}`,
       processName: processNameRaw?.trim() || null,
       pid: normalizedPid,
-      terminal: normalizedPid === null ? null : (terminalByProcessId.get(normalizedPid) ?? null),
+      terminal,
     });
   }
   return [...seen.values()].toSorted((left, right) => left.port - right.port);
@@ -421,7 +430,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
 
   /**
    * Linux listeners from `/proc/net/tcp{,6}`, for hosts without `lsof`. Null
-   * when neither file is readable, so discovery falls back to common ports.
+   * when neither file is readable, so only configured URLs are probed.
    */
   const scanProcListeners = Effect.fn("PortDiscovery.scanProcListeners")(function* (
     terminalByProcessId: ReadonlyMap<number, TerminalProcessOwner>,
@@ -456,24 +465,30 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
     const seen = new Map<number, DiscoveredLocalServer>();
     for (const { port, inode } of listeners) {
       const owner = owners.get(inode) ?? null;
+      const terminal = owner === null ? null : (terminalByProcessId.get(owner.pid) ?? null);
       const existing = seen.get(port);
-      if (existing && (existing.pid !== null || owner === null)) continue;
+      if (existing && (existing.pid !== null || owner === null)) {
+        if (terminal === null) seen.set(port, { ...existing, terminal: null });
+        continue;
+      }
       seen.set(port, {
         host: "localhost",
         port,
         url: `http://localhost:${port}`,
         processName: owner?.processName ?? null,
         pid: owner?.pid ?? null,
-        terminal: owner === null ? null : (terminalByProcessId.get(owner.pid) ?? null),
+        // A replaced listener had no known owner, so the port stays unowned.
+        terminal: existing ? null : terminal,
       });
     }
     return [...seen.values()].toSorted((left, right) => left.port - right.port);
   });
 
-  const probeCommonPorts = Effect.fn("PortDiscovery.probeCommonPorts")(function* () {
+  /** Managed-process ports held by anything, for when listener ownership is unknown. */
+  const probeManagedPorts = Effect.fn("PortDiscovery.probeManagedPorts")(function* () {
     const { managedPorts } = yield* Ref.get(stateRef);
     const results = yield* Effect.forEach(
-      [...new Set([...COMMON_DEV_PORTS, ...managedPorts])],
+      managedPorts,
       (port) =>
         net.isPortAvailableOnLoopback(port).pipe(
           Effect.map((available) => ({
@@ -519,6 +534,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
   const makeWebProbeGroups = (
     servers: ReadonlyArray<DiscoveredLocalServer>,
     configuredUrls: ReadonlyArray<string>,
+    managedPorts: ReadonlyArray<number>,
   ): ReadonlyArray<WebProbeGroup> => {
     const serversByKey = new Map(
       servers.map((server) => [localServerKey(server.host, server.port), server] as const),
@@ -548,6 +564,11 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
     }
 
     for (const server of servers) {
+      // A listener alone does not identify its protocol. Sending HTTP or TLS to
+      // another app's binary RPC listener can crash it before classification.
+      // Ownerless managed ports come from the fallback, which only knows T3 reserved them.
+      const unownedManagedPort = server.pid === null && managedPorts.includes(server.port);
+      if (server.terminal === null && !unownedManagedPort) continue;
       groups.push({
         server,
         urls: [`http://${server.host}:${server.port}`, `https://${server.host}:${server.port}`],
@@ -564,7 +585,8 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
   ) {
     const nowMillis = yield* Clock.currentTimeMillis;
     const cached = yield* Ref.get(webProbeCacheRef);
-    const groups = makeWebProbeGroups(servers, configuredUrls);
+    const { managedPorts } = yield* Ref.get(stateRef);
+    const groups = makeWebProbeGroups(servers, configuredUrls, managedPorts);
     const batchProbes = new Map<
       string,
       Effect.Effect<{ readonly probe: WebProbeCacheEntry; readonly fresh: boolean }>
@@ -640,7 +662,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
 
   const recoverProcessProbeFailure =
     (probe: "lsof" | "windows-listeners") => (error: ProcessRunner.ProcessRunError) =>
-      Effect.logDebug("preview port process probe failed; falling back to common-port probes", {
+      Effect.logDebug("preview port process probe failed; probing configured URLs only", {
         cause: error,
         probe,
         platform: hostPlatform,
@@ -665,7 +687,6 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
           args: ["-NoProfile", "-NonInteractive", "-Command", command],
           timeout: Duration.millis(WINDOWS_LISTENER_TIMEOUT_MS),
           maxOutputBytes: 1024 * 1024,
-          outputMode: "truncate",
         })
         .pipe(
           Effect.map((result) => parseWindowsListenerOutput(result.stdout, terminalByProcessId)),
@@ -685,8 +706,8 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
         command: "lsof",
         args: ["-iTCP", "-sTCP:LISTEN", "-P", "-n", "-F", "pcn"],
         timeout: Duration.millis(LSOF_TIMEOUT_MS),
+        // Partial output could hide another app's listener on an owned port.
         maxOutputBytes: 1024 * 1024,
-        outputMode: "truncate",
       })
       .pipe(
         Effect.map((result) => parseLsofOutput(result.stdout, terminalByProcessId)),
@@ -711,7 +732,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
   ) {
     const listeners = yield* listProcessListeners();
     if (listeners !== null) return yield* probeWebServers(listeners, configuredUrls);
-    return yield* probeWebServers(yield* probeCommonPorts(), configuredUrls);
+    return yield* probeWebServers(yield* probeManagedPorts(), configuredUrls);
   });
 
   const listenerOn: PortDiscovery["Service"]["listenerOn"] = Effect.fn("PortDiscovery.listenerOn")(

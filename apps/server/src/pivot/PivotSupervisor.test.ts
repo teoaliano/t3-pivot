@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { RunId, type ThreadId } from "@t3tools/contracts";
+import { RunId, SourceControlProviderKind, type ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
@@ -474,7 +474,7 @@ describe("PivotSupervisor", () => {
       yield* tick;
       const before = wakesFor(fake, pivot).length;
       fake.pullRequests.set("https://github.com/o/r/pull/7", {
-        provider: "github",
+        provider: SourceControlProviderKind.make("github"),
         state: "open",
         isDraft: false,
         mergeability: "mergeable",

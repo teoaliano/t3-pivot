@@ -92,7 +92,7 @@ function NewPivotCreation(props: { target: NewPivotTarget; onDone: () => void })
     settings,
     project,
     sortProviderInstanceEntries(
-      applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings),
+      applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings, projectId),
     ),
   );
   const createPivot = useAtomCommand(serverEnvironment.createPivot, { reportFailure: false });

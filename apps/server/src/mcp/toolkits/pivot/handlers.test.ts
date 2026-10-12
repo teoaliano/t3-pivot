@@ -9,6 +9,7 @@ import {
   type OrchestrationV2ThreadShell,
   type PivotMcpDispatchTeammateResult,
   RunId,
+  SourceControlProviderKind,
   type TeammateModelEntry,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -850,7 +851,7 @@ describe("delivery and teardown", () => {
     thread.shell = { ...thread.shell, pullRequests: [link(state, host)] } as typeof thread.shell;
   };
   const greenPr = {
-    provider: "github" as const,
+    provider: SourceControlProviderKind.make("github"),
     state: "open" as const,
     isDraft: false,
     mergeability: "mergeable" as const,
@@ -960,13 +961,16 @@ describe("delivery and teardown", () => {
       const { pivot, ship, decisionId } = yield* approvedShip(fake);
       yield* approve(pivot, decisionId);
       linkPr(fake, ship.threadId, "open", "gitlab.com");
-      fake.pullRequests.set("https://gitlab.com/o/r/pull/9", { ...greenPr, provider: "gitlab" });
+      fake.pullRequests.set("https://gitlab.com/o/r/pull/9", {
+        ...greenPr,
+        provider: SourceControlProviderKind.make("gitlab"),
+      });
       expectOk(yield* call(pivot, "merge_teammate", { threadId: ship.threadId, decisionId }));
 
       linkPr(fake, ship.threadId, "open", "bitbucket.org");
       fake.pullRequests.set("https://bitbucket.org/o/r/pull/9", {
         ...greenPr,
-        provider: "bitbucket",
+        provider: SourceControlProviderKind.make("bitbucket"),
       });
       expectRefused(
         yield* call(pivot, "merge_teammate", { threadId: ship.threadId, decisionId }),
