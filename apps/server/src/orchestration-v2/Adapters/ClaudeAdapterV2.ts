@@ -1706,9 +1706,30 @@ export interface ClaudeRuntimeQueryPolicy {
   readonly installPermissionCallback: boolean;
 }
 
+// Claude has no OS sandbox to confine a shell, so a file-scoped write policy takes
+// the whole thread out of Bash: built-in reads, plus edits to the listed files only.
+// The rule form is an absolute path with a `//` prefix, e.g. `Edit(//home/me/x.md)`.
+function claudeFileScopedQueryPolicy(
+  writableFiles: ReadonlyArray<string>,
+): ClaudeRuntimeQueryPolicy {
+  const editRules = writableFiles.flatMap((file) => {
+    const rule = `//${file.replace(/^\/+/, "")}`;
+    return [`Edit(${rule})`, `Write(${rule})`];
+  });
+  return {
+    permissionMode: "dontAsk",
+    tools: [...CLAUDE_READ_ONLY_ALLOWED_TOOLS, "Edit", "Write"],
+    allowedTools: [...CLAUDE_READ_ONLY_ALLOWED_TOOLS, ...editRules],
+    installPermissionCallback: false,
+  };
+}
+
 export function claudeRuntimeQueryPolicyForRuntimePolicy(
   runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
 ): ClaudeRuntimeQueryPolicy {
+  if (runtimePolicy.writableFiles !== undefined) {
+    return claudeFileScopedQueryPolicy(runtimePolicy.writableFiles);
+  }
   const permissionMode = permissionModeForClaudeRuntimePolicy(runtimePolicy);
   const readOnlyTools =
     sandboxPolicyKindForClaudeRuntimePolicy(runtimePolicy) === "readOnly"

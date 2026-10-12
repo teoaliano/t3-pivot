@@ -18,6 +18,7 @@ import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
+import * as ThreadWriteAccess from "./ThreadWriteAccess.ts";
 
 const projectId = ProjectId.make("project:runtime-policy");
 const providerInstanceId = ProviderInstanceId.make("codex");
@@ -151,6 +152,58 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
       assert.equal(yield* modeFor(grokInstanceId, "full-access"), "full-access");
       // A provider that advertises no restriction runs every mode as stored.
       assert.equal(yield* modeFor(providerInstanceId, "auto-accept-edits"), "auto-accept-edits");
+    }),
+  );
+});
+
+const layerPivotScope = layerTest.pipe(
+  Layer.provideMerge(
+    Layer.succeed(ThreadWriteAccess.ThreadWriteAccess, {
+      scopeFor: (thread) =>
+        Effect.succeed(
+          thread.worktreePath === "/pivot-home"
+            ? {
+                writableRoots: ["/pivot-home"],
+                writableFiles: ["/pivot-home/preferences.md"],
+              }
+            : null,
+        ),
+    }),
+  ),
+);
+
+it.layer(layerPivotScope)("RuntimePolicyV2 write scope", (it) => {
+  it.effect("confines a scoped thread's writes and keeps its runtime mode", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const resolved = yield* policy.resolve({
+        thread: makeThread({ now, worktreePath: "/pivot-home" }),
+        modelSelection,
+      });
+      assert.equal(resolved.cwd, "/pivot-home");
+      assert.equal(resolved.runtimeMode, "full-access");
+      assert.deepEqual(resolved.sandboxPolicy, {
+        type: "workspaceWrite",
+        writableRoots: ["/pivot-home"],
+        networkAccess: true,
+        excludeSlashTmp: true,
+        excludeTmpdirEnvVar: true,
+      });
+      assert.deepEqual(resolved.writableFiles, ["/pivot-home/preferences.md"]);
+    }),
+  );
+
+  it.effect("leaves an unscoped thread on its runtime mode", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const resolved = yield* policy.resolve({
+        thread: makeThread({ now, worktreePath: "/project-worktree" }),
+        modelSelection,
+      });
+      assert.equal(resolved.sandboxPolicy, undefined);
+      assert.equal(resolved.writableFiles, undefined);
     }),
   );
 });

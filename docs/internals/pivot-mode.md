@@ -66,6 +66,12 @@ user's `preferences.md`. The Pivot thread's workspace is the home, so the projec
 instructions never load into it. The thread is created directly rather than launched: a
 launch runs the project's setup script in the workspace it is given.
 
+The Pivot reads the project and its worktrees but writes only `preferences.md`. Its write
+scope is applied per run by `ThreadWriteAccess` (see `PivotToolRestrictions`), and each
+provider adapter enforces what it can: Codex confines writes to the home directory, and
+Claude gets file-scoped edits with no shell. Providers without that support still run the
+Pivot in full access.
+
 A teammate's brief names its worktree path, which V2 only creates during launch
 preparation. Dispatch derives the path the way V2 does and records the teammate as soon as
 V2 accepts the launch, before the first run starts, so the teammate's first
