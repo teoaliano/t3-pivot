@@ -7,22 +7,27 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { create } from "zustand";
 
-import { useEnvironmentSettings } from "../../hooks/useSettings";
+import { useClientSettings, useEnvironmentSettings } from "../../hooks/useSettings";
+import { useComposerDraftStore } from "../../composerDraftStore";
+import {
+  deriveLogicalProjectKeyFromSettings,
+  selectProjectGroupingSettings,
+} from "../../logicalProject";
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
   sortProviderInstanceEntries,
 } from "../../providerInstances";
-import { useProject, waitForThreadShell } from "../../state/entities";
+import { useProject, useProjects, waitForThreadShell } from "../../state/entities";
 import { usePivotState } from "../../state/pivot";
 import { useEnvironmentQuery } from "../../state/query";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { vcsEnvironment } from "../../state/vcs";
-import { buildThreadRouteParams } from "../../threadRoutes";
+import { buildDraftThreadRouteParams, buildThreadRouteParams } from "../../threadRoutes";
 import { readLocalApi } from "../../localApi";
 import { toastManager } from "../ui/toast";
-import { decideNewPivot, replacePivotPrompt } from "./newPivot.logic";
+import { decideNewPivot, pivotEnvironmentChoices, replacePivotPrompt } from "./newPivot.logic";
 import { pivotDefaultModel } from "./pivotModel.logic";
 import { usePivotViewStore } from "./pivotViewStore";
 
@@ -83,6 +88,22 @@ function NewPivotCreation(props: { target: NewPivotTarget; onDone: () => void })
   const { environmentId, projectId } = props.target;
   const navigate = useNavigate();
   const project = useProject(scopeProjectRef(environmentId, projectId));
+  const projects = useProjects();
+  const groupingSettings = useClientSettings(selectProjectGroupingSettings);
+  const logicalProjectKey =
+    project === null ? null : deriveLogicalProjectKeyFromSettings(project, groupingSettings);
+  // Copies of the project on other environments: more than one and the composer asks where.
+  const environmentChoices = pivotEnvironmentChoices(
+    logicalProjectKey === null
+      ? []
+      : projects
+          .filter(
+            (candidate) =>
+              deriveLogicalProjectKeyFromSettings(candidate, groupingSettings) ===
+              logicalProjectKey,
+          )
+          .map((candidate) => candidate.environmentId),
+  );
   const pivotState = usePivotState(environmentId);
   const takeover = pivotState === null ? null : takeoverSummary(pivotState, projectId);
   const settings = useEnvironmentSettings(environmentId);
@@ -105,6 +126,16 @@ function NewPivotCreation(props: { target: NewPivotTarget; onDone: () => void })
     if (started.current || pivotState === null) return;
     started.current = true;
     void (async () => {
+      // Several environments: the composer asks where, and the first send creates
+      // the Pivot. Takeover is decided then, against the environment chosen.
+      if (environmentChoices.length > 1 && logicalProjectKey !== null) {
+        const draftId = useComposerDraftStore
+          .getState()
+          .createPivotDraft(scopeProjectRef(environmentId, projectId), logicalProjectKey);
+        props.onDone();
+        void navigate({ to: "/draft/$draftId", params: buildDraftThreadRouteParams(draftId) });
+        return;
+      }
       const decision = await decideNewPivot(
         takeover,
         async () =>

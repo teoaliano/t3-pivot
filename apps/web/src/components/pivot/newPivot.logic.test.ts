@@ -2,13 +2,28 @@ import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { decideNewPivot, replacePivotPrompt, resolveNewPivotProjectRef } from "./newPivot.logic";
+import {
+  decideNewPivot,
+  pivotEnvironmentChoices,
+  replacePivotPrompt,
+  resolveNewPivotProjectRef,
+} from "./newPivot.logic";
 
 const local = EnvironmentId.make("local");
 const remote = EnvironmentId.make("remote");
 const localApp = scopeProjectRef(local, ProjectId.make("app-local"));
 const remoteApp = scopeProjectRef(remote, ProjectId.make("app-remote"));
 const other = scopeProjectRef(local, ProjectId.make("other"));
+
+describe("pivotEnvironmentChoices", () => {
+  it("offers each environment once, so a project in one place asks nothing", () => {
+    expect(pivotEnvironmentChoices([local, local])).toEqual([local]);
+  });
+
+  it("offers every environment holding the project", () => {
+    expect(pivotEnvironmentChoices([local, remote])).toEqual([local, remote]);
+  });
+});
 
 describe("resolveNewPivotProjectRef", () => {
   const everywhere = () => true;

@@ -448,7 +448,11 @@ import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
 import { MessagesTimeline, type MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
 import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
 import { PivotComposerBar, PivotDecisionsStrip, usePivotChatRole } from "./pivot/PivotChatChrome";
+import { decideNewPivot, replacePivotPrompt } from "./pivot/newPivot.logic";
+import { usePivotViewStore } from "./pivot/pivotViewStore";
 import { useInPivotView } from "./pivot/pivotViewContext";
+import { usePivotState } from "../state/pivot";
+import { takeoverSummary } from "@t3tools/client-runtime/pivot-state";
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveTimelineIsAtEnd, worktreeSetupAgentStarted } from "./chat/MessagesTimeline.logic";
 import {
@@ -1636,6 +1640,8 @@ export default function ChatView(props: ChatViewProps) {
   const startThreadTurn = useOrchestrationCommand(threadEnvironment.startTurn, {
     reportFailure: false,
   });
+  // A New Pivot composer's first send: the Pivot is created on the draft's environment.
+  const createPivot = useAtomCommand(serverEnvironment.createPivot, { reportFailure: false });
   const resumeThreadQueue = useOrchestrationCommand(threadEnvironment.resumeThreadQueue, {
     reportFailure: false,
   });
@@ -1710,6 +1716,7 @@ export default function ChatView(props: ChatViewProps) {
         : null,
   );
   const serverThread = useThreadShell(routeThreadRef);
+  const pivotState = usePivotState(draftThread?.environmentId ?? null);
   const routeThreadDetailRef = resolveThreadDetailRef(routeThreadRef, {
     shellExists: serverThread !== null,
     waitForShell: draftThread !== null,
@@ -8824,6 +8831,69 @@ export default function ChatView(props: ChatViewProps) {
     }
   };
 
+  // A New Pivot composer's first send: create the Pivot on the chosen environment, then
+  // send the message to it. Returns false, creating nothing, when the user declines a takeover.
+  const sendNewPivotFirstMessage = async (text: string, modelSelection: ModelSelection) => {
+    if (draftId === null || draftThread?.pivot !== true) return false;
+    const pivotEnvironmentId = draftThread.environmentId;
+    const projectId = draftThread.projectId;
+    const takeover = pivotState === null ? null : takeoverSummary(pivotState, projectId);
+    const decision = await decideNewPivot(
+      takeover,
+      async () =>
+        (await readLocalApi()?.dialogs.confirm(
+          replacePivotPrompt(activeProject?.title ?? "this project", takeover!),
+        )) ?? false,
+    );
+    if (decision === "cancel") return false;
+    const created = await createPivot({
+      environmentId: pivotEnvironmentId,
+      input: { projectId, modelSelection, takeover: decision === "replace" },
+    });
+    if (created._tag !== "Success") {
+      const failure = created._tag === "Failure" ? squashAtomCommandFailure(created) : null;
+      toastManager.add({
+        type: "error",
+        title: "The Pivot was not created.",
+        ...(failure instanceof Error ? { description: failure.message } : {}),
+      });
+      return false;
+    }
+    const pivotRef = scopeThreadRef(pivotEnvironmentId, created.value.threadId);
+    const sent = await startThreadTurn({
+      environmentId: pivotEnvironmentId,
+      input: {
+        threadId: pivotRef.threadId,
+        message: { messageId: newMessageId(), role: "user", text, attachments: [] },
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        createdAt: new Date().toISOString(),
+      },
+    });
+    // The route treats a thread missing from the shell as gone, so land only once it arrives.
+    const arrived = await waitForThreadShell(pivotRef);
+    useComposerDraftStore.getState().clearDraftThread(draftId);
+    if (sent._tag !== "Success") {
+      toastManager.add({
+        type: "error",
+        title: "The Pivot was created, but the message was not sent.",
+        description: "Send it from the Pivot.",
+      });
+    }
+    if (!arrived) {
+      toastManager.add({
+        type: "error",
+        title: "The Pivot was created, but has not reached this client yet.",
+        description: "Reconnect and open it from the sidebar.",
+      });
+      return true;
+    }
+    usePivotViewStore.getState().setMode(pivotRef, "chat");
+    void navigate({ to: "/$environmentId/$threadId", params: buildThreadRouteParams(pivotRef) });
+    return true;
+  };
+
   const onSend = async (
     e?: { preventDefault: () => void },
     dispatchMode: ComposerDispatchMode = "auto",
@@ -8913,6 +8983,32 @@ export default function ChatView(props: ChatViewProps) {
     }
     if (!sendCtx?.providerAvailable) {
       notifyDirectAnnotationAttached();
+      return;
+    }
+    if (draftThread?.pivot === true) {
+      const pivotText = promptRef.current.trim();
+      if (directAnnotation || composerHasNonPromptContent) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "A Pivot starts from a text message",
+            description:
+              "Remove attachments and context, then send. Add them once the Pivot exists.",
+          }),
+        );
+        return;
+      }
+      if (pivotText.length === 0) return;
+      sendInFlightRef.current = true;
+      try {
+        const sent = await sendNewPivotFirstMessage(pivotText, sendCtx.selectedModelSelection);
+        if (sent) {
+          promptRef.current = "";
+          composerRef.current?.resetCursorState();
+        }
+      } finally {
+        sendInFlightRef.current = false;
+      }
       return;
     }
     const multipleModelSelections = sendCtx.multipleModelSelections;
@@ -11930,7 +12026,8 @@ export default function ChatView(props: ChatViewProps) {
                                 ref={branchToolbarRef}
                                 environmentId={activeThread.environmentId}
                                 threadId={activeThread.id}
-                                showGitControls={isGitRepo}
+                                // A Pivot runs in its own home, so the branch and worktree controls do not apply.
+                                showGitControls={isGitRepo && draftThread?.pivot !== true}
                                 {...(routeKind === "draft" && draftId ? { draftId } : {})}
                                 onEnvModeChange={onEnvModeChange}
                                 startFromOrigin={startFromOrigin}
