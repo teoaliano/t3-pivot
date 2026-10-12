@@ -141,16 +141,10 @@ describe("searchSettings", () => {
     expect(SETTINGS_SEARCH_ITEMS.some((item) => item.id === "quit-confirmation")).toBe(true);
     expect(searchSettings("hold to quit")).toEqual([]);
     expect(searchSettings("wsl")).toEqual([]);
-    expect(searchSettings("update track")).toEqual([]);
   });
 
-  it("finds the About update rows", () => {
+  it("finds the About version row", () => {
     expect(searchSettings("check for updates").map((item) => item.id)).toContain("app-version");
-    expect(SETTINGS_SEARCH_ITEMS.find((item) => item.id === "update-track")).toMatchObject({
-      title: "Update track",
-      to: "/settings/general",
-      releaseChannelOnly: true,
-    });
   });
 
   it("hides macOS-only settings on other platforms", () => {
