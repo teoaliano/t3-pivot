@@ -396,7 +396,7 @@ export const resolveServerConfig = (
         Option.fromUndefinedOr(env.tailscaleServePort),
         Option.fromUndefinedOr(bootstrap?.tailscaleServePort),
       ),
-      () => 443,
+      () => 8444,
     );
     const staticDir = devUrl ? undefined : yield* ServerConfig.resolveStaticDir();
     const host = Option.getOrElse(
