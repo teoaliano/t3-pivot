@@ -342,6 +342,15 @@ export const make = Effect.gen(function* () {
       Effect.map((settings) => resolveProjectSettings(settings, projectId).settings.teammateModels),
     );
 
+  /** The project's model per built-in teammate kind, from the same settings as the list. */
+  const teammateKindModels = (projectId: ProjectId) =>
+    serverSettings.getSettings.pipe(
+      Effect.map(
+        (settings) =>
+          resolveProjectSettings(settings, projectId).settings.teammateKindModelSelections,
+      ),
+    );
+
   const ensureHome = (projectId: ProjectId) =>
     Effect.gen(function* () {
       const entries = yield* teammateModels(projectId);
@@ -598,7 +607,11 @@ export const make = Effect.gen(function* () {
             worktreePath,
             definitionOfDone: yield* text(definitionOfDoneText(input.kind, deliveryMode)),
           });
-          const choice = chooseTeammateModel(yield* teammateModels(pivot.projectId), input);
+          const choice = chooseTeammateModel(
+            yield* teammateModels(pivot.projectId),
+            yield* teammateKindModels(pivot.projectId),
+            input,
+          );
           if (choice.type === "refused") return yield* refuse(command, choice.reason);
           const pivotShell = yield* threads.shell(pivot.threadId);
           const modelSelection =

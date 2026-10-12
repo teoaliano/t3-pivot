@@ -236,7 +236,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Teammate models",
     to: "/settings/general",
     scope: "project-defaults",
-    searchTerms: ["pivot teammates dispatch research fixes coding provider reasoning effort"],
+    searchTerms: [
+      "pivot teammates dispatch research fixes coding provider reasoning effort ship scout",
+    ],
   },
   {
     id: "default-permissions",

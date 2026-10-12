@@ -959,6 +959,13 @@ export const TeammateModelEntry = Schema.Struct({
 });
 export type TeammateModelEntry = typeof TeammateModelEntry.Type;
 
+/** The model each built-in teammate kind runs on when a dispatch names no entry. Null leaves it to the default entry. */
+export const TeammateKindModelSelections = Schema.Struct({
+  ship: Schema.NullOr(ModelSelection),
+  scout: Schema.NullOr(ModelSelection),
+});
+export type TeammateKindModelSelections = typeof TeammateKindModelSelections.Type;
+
 export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "worktreeCleanup",
   "defaultModelSelection",
@@ -986,6 +993,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "responseStreamingMode",
   "pivotModelSelection",
   "teammateModels",
+  "teammateKindModelSelections",
 ] as const;
 export type ProjectScopedServerSettingKey = (typeof PROJECT_SCOPED_SERVER_SETTING_KEYS)[number];
 
@@ -1036,6 +1044,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
   pivotModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   /** Replaces the environment's list as a whole; entries never merge. */
   teammateModels: Schema.optionalKey(Schema.Array(TeammateModelEntry)),
+  teammateKindModelSelections: Schema.optionalKey(TeammateKindModelSelections),
   providerInstances: Schema.optionalKey(
     Schema.Record(ProviderInstanceId, ProjectProviderInstanceOverride),
   ),
@@ -1170,6 +1179,9 @@ export const ServerSettings = Schema.Struct({
   /** The models a Pivot chooses from when it starts a teammate. */
   teammateModels: Schema.Array(TeammateModelEntry).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  teammateKindModelSelections: TeammateKindModelSelections.pipe(
+    Schema.withDecodingDefault(Effect.succeed({ ship: null, scout: null })),
   ),
   /**
    * Per-project overrides of the keys in `PROJECT_SCOPED_SERVER_SETTING_KEYS`,
@@ -1566,6 +1578,7 @@ export const ServerSettingsPatch = Schema.Struct({
   pivotModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   /** Replaces the whole list. */
   teammateModels: Schema.optionalKey(Schema.Array(TeammateModelEntry)),
+  teammateKindModelSelections: Schema.optionalKey(TeammateKindModelSelections),
   /**
    * Per-project entry replacement: each entry replaces that project's whole
    * override set and `null` removes it. Clearing one override means resending
