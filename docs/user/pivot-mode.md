@@ -30,8 +30,9 @@ name. On other forges you merge by hand. In a project with no remote, a ready br
 your default branch by fast-forward.
 
 Calls that need you appear above the Pivot's composer until you answer. A merge, a landing or
-discarding work asks for your approval: answer with **Approve** or **Decline**, adding a note if
-you want to waive a check. Your answer is recorded in your words and passed on to the teammate.
+discarding work asks for your approval: answer with **Accept**, adding a note if you want to waive
+a check, or with **Comment**, which needs a note. Your answer is recorded in your words and passed on
+to the teammate; after a comment, the teammate makes its change and proposes again.
 To check the Pivot's judgment, show the **Decisions** pane in the Pivot view: it lists every
 decision, with the answers the Pivot gave on its own labeled as its own.
 
