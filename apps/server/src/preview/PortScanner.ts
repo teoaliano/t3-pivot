@@ -18,6 +18,10 @@
  *
  * Polling is reference-counted via scoped `retain`. A single layer-scoped fiber
  * polls forever, but each tick is a no-op when the retain count is zero.
+ *
+ * Managed processes run in T3 terminals, so their listeners count as owned.
+ * The managed process service also registers their ports, which receive probes
+ * when the platform cannot report listener ownership.
  */
 import {
   CONFIGURED_LOCAL_SERVER_URLS_MAX_ITEMS,
@@ -26,6 +30,7 @@ import {
   type DiscoveredLocalServer,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as Net from "@t3tools/shared/Net";
 import { isLoopbackHost, LSOF_LOCAL_HOST_TOKENS } from "@t3tools/shared/preview";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -67,8 +72,26 @@ export class PortDiscovery extends Context.Service<
       readonly threadId: string;
       readonly terminalId: string;
     }) => Effect.Effect<void>;
+    /** Descendant pids the terminal layer last registered for a terminal. */
+    readonly terminalProcessIds: (input: {
+      readonly threadId: string;
+      readonly terminalId: string;
+    }) => Effect.Effect<ReadonlyArray<number>>;
+    /**
+     * The process listening on a loopback port, whether or not it serves a web
+     * page. None when the port is free. Pid and name are null when the
+     * platform could only tell that the port is held.
+     */
+    readonly listenerOn: (port: number) => Effect.Effect<Option.Option<PortListener>>;
+    /** Replaces the managed-process ports probed when listener ownership is unknown. */
+    readonly setManagedPorts: (ports: ReadonlyArray<number>) => Effect.Effect<void>;
   }
 >()("t3/preview/PortScanner/PortDiscovery") {}
+
+export interface PortListener {
+  readonly pid: number | null;
+  readonly processName: string | null;
+}
 
 const POLL_INTERVAL = Duration.seconds(3);
 const LSOF_TIMEOUT_MS = 5_000;
@@ -99,6 +122,7 @@ interface ScannerState {
     }
   >;
   readonly retainCount: number;
+  readonly managedPorts: ReadonlyArray<number>;
 }
 
 interface TerminalProcessOwner {
@@ -346,6 +370,7 @@ const isCommandNotFound = (error: ProcessRunner.ProcessSpawnError): boolean =>
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* PortDiscoveryMake() {
+  const net = yield* Net.NetService;
   const processRunner = yield* ProcessRunner.ProcessRunner;
   const fileSystem = yield* FileSystem.FileSystem;
   const hostPlatform = yield* HostProcess.Platform;
@@ -354,6 +379,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
     listeners: new Map(),
     terminalProcesses: new Map(),
     retainCount: 0,
+    managedPorts: [],
   });
   const webProbeCacheRef = yield* Ref.make<ReadonlyMap<string, WebProbeCacheEntry>>(new Map());
   const scanSemaphore = yield* Semaphore.make(1);
@@ -458,6 +484,32 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
     return [...seen.values()].toSorted((left, right) => left.port - right.port);
   });
 
+  /** Managed-process ports held by anything, for when listener ownership is unknown. */
+  const probeManagedPorts = Effect.fn("PortDiscovery.probeManagedPorts")(function* () {
+    const { managedPorts } = yield* Ref.get(stateRef);
+    const results = yield* Effect.forEach(
+      managedPorts,
+      (port) =>
+        net.isPortAvailableOnLoopback(port).pipe(
+          Effect.map((available) => ({
+            port,
+            listening: !available,
+          })),
+        ),
+      { concurrency: "unbounded" },
+    );
+    return results
+      .filter((result) => result.listening)
+      .map<DiscoveredLocalServer>((result) => ({
+        host: "localhost",
+        port: result.port,
+        url: `http://localhost:${result.port}`,
+        processName: null,
+        pid: null,
+        terminal: null,
+      }));
+  });
+
   const probeWebUrl = Effect.fn("PortDiscovery.probeWebUrl")((url: string) =>
     httpClient.get(url).pipe(
       Effect.map((response) => {
@@ -482,6 +534,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
   const makeWebProbeGroups = (
     servers: ReadonlyArray<DiscoveredLocalServer>,
     configuredUrls: ReadonlyArray<string>,
+    managedPorts: ReadonlyArray<number>,
   ): ReadonlyArray<WebProbeGroup> => {
     const serversByKey = new Map(
       servers.map((server) => [localServerKey(server.host, server.port), server] as const),
@@ -513,7 +566,9 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
     for (const server of servers) {
       // A listener alone does not identify its protocol. Sending HTTP or TLS to
       // another app's binary RPC listener can crash it before classification.
-      if (server.terminal === null) continue;
+      // Ownerless managed ports come from the fallback, which only knows T3 reserved them.
+      const unownedManagedPort = server.pid === null && managedPorts.includes(server.port);
+      if (server.terminal === null && !unownedManagedPort) continue;
       groups.push({
         server,
         urls: [`http://${server.host}:${server.port}`, `https://${server.host}:${server.port}`],
@@ -530,7 +585,8 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
   ) {
     const nowMillis = yield* Clock.currentTimeMillis;
     const cached = yield* Ref.get(webProbeCacheRef);
-    const groups = makeWebProbeGroups(servers, configuredUrls);
+    const { managedPorts } = yield* Ref.get(stateRef);
+    const groups = makeWebProbeGroups(servers, configuredUrls, managedPorts);
     const batchProbes = new Map<
       string,
       Effect.Effect<{ readonly probe: WebProbeCacheEntry; readonly fresh: boolean }>
@@ -612,9 +668,8 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
         platform: hostPlatform,
       }).pipe(Effect.as(null));
 
-  const scanUnlocked = Effect.fn("PortDiscovery.scanUnlocked")(function* (
-    configuredUrls: ReadonlyArray<string>,
-  ) {
+  /** Every loopback listener with its owner, or null when the platform probe failed. */
+  const listProcessListeners = Effect.fn("PortDiscovery.listProcessListeners")(function* () {
     const state = yield* Ref.get(stateRef);
     const terminalByProcessId = new Map<number, TerminalProcessOwner>();
     for (const registration of state.terminalProcesses.values()) {
@@ -626,7 +681,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
       const recoverWindowsProbeFailure = recoverProcessProbeFailure("windows-listeners");
       const command =
         'Get-NetTCPConnection -State Listen -ErrorAction Stop | ForEach-Object { $processName = (Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName; Write-Output "$($_.LocalAddress)|$($_.LocalPort)|$($_.OwningProcess)|$processName" }';
-      const listeners = yield* processRunner
+      return yield* processRunner
         .run({
           command: "powershell.exe",
           args: ["-NoProfile", "-NonInteractive", "-Command", command],
@@ -643,14 +698,9 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
             ProcessTimeoutError: recoverWindowsProbeFailure,
           }),
         );
-      if (listeners !== null) return yield* probeWebServers(listeners, configuredUrls);
-      return yield* probeWebServers([], configuredUrls);
     }
     const recoverLsofProbeFailure = recoverProcessProbeFailure("lsof");
-    if (yield* Ref.get(lsofMissingRef)) {
-      const fromProc = yield* scanProcListeners(terminalByProcessId);
-      return yield* probeWebServers(fromProc ?? [], configuredUrls);
-    }
+    if (yield* Ref.get(lsofMissingRef)) return yield* scanProcListeners(terminalByProcessId);
     const lsofResult = yield* processRunner
       .run({
         command: "lsof",
@@ -673,10 +723,31 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
           ProcessTimeoutError: recoverLsofProbeFailure,
         }),
       );
-    if (lsofResult !== null) return yield* probeWebServers(lsofResult, configuredUrls);
-    const fromProc = yield* scanProcListeners(terminalByProcessId);
-    return yield* probeWebServers(fromProc ?? [], configuredUrls);
+    if (lsofResult !== null) return lsofResult;
+    return yield* scanProcListeners(terminalByProcessId);
   });
+
+  const scanUnlocked = Effect.fn("PortDiscovery.scanUnlocked")(function* (
+    configuredUrls: ReadonlyArray<string>,
+  ) {
+    const listeners = yield* listProcessListeners();
+    if (listeners !== null) return yield* probeWebServers(listeners, configuredUrls);
+    return yield* probeWebServers(yield* probeManagedPorts(), configuredUrls);
+  });
+
+  const listenerOn: PortDiscovery["Service"]["listenerOn"] = Effect.fn("PortDiscovery.listenerOn")(
+    function* (port) {
+      const listeners = yield* listProcessListeners();
+      if (listeners !== null) {
+        const listener = listeners.find((server) => server.port === port);
+        return listener
+          ? Option.some({ pid: listener.pid, processName: listener.processName })
+          : Option.none();
+      }
+      const available = yield* net.isPortAvailableOnLoopback(port);
+      return available ? Option.none() : Option.some({ pid: null, processName: null });
+    },
+  );
 
   const scanSnapshot = Effect.fn("PortDiscovery.scanSnapshot")(
     (configuredUrls: ReadonlyArray<string>) =>
@@ -797,12 +868,25 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
     });
   });
 
+  const terminalProcessIds: PortDiscovery["Service"]["terminalProcessIds"] = (input) =>
+    Ref.get(stateRef).pipe(
+      Effect.map((state) => [
+        ...(state.terminalProcesses.get(terminalOwnerKey(input))?.processIds ?? []),
+      ]),
+    );
+
+  const setManagedPorts: PortDiscovery["Service"]["setManagedPorts"] = (ports) =>
+    Ref.update(stateRef, (state) => ({ ...state, managedPorts: [...ports] }));
+
   return PortDiscovery.of({
     scan: scanOnce,
     subscribe,
     retain,
     registerTerminalProcesses,
     unregisterTerminal,
+    terminalProcessIds,
+    listenerOn,
+    setManagedPorts,
   });
 }).pipe(Effect.withSpan("PortDiscovery.make"));
 

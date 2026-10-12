@@ -225,6 +225,20 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["new thread project provider reasoning effort"],
   },
   {
+    id: "pivot-model",
+    title: "Pivot model",
+    to: "/settings/general",
+    scope: "project-defaults",
+    searchTerms: ["new pivot supervisor provider reasoning effort"],
+  },
+  {
+    id: "teammate-models",
+    title: "Teammate models",
+    to: "/settings/general",
+    scope: "project-defaults",
+    searchTerms: ["pivot teammates dispatch research fixes coding provider reasoning effort"],
+  },
+  {
     id: "default-permissions",
     title: "Permissions",
     to: "/settings/general",
@@ -588,7 +602,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "diagnostics",
     title: "Diagnostics",
     to: "/settings/general",
-    searchTerms: ["logs traces processes resource history failures spans cpu memory"],
+    searchTerms: [
+      "logs traces processes resource history failures spans cpu memory dev servers running ports stop",
+    ],
   },
   {
     id: "open-source-licenses",

@@ -7,6 +7,7 @@ import {
   type DiscoveredLocalServer,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as Net from "@t3tools/shared/Net";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
@@ -43,6 +44,15 @@ const layerTestProcessRunner = Layer.succeed(ProcessRunner.ProcessRunner, {
   run: processProbeFailure,
 });
 
+/** Loopback with nothing listening, for scanners that never reach the managed-port fallback. */
+const layerFreeNet = Layer.succeed(Net.NetService, {
+  canListenOnHost: () => Effect.succeed(true),
+  isPortAvailableOnLoopback: () => Effect.succeed(true),
+  hasListenerOnHost: () => Effect.succeed(false),
+  reserveLoopbackPort: () => Effect.succeed(40_000),
+  findAvailablePort: (preferred) => Effect.succeed(preferred),
+});
+
 /** A host without `/proc`, so a missing `lsof` leaves only configured URLs. */
 const layerNoProc = FileSystem.layerNoop({});
 
@@ -56,6 +66,7 @@ const layerProbeFailure = (
       Layer.mergeAll(
         fileSystem,
         Layer.succeed(ProcessRunner.ProcessRunner, { run }),
+        layerFreeNet,
         Layer.succeed(HostProcess.Platform, "linux"),
         FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch))),
       ),
@@ -67,6 +78,7 @@ const layerTestPortDiscovery = PortScanner.layer.pipe(
     Layer.mergeAll(
       layerNoProc,
       layerTestProcessRunner,
+      Net.layer,
       Layer.succeed(HostProcess.Platform, "win32"),
       FetchHttpClient.layer,
     ),
@@ -107,6 +119,7 @@ const layerLsofScanner = (input: {
               stderrInvalidUtf8: false,
             }),
         }),
+        layerFreeNet,
         Layer.succeed(HostProcess.Platform, "linux"),
         FetchHttpClient.layer.pipe(
           Layer.provide(Layer.succeed(FetchHttpClient.Fetch, input.fetch)),
@@ -190,6 +203,18 @@ effectIt.layer(layerTestPortDiscovery)("PortDiscovery integration (configured UR
       const scanner = yield* PortScanner.PortDiscovery;
       const result = yield* scanner.scan([`http://localhost:${port}`]);
       expect(result.some((server) => server.port === port)).toBe(false);
+    }),
+  );
+
+  it.effect(
+    "scan() probes a managed-process port when listener ownership is unknown",
+    Effect.fn("PortScannerTest.scanFindsManagedPort")(function* () {
+      const { port } = yield* commonDevServer;
+      const scanner = yield* PortScanner.PortDiscovery;
+      expect((yield* scanner.scan()).some((server) => server.port === port)).toBe(false);
+      yield* scanner.setManagedPorts([port]);
+      expect((yield* scanner.scan()).some((server) => server.port === port)).toBe(true);
+      yield* scanner.setManagedPorts([]);
     }),
   );
 

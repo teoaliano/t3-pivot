@@ -16,6 +16,8 @@ import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import type * as FileSystem from "effect/FileSystem";
+import type * as Path from "effect/Path";
 import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
@@ -46,6 +48,8 @@ import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as ProviderEventIngestor from "./orchestration-v2/ProviderEventIngestor.ts";
 import * as ModelManifest from "./provider/ModelManifest.ts";
 import * as ResetCreditCoordinator from "./provider/resetCreditCoordinator.ts";
+import * as ManagedProcesses from "./managedProcess/ManagedProcesses.ts";
+import * as ProcessInspector from "./managedProcess/ProcessInspector.ts";
 import * as EventNdjsonLogger from "./provider/EventNdjsonLogger.ts";
 import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
@@ -108,6 +112,16 @@ import * as PullRequestReadCache from "./pullRequest/PullRequestReadCache.ts";
 import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
+import * as PivotHome from "./pivot/PivotHome.ts";
+import * as PivotCarryOn from "./pivot/PivotCarryOn.ts";
+import * as PivotDatabase from "./pivot/PivotDatabase.ts";
+import * as PivotRelayAwareness from "./pivot/PivotRelayAwareness.ts";
+import * as PivotGit from "./pivot/PivotGit.ts";
+import * as PivotService from "./pivot/PivotService.ts";
+import * as PivotStore from "./pivot/PivotStore.ts";
+import * as PivotSupervisor from "./pivot/PivotSupervisor.ts";
+import * as PivotThreads from "./pivot/PivotThreads.ts";
+import * as PivotToolRestrictions from "./pivot/PivotToolRestrictions.ts";
 import * as Observability from "./observability/Observability.ts";
 import * as HeapSnapshot from "./observability/HeapSnapshot.ts";
 import * as EventLoopMonitor from "./observability/EventLoopMonitor.ts";
@@ -172,8 +186,11 @@ import * as RunFinalizationService from "./orchestration-v2/RunFinalizationServi
 import * as ProjectionStoreV2 from "./orchestration-v2/ProjectionStore.ts";
 import {
   clearPersistedServerRuntimeState,
+  ensureHomeNotInUse,
+  isProcessAlive,
   makePersistedServerRuntimeState,
   persistServerRuntimeState,
+  serverOriginAnswers,
 } from "./serverRuntimeState.ts";
 import * as OrchestrationHttp from "./orchestration-v2/http.ts";
 import * as ProjectHttp from "./project/http.ts";
@@ -181,6 +198,7 @@ import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
 import * as ServerActivation from "./serverActivation.ts";
+import { ensureDatabaseNotNewer } from "./databaseNewerGuard.ts";
 
 // MCP handoff thread IDs include escaped provenance and can exceed find-my-way's
 // 100-character default for one path segment.
@@ -574,6 +592,32 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
     Layer.provide(layerPullRequestService),
     Layer.provide(ProjectionStoreV2.layer),
   ),
+  // Pivot mode: brings each active Pivot's home contract up to this release before
+  // any Pivot runs, then records teammate changes from V2's events and wakes each Pivot.
+  // The contract lists the teammate models from Settings, so changing them rewrites it.
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const pivots = yield* PivotService.PivotService;
+      yield* pivots.refreshHomes;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      yield* settings.streamChanges.pipe(
+        Stream.map((next) =>
+          JSON.stringify([
+            next.teammateModels,
+            Object.entries(next.projectSettingsOverrides).map(([projectId, overrides]) => [
+              projectId,
+              overrides.teammateModels,
+            ]),
+          ]),
+        ),
+        Stream.changes,
+        Stream.runForEach(() => pivots.refreshHomes),
+        Effect.forkScoped,
+      );
+      const supervisor = yield* PivotSupervisor.PivotSupervisor;
+      yield* supervisor.start;
+    }),
+  ).pipe(Layer.provide(PivotSupervisor.layer)),
   // Subscribes to `account.rate-limits.updated` so usage bars track live
   // telemetry instead of waiting for the next status probe.
   ProviderUsageLimitsIngestion.layer,
@@ -584,8 +628,30 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   // for the normal (on-delete) path.
   Layer.effectDiscard(ProjectSettingsOverrideSweep.sweep),
 ).pipe(
+  // Pivot mode: its service and the adapter it reaches V2 threads, PRs and
+  // checkouts through. Teardown stops a worktree's managed processes, so it
+  // sits inside them.
+  Layer.provideMerge(
+    PivotService.layer.pipe(
+      Layer.provideMerge(PivotThreads.layer.pipe(Layer.provide(layerPullRequestService))),
+      Layer.provideMerge(PivotGit.layer.pipe(Layer.provide(ProcessRunner.layer))),
+    ),
+  ),
+  // Storage cleanup stops a checkout's dev servers before removing it; the
+  // RPC and MCP layers start and stop them.
+  Layer.provideMerge(
+    ManagedProcesses.layer.pipe(
+      Layer.provide(ProcessInspector.layer.pipe(Layer.provide(ProcessRunner.layer))),
+    ),
+  ),
   // Core Services
   Layer.provideMerge(layerOrchestrationApplication),
+  // Pivot mode: a Pivot and its teammates carry on after a restart, and the
+  // relay publishes teammates only when held for the user, and a Pivot's decisions as
+  // input needed.
+  Layer.provideMerge(
+    Layer.mergeAll(PivotCarryOn.layer, PivotRelayAwareness.layer, PivotToolRestrictions.layer),
+  ),
   Layer.provideMerge(RuntimeLayer.layerEventInfrastructure),
   Layer.provideMerge(Layer.merge(ProjectStore.layer, ThreadSearch.layer)),
   Layer.provideMerge(layerServerSettings),
@@ -654,6 +720,8 @@ const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
   Layer.provideMerge(layerWorkspace),
   Layer.provideMerge(ProjectEnrichmentService.layer),
   Layer.provideMerge(Layer.mergeAll(NativeAppIconResolver.layer, layerProjectFaviconResolver)),
+  Layer.provideMerge(PivotHome.layer.pipe(Layer.provide(ProcessRunner.layer))),
+  Layer.provideMerge(PivotStore.layer.pipe(Layer.provide(PivotDatabase.layer))),
   Layer.provideMerge(layerRepositoryIdentityResolver),
   Layer.provideMerge(layerServerEnvironment),
   Layer.provideMerge(layerAuth),
@@ -756,6 +824,19 @@ const layerMakeServer = Layer.unwrap(
     const layerLauncher = ServiceLauncherClient.layer;
 
     yield* fixPath({ shellEnvironmentPrepared: config.shellEnvironmentPrepared });
+
+    // Refuse to share a T3 home with another live server before anything
+    // opens its database. A launcher-managed standby would be refused too,
+    // but T3 Pivot never runs under the service launcher.
+    yield* ensureHomeNotInUse({
+      path: config.serverRuntimeStatePath,
+      currentPid: process.pid,
+      isAlive: isProcessAlive,
+      originAnswers: (origin) =>
+        serverOriginAnswers(origin).pipe(Effect.provide(FetchHttpClient.layer)),
+    }).pipe(Effect.provide(layerPlatformServices));
+    // Refuse a database a newer build already migrated.
+    yield* ensureDatabaseNotNewer(config.dbPath).pipe(Effect.provide(layerPlatformServices));
 
     const layerHttpListening = Layer.effectDiscard(
       Effect.gen(function* () {
@@ -1122,4 +1203,12 @@ const layerMakeServer = Layer.unwrap(
 );
 
 // The CLI supplies configuration.
-export const runServer = Layer.launch(layerMakeServer);
+const launchServer = Layer.launch(layerMakeServer);
+
+// Declared so callers read three services instead of re-inferring the whole
+// layer graph, which the Effect language service misreads as `any`.
+export const runServer: Effect.Effect<
+  never,
+  Effect.Error<typeof launchServer>,
+  FileSystem.FileSystem | Path.Path | ServerConfig.ServerConfig
+> = launchServer;

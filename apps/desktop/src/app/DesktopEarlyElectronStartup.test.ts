@@ -88,6 +88,20 @@ describe("DesktopEarlyElectronStartup", () => {
     });
   });
 
+  it("reads packaged state from ~/.t3-pivot when T3CODE_HOME is unset", () => {
+    const preference = resolveEarlyLinuxPasswordStorePreference({
+      env: {},
+      homeDirectory: "/home/user",
+      joinPath,
+      readFileString: (path) => {
+        assert.equal(path, "/home/user/.t3-pivot/userdata/desktop-settings.json");
+        return JSON.stringify({ linuxPasswordStore: "kwallet" });
+      },
+    });
+
+    assert.equal(preference, "kwallet");
+  });
+
   it("keeps implicit development state under ~/.t3/dev when T3CODE_HOME is unset", () => {
     const preference = resolveEarlyLinuxPasswordStorePreference({
       env: {

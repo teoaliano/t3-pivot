@@ -69,6 +69,7 @@ previous directory.
 If your Xcode account only has a Personal Team, use a bundle identifier you control and opt into the
 reduced-capability local build. Personal Team builds omit the widget and share extensions, push
 entitlement, and native Sign in with Apple entitlement; builds without this opt-in are unchanged.
+They install as "T3 Pivot" and never fetch OTA updates, so they always run the JS bundled at build time.
 
 ```bash
 T3CODE_IOS_PERSONAL_TEAM=1 \

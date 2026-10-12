@@ -102,6 +102,7 @@ function Header(props: { readonly gitStatus: VcsStatusResult | null; readonly ti
         onOpenTerminal: () => {},
         onOpenNewTerminal: () => {},
         onRunProjectScript: async () => {},
+        onOpenDevServers: () => {},
       }}
       hasThreadCwd
       hasWorkspaceRoot

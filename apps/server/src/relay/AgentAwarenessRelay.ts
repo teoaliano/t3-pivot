@@ -11,7 +11,10 @@ import {
   type RelayAgentActivityPublishProofPayload,
   type RelayAgentActivityState,
 } from "@t3tools/contracts/relay";
-import { projectThreadAwarenessV2 } from "@t3tools/shared/agentAwareness";
+import {
+  projectThreadAwarenessV2,
+  type ThreadAwarenessPivotRole,
+} from "@t3tools/shared/agentAwareness";
 import { turnItemUpdateCanEndBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
@@ -50,6 +53,7 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import { forkParked } from "../serverActivation.ts";
+import * as PivotAwareness from "./PivotAwareness.ts";
 
 export class AgentAwarenessRelay extends Context.Service<
   AgentAwarenessRelay,
@@ -297,6 +301,7 @@ function resolveAgentAwarenessRelayPublishSnapshot(input: {
   readonly threadId: ThreadId;
   readonly thread: Option.Option<OrchestrationV2ThreadShell>;
   readonly project: Option.Option<Project>;
+  readonly pivotRole: ThreadAwarenessPivotRole | null;
 }): {
   readonly projectId: string | null;
   readonly state: RelayAgentActivityState | null;
@@ -323,6 +328,7 @@ function resolveAgentAwarenessRelayPublishSnapshot(input: {
         environmentId: input.environmentId,
         project: input.project.value,
         thread: input.thread.value,
+        pivotRole: input.pivotRole,
       }),
     ),
     reason: "snapshot",
@@ -524,8 +530,12 @@ export const make = Effect.gen(function* () {
     // domain event, so materializing the full shell here would make the cost
     // of one thread's activity proportional to how many threads exist.
     const threadShell = yield* threads.getThreadShell(threadId);
+    const pivotRole = yield* (yield* PivotAwareness.PivotAwareness).roleOf(threadId);
     if (
-      threadShell?.lineage.relationshipToParent === "subagent" &&
+      (threadShell?.lineage.relationshipToParent === "subagent" ||
+        // T3 Pivot: a teammate's news reaches the user through its Pivot, unless a
+        // question or approval holds it for the user.
+        (pivotRole?.kind === "teammate" && threadShell?.pendingRuntimeRequest == null)) &&
       !(yield* Ref.get(publishedStateByThreadRef)).has(threadId)
     ) {
       // Subagents never project activity, so the relay holds no row to clear.
@@ -546,6 +556,7 @@ export const make = Effect.gen(function* () {
       threadId,
       thread,
       project,
+      pivotRole,
     });
     const publishIdentity = agentAwarenessPublishIdentity(snapshot.state);
     const publishedStateByThread = yield* Ref.get(publishedStateByThreadRef);
@@ -822,6 +833,10 @@ export const make = Effect.gen(function* () {
         Effect.sleep("1 second").pipe(
           Effect.andThen(publishActiveThreadsOnceWhenConfigured(startupState !== "enabled")),
         ),
+      );
+      // T3 Pivot: an escalated decision changes a Pivot's phase without a V2 event.
+      yield* forkParked(
+        Stream.runForEach((yield* PivotAwareness.PivotAwareness).changes, enqueueThreadPublish),
       );
       yield* forkParked(
         Stream.runForEach(threads.streamDomainEvents, (event) => {

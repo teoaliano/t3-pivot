@@ -24,6 +24,7 @@ import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
+import * as ManagedProcesses from "./managedProcess/ManagedProcesses.ts";
 import { CodexProviderCapabilitiesV2 } from "./orchestration-v2/Adapters/CodexAdapterV2.ts";
 import { ServerActivation } from "./serverActivation.ts";
 import { describe, expect, it } from "@effect/vitest";
@@ -105,6 +106,11 @@ describe("V2 storage cleanup eligibility", () => {
   it("allows an idle worktree and rejects the project checkout", () => {
     expect(storageCleanupThreadIdle(candidate(), NOW_MS)).toBe(true);
     expect(storageCleanupThreadIdle(shell(), NOW_MS)).toBe(false);
+  });
+
+  it("never removes a Pivot home, which a Pivot runs in without a branch", () => {
+    const pivot = shell({ worktreePath: "/home/.t3/userdata/pivot-homes/project-1" });
+    expect(storageCleanupThreadIdle(pivot, NOW_MS)).toBe(false);
   });
 
   it.each(["running", "starting", "preparing", "waiting", "queued"] as const)(
@@ -306,6 +312,9 @@ const cleanupFixture = Effect.gen(function* () {
     Effect.provideService(TerminalManager.TerminalManager, {
       subscribeMetadata: () => Effect.succeed(() => {}),
     } as unknown as TerminalManager.TerminalManager["Service"]),
+    Effect.provideService(ManagedProcesses.ManagedProcesses, {
+      stopAllForCheckout: () => Effect.void,
+    } as unknown as ManagedProcesses.ManagedProcesses["Service"]),
     Effect.provideService(ServerActivation, Effect.never),
   );
   return {

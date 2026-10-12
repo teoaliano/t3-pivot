@@ -1,3 +1,4 @@
+import { DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
@@ -6,7 +7,9 @@ import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as PlatformError from "effect/PlatformError";
 import * as References from "effect/References";
+import * as Runtime from "effect/Runtime";
 import * as Schema from "effect/Schema";
 
 import * as ServerRuntimeState from "./serverRuntimeState.ts";
@@ -202,4 +205,94 @@ describe("serverRuntimeState", () => {
       }
     }).pipe(Effect.provide(NodeServices.layer)),
   );
+
+  describe("ensureHomeNotInUse", () => {
+    const statePath = "/home/alice/.t3/userdata/server-runtime.json";
+    const recorded: ServerRuntimeState.PersistedServerRuntimeState = {
+      version: 1,
+      pid: 4_242,
+      host: "127.0.0.1",
+      port: 3_773,
+      origin: "http://127.0.0.1:3773",
+      startedAt: "2026-09-29T00:00:00.000Z",
+    };
+    const recordedFile = Schema.encodeSync(
+      Schema.fromJsonString(ServerRuntimeState.PersistedServerRuntimeState),
+    )(recorded);
+    const withStateFile = (contents: string | undefined) =>
+      FileSystem.layerNoop({
+        readFileString: (path) =>
+          contents !== undefined && path === statePath
+            ? Effect.succeed(contents)
+            : Effect.fail(
+                PlatformError.systemError({
+                  _tag: "NotFound",
+                  module: "FileSystem",
+                  method: "readFileString",
+                  pathOrDescriptor: path,
+                }),
+              ),
+      });
+    const guard = (input: {
+      readonly contents: string | undefined;
+      readonly alivePids: ReadonlyArray<number>;
+      readonly answeringOrigins: ReadonlyArray<string>;
+      readonly currentPid?: number;
+    }) =>
+      ServerRuntimeState.ensureHomeNotInUse({
+        path: statePath,
+        currentPid: input.currentPid ?? 1_000,
+        isAlive: (pid) => input.alivePids.includes(pid),
+        originAnswers: (origin) => Effect.succeed(input.answeringOrigins.includes(origin)),
+      }).pipe(Effect.provide(withStateFile(input.contents)));
+
+    it.effect("continues when no server has recorded itself", () =>
+      guard({ contents: undefined, alivePids: [], answeringOrigins: [] }),
+    );
+
+    it.effect("continues past a runtime file left by a server that crashed", () =>
+      guard({
+        contents: recordedFile,
+        alivePids: [],
+        answeringOrigins: [recorded.origin],
+      }),
+    );
+
+    it.effect("continues when the recorded pid was reused by a process that is not a server", () =>
+      guard({
+        contents: recordedFile,
+        alivePids: [recorded.pid],
+        answeringOrigins: [],
+      }),
+    );
+
+    it.effect("refuses to start while a live server answers on its recorded origin", () =>
+      Effect.gen(function* () {
+        const error = yield* guard({
+          contents: recordedFile,
+          alivePids: [recorded.pid],
+          answeringOrigins: [recorded.origin],
+        }).pipe(Effect.flip);
+
+        assert.instanceOf(error, ServerRuntimeState.ServerHomeInUseError);
+        assert.equal(error.pid, 4_242);
+        assert.equal(error.origin, "http://127.0.0.1:3773");
+        assert.equal(
+          error.message,
+          "Another T3 Code server is already using this data (pid 4242, origin http://127.0.0.1:3773).",
+        );
+        // The desktop recognises this exit code and stops restarting the backend.
+        assert.equal(Runtime.getErrorExitCode(error), DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE);
+      }),
+    );
+
+    it.effect("continues when the runtime file names the current process", () =>
+      guard({
+        contents: recordedFile,
+        alivePids: [recorded.pid],
+        answeringOrigins: [recorded.origin],
+        currentPid: recorded.pid,
+      }),
+    );
+  });
 });
