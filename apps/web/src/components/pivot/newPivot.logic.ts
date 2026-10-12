@@ -25,6 +25,16 @@ export function resolveNewPivotProjectRef(input: {
   return candidates.find((ref) => input.supportsPivot(ref.environmentId)) ?? null;
 }
 
+/**
+ * The environments a project's copies live on, each once. More than one means
+ * the New Pivot composer asks which environment to create the Pivot on.
+ */
+export function pivotEnvironmentChoices(
+  environmentIds: readonly EnvironmentId[],
+): readonly EnvironmentId[] {
+  return [...new Set(environmentIds)];
+}
+
 export interface NewPivotTakeover {
   readonly liveTeammates: number;
   readonly openDecisions: number;
