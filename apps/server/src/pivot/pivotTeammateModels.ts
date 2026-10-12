@@ -2,7 +2,12 @@
  * The named teammate models from settings: which one a dispatch runs on, and
  * the list the Pivot reads in its home to choose one.
  */
-import type { ModelSelection, TeammateModelEntry } from "@t3tools/contracts";
+import type {
+  ModelSelection,
+  TeammateKind,
+  TeammateKindModelSelections,
+  TeammateModelEntry,
+} from "@t3tools/contracts";
 
 /** The entry marked default, else the first. */
 export const defaultTeammateModel = (
@@ -20,11 +25,13 @@ export type TeammateModelChoice =
 
 /**
  * A model the Pivot names wins over an entry; a named entry must exist; with
- * neither, the default entry runs it.
+ * neither, the kind's model runs when Settings sets one, else the default entry.
  */
 export const chooseTeammateModel = (
   entries: ReadonlyArray<TeammateModelEntry>,
+  kindModels: TeammateKindModelSelections,
   input: {
+    readonly kind: TeammateKind;
     readonly modelEntry?: string | undefined;
     readonly modelSelection?: ModelSelection | undefined;
   },
@@ -45,6 +52,8 @@ export const chooseTeammateModel = (
     }
     return { type: "chosen", modelSelection: entry.modelSelection, entry: entry.name };
   }
+  const kindModel = kindModels[input.kind];
+  if (kindModel !== null) return { type: "chosen", modelSelection: kindModel, entry: null };
   const fallback = defaultTeammateModel(entries);
   return {
     type: "chosen",

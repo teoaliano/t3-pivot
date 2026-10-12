@@ -2,6 +2,7 @@ import {
   DEFAULT_SERVER_SETTINGS,
   type ModelSelection,
   type ProviderInstanceId,
+  type TeammateKind,
   type TeammateModelEntry,
   type WorktreeSubmodules,
 } from "@t3tools/contracts";
@@ -38,6 +39,7 @@ import {
   addTeammateModel,
   defaultTeammateModelIndex,
   renameTeammateModel,
+  TEAMMATE_KIND_LABELS,
 } from "./teammateModels.logic";
 import { useSettingsScope } from "./SettingsScopeContext";
 import {
@@ -91,6 +93,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const mixedModel = useScopedSettingsMixed(["defaultModelSelection"]);
   const mixedPivotModel = useScopedSettingsMixed(["pivotModelSelection"]);
   const mixedTeammateModels = useScopedSettingsMixed(["teammateModels"]);
+  const mixedTeammateKindModels = useScopedSettingsMixed(["teammateKindModelSelections"]);
   const pivotEntries = entries.filter((entry) => PIVOT_DRIVERS.has(entry.driverKind));
   const mixedPermissions = useScopedSettingsMixed(["defaultRuntimeMode"]);
   const PermissionIcon = runtimeModeConfig[settings.defaultRuntimeMode].icon;
@@ -335,6 +338,17 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     />
   );
   const defaultTeammateIndex = defaultTeammateModelIndex(teammateModels);
+  const teammateKindModels = settings.teammateKindModelSelections;
+  const setTeammateKindModel = (kind: TeammateKind, value: ModelSelection | null) => {
+    const reason = value ? modelDisabledReason(value.instanceId, value.model) : null;
+    if (reason) {
+      toastManager.add({ type: "error", title: "Teammate model not saved", description: reason });
+      return;
+    }
+    updateSettings({ teammateKindModelSelections: { ...teammateKindModels, [kind]: value } });
+  };
+  // Without a kind model a dispatch runs the default entry, so that is what the row shows.
+  const teammateKindFallback = teammateModels[defaultTeammateIndex]?.modelSelection ?? selection;
   const teammateModelsRow = (
     <SettingsRow
       serverScoped
@@ -371,6 +385,37 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
         </Button>
       }
     >
+      {!mixedTeammateKindModels
+        ? Object.entries(TEAMMATE_KIND_LABELS).map(([kind, label]) => {
+            const kindModel = teammateKindModels[kind as TeammateKind];
+            const shown = kindModel ?? teammateKindFallback;
+            return (
+              <div
+                key={kind}
+                className="mb-2 flex flex-wrap items-center gap-1.5 rounded-lg border border-border/70 p-2"
+              >
+                <span className="w-36 text-sm">{label}</span>
+                <div className="min-w-0 flex-1">
+                  {shown ? (
+                    modelControl(shown, entries, false, (value) =>
+                      setTeammateKindModel(kind as TeammateKind, value),
+                    )
+                  ) : (
+                    <span className="text-sm text-muted-foreground">No providers available</span>
+                  )}
+                </div>
+                {kindModel === null ? (
+                  <span className="text-xs text-muted-foreground">Default</span>
+                ) : (
+                  <SettingResetButton
+                    label={`${label} model`}
+                    onClick={() => setTeammateKindModel(kind as TeammateKind, null)}
+                  />
+                )}
+              </div>
+            );
+          })
+        : null}
       {!mixedTeammateModels && teammateModels.length > 0 ? (
         <RadioGroup
           aria-label="Default teammate model"

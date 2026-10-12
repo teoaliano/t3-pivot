@@ -584,6 +584,9 @@ export function applyServerSettingsPatch(
       ? { pivotModelSelection: patch.pivotModelSelection }
       : {}),
     ...(patch.teammateModels !== undefined ? { teammateModels: patch.teammateModels } : {}),
+    ...(patch.teammateKindModelSelections !== undefined
+      ? { teammateKindModelSelections: patch.teammateKindModelSelections }
+      : {}),
     ...(usageLimitSourcesPatch !== undefined
       ? {
           usageLimitSources: mergeSettingsEntries(
