@@ -109,9 +109,9 @@ describe("recommendedOption", () => {
 });
 
 describe("userAnswerLabel", () => {
-  it("reads an approval's answer as approved or declined", () => {
-    expect(userAnswerLabel(true)).toBe("You approved");
-    expect(userAnswerLabel(false)).toBe("You declined");
+  it("reads an approval's answer as accepted or commented", () => {
+    expect(userAnswerLabel(true)).toBe("You accepted");
+    expect(userAnswerLabel(false)).toBe("You commented");
     expect(userAnswerLabel(null)).toBe("You answered");
   });
 });

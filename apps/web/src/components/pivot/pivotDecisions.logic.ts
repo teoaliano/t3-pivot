@@ -82,8 +82,8 @@ export function recommendedOption(
 /** How the user's answer to a decision reads once given. */
 export function userAnswerLabel(userApproved: boolean | null): string {
   return userApproved === true
-    ? "You approved"
+    ? "You accepted"
     : userApproved === false
-      ? "You declined"
+      ? "You commented"
       : "You answered";
 }
