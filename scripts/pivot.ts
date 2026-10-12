@@ -322,6 +322,14 @@ const release = Effect.gen(function* () {
   yield* run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", app]);
   yield* run("xcrun", ["stapler", "validate", app]);
   yield* run("spctl", ["--assess", "--type", "execute", "--verbose", app]);
+  // Start the bundled backend the way the desktop app does. Signing checks pass
+  // for a bundle that cannot load, which is how 0.0.4605 shipped a backend that
+  // crashed on an import left unresolved by a stale local install.
+  yield* run(
+    `${app}/Contents/MacOS/T3 Pivot`,
+    [`${app}/Contents/Resources/app.asar/apps/server/dist/bin.mjs`, "--version"],
+    { ELECTRON_RUN_AS_NODE: "1" },
+  );
 
   const releaseUrl = yield* run(
     "gh",
