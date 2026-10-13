@@ -93,3 +93,20 @@ A teammate's brief names its worktree path, which V2 only creates during launch
 preparation. Dispatch derives the path the way V2 does and records the teammate as soon as
 V2 accepts the launch, before the first run starts, so the teammate's first
 `report_status` finds its record.
+
+## A host link is full control of its machine
+
+A Pivot on one environment (the home) starts teammates on another (the host) through a
+`pivot:host` session. The host runs each teammate in full access, and on the host's own `/mcp` a
+full-access thread may read any thread and target any project in that environment. So the
+session's project allowlist limits which projects the RPC surface will launch into, not what a
+running teammate can reach. Treat `pivot:host` as code execution as the host's server user. Do
+not describe the allowlist as a sandbox, in the UI or in docs.
+
+The user accepted this trust model for the first version, on two conditions. Wherever a host link
+is created, the product says in plain words that "this gives that Pivot's agents full control of
+this machine". And the home's side of dispatch, which makes a teammate run on a remote host, does
+not ship until hosted teammates are contained: an MCP scope for hosted threads limited to the
+teammate tools (`report_status`, `record_scout_report`, `link_pull_request`), no `t3_*`
+environment or thread tools, and a write scope confined to the worktree as the Pivot's is
+(`PivotToolRestrictions`).
