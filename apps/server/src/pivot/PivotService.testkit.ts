@@ -8,7 +8,12 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProjectId, ProviderInstanceId, type ServerSettings } from "@t3tools/contracts";
+import {
+  ProjectId,
+  ProviderInstanceId,
+  type ServerSettings,
+  type ThreadId,
+} from "@t3tools/contracts";
 import type { DeepPartial } from "@t3tools/shared/Struct";
 import * as Layer from "effect/Layer";
 
@@ -56,6 +61,22 @@ export const addWorktree = (repo: string, worktreePath: string, branch: string, 
   NodeFS.mkdirSync(NodePath.dirname(worktreePath), { recursive: true });
   sh(repo, `git worktree add -q -b ${branch} ${worktreePath} ${base}`);
   return worktreePath;
+};
+
+/** Gives a dispatched teammate a real worktree of the project's repository, as V2 would. */
+export const attachWorktree = (
+  fake: FakeThreads.FakeV2,
+  repo: string,
+  teammate: ThreadId,
+  branch: string,
+) => {
+  const worktree = addWorktree(
+    repo,
+    NodePath.join(NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pivot-ship-")), "wt"),
+    branch,
+  );
+  fake.threads.get(teammate)!.worktreePath = worktree;
+  return worktree;
 };
 
 export const harness = (fake: FakeThreads.FakeV2, settings: DeepPartial<ServerSettings> = {}) =>
