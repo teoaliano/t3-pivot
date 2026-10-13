@@ -201,7 +201,9 @@ function acpOperationDisposition(
           ? "allow"
           : "deny";
       }
-      return "deny";
+      // ACP agents run commands with their own privileges and T3 has no sandbox to
+      // confine them in, so a command runs unconfined; file edits stay in the roots.
+      return toolKind === "execute" ? "allow" : "deny";
     case "dangerFullAccess":
     case "externalSandbox":
       return "allow";

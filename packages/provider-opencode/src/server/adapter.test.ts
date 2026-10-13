@@ -2681,7 +2681,7 @@ describe("OpenCodeAdapterV2", () => {
       }),
     );
     assert.equal(permissionAction(workspaceWrite, "edit"), "allow");
-    assert.equal(permissionAction(workspaceWrite, "bash"), "deny");
+    assert.equal(permissionAction(workspaceWrite, "bash"), "allow");
     assert.equal(permissionAction(workspaceWrite, "webfetch"), "allow");
     assert.deepInclude(workspaceWrite, {
       permission: "external_directory",
