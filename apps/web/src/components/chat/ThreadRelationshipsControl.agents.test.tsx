@@ -35,7 +35,7 @@ vi.mock("../../state/entities", () => ({
   useServerConfigs: () => state.configs,
 }));
 vi.mock("../../state/pivot", () => ({ usePivotState: () => state.pivotState }));
-vi.mock("../sidebar/WorkingDuration", () => ({ WorkingDuration: () => null }));
+vi.mock("../../hooks/useNowMinute", () => ({ useNowMinute: () => "2026-10-06T01:05" }));
 vi.mock("../../lib/archivedThreadsState", () => ({
   useArchivedThreadSnapshots: () => ({ snapshots: [] }),
 }));

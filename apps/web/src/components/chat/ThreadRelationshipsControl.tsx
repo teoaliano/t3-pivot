@@ -55,14 +55,15 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { cn } from "../../lib/utils";
 import { buildThreadRouteParams } from "../../threadRoutes";
+import { useNowMinute } from "../../hooks/useNowMinute";
 import { usePivotState } from "../../state/pivot";
 import {
+  elapsedLabel,
   TEAMMATE_TONE_CLASSES,
   type TeammateCard,
   teammateCardShellOf,
 } from "../pivot/pivotCards.logic";
 import { sidebarPivotGroup } from "../sidebar/pivotNesting.logic";
-import { WorkingDuration } from "../sidebar/WorkingDuration";
 import {
   useProjects,
   useServerConfigs,
@@ -193,15 +194,18 @@ const TEAMMATE_RELATIONSHIP_STATUS: Record<TeammateStatus, string> = {
 
 /**
  * A Pivot teammate under Lineage, in the relationship row layout: its status label in
- * place of the relationship's, and the working time while it runs, as in the sidebar.
+ * place of the relationship's, and the elapsed time while it runs.
  */
 function PivotTeammateLineageRow(props: {
   readonly card: TeammateCard;
   readonly provider: ServerProvider | undefined;
+  readonly nowMs: number;
   readonly onOpen: (threadId: ThreadId) => void;
 }) {
   const { card } = props;
   const tone = TEAMMATE_TONE_CLASSES[card.tone];
+  // Minute-quantized, as the Pivot's own cards: a per-second tick would re-render inside the tooltip trigger.
+  const elapsed = card.tone === "working" ? elapsedLabel(card.since, props.nowMs) : null;
   return (
     <li className="group relative flex h-8 items-center rounded-lg">
       <Tooltip>
@@ -229,12 +233,7 @@ function PivotTeammateLineageRow(props: {
           </span>
           <span className={cn("shrink-0 text-2xs font-normal tabular-nums", tone.text)}>
             {card.label}
-            {card.tone === "working" ? (
-              <span aria-hidden>
-                {" "}
-                <WorkingDuration startedAt={card.since} />
-              </span>
-            ) : null}
+            {elapsed !== null ? ` ${elapsed}` : null}
           </span>
         </TooltipTrigger>
         <TooltipPopup side="left">{card.detail ?? "Open teammate in this chat"}</TooltipPopup>
@@ -368,6 +367,8 @@ export function ThreadRelationshipsPanel(props: {
       })?.teammates ?? []
     );
   }, [pivotState, props.environmentId, props.threadId, threadShells]);
+  const nowMinute = useNowMinute();
+  const nowMs = useMemo(() => Date.parse(`${nowMinute}:00.000Z`), [nowMinute]);
   const navigate = useNavigate();
   const mergeBack = useAtomCommand(threadEnvironment.mergeBack);
   const stopSession = useAtomCommand(threadEnvironment.stopSession);
@@ -548,6 +549,7 @@ export function ThreadRelationshipsPanel(props: {
               key={card.threadId}
               card={card}
               provider={providers?.find((entry) => entry.instanceId === card.providerInstanceId)}
+              nowMs={nowMs}
               onOpen={openThread}
             />
           ))
