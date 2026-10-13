@@ -79,10 +79,18 @@ node scripts/pivot.ts nightly-install
 
 It writes a launchd agent, `com.teoaliano.t3pivot.nightly`, that runs `pivot.ts nightly` at
 07:30 and at every login, so a Mac that was asleep or off catches up when it's next used. It
-needs you logged in, because signing reads the login keychain. `nightly` fast-forwards the
-clone, then publishes the desktop release and the TestFlight build `main` doesn't have yet;
-with nothing new it does nothing. Without the TestFlight ids it skips the iPhone. A failure
-shows a notification. The log is `~/Library/Logs/t3-pivot-nightly.log`; run it now with
+needs you logged in, because signing reads the login keychain. The agent gets this shell's
+`PATH`, with fnm's per-shell directories swapped for the Node that ran the install, and a
+UTF-8 locale, which CocoaPods needs.
+
+`nightly` resets the clone to `origin/main`, discarding any local change, so it refuses to run
+anywhere but `~/.t3-pivot/app`. It shows a notification when a `sync/<tag>` PR is waiting on
+your decision. Then it publishes the desktop release and the TestFlight build `main` doesn't
+have yet, and installs the release as `/Applications/T3 Pivot.app`. While T3 Pivot is open it
+leaves the app alone, since replacing it would end running turns; the sidebar update button
+offers the same release, and the next run installs it if the app is closed. With nothing new
+it does nothing. Without the TestFlight ids it skips the iPhone. A failure shows a
+notification. The log is `~/Library/Logs/t3-pivot-nightly.log`; run it now with
 `launchctl kickstart gui/$(id -u)/com.teoaliano.t3pivot.nightly`, and remove it with
 `launchctl bootout gui/$(id -u)/com.teoaliano.t3pivot.nightly`. Rerun `nightly-install`
 after the ids or your `PATH` change, since the agent keeps the values it was installed with.
@@ -101,34 +109,30 @@ The host runs a dedicated clone at `~/.t3-pivot/app`, never a working checkout, 
 --tailscale-serve --tailscale-serve-port 8444 --no-browser`, and `t3-pivot-update.timer` runs
 `node scripts/pivot.ts host-update` in the clone every night.
 
-`host-update` fast-forwards to `origin/main` and merges the newest upstream nightly into it. A
-conflict is settled by owner first: in a Pivot-owned file main's side wins, and in vendored `.repos/`
-upstream's side wins (see `PIVOT_OWNED_PATHS` and `UPSTREAM_OWNED_PATHS` in `scripts/pivot.ts`).
-Any other conflicted file goes to Claude Haiku 5.5 at medium effort, run headless as `claude -p`
-in the clone with file tools only (no shell, so it cannot commit or push). It runs under the
-host user's Claude Code login, so `t3-pivot-update.service` needs that login (or
-`ANTHROPIC_API_KEY`) in its environment. The agent gets at most 10 files and 10 minutes. A
-resolution is committed only if no markers remain, the agent touched no other file, and the
-build passes; each agent-resolved file and its reason is logged to the journal. Any other failure
-aborts the merge, and the run fails before anything is built or restarted, with the files and the
-reason in the journal. A merge that builds is pushed to `main`, so it
-replaces running `pivot:sync` by hand. A merge that doesn't build becomes the usual `sync/<tag>`
-PR and the host keeps its deployed build. Otherwise it rebuilds and restarts the service when
-`main` moved, which ends any running turn in T3 Pivot. Run it on demand with
-`systemctl --user start t3-pivot-update.service` and read the result with
-`journalctl --user -u t3-pivot-update`. Merged PRs reach the host on the next run, and the
-Mac and iPhone the next morning.
+`host-update` resets the clone to `origin/main` and merges the newest upstream nightly into it.
+A conflict is settled by owner first: in a Pivot-owned file main's side wins, and in vendored
+`.repos/` upstream's side wins (see `PIVOT_OWNED_PATHS` and `UPSTREAM_OWNED_PATHS` in
+`scripts/pivot.ts`). If conflicts are left, or the merged tree doesn't build, Claude Sonnet 5.5
+finishes the merge: it runs headless as `claude -p` in the clone, with every tool and no time
+limit, and may change any file, including Pivot code that has to follow an upstream change. It
+runs under the host user's Claude Code login, so `t3-pivot-update.service` needs that login (or
+`ANTHROPIC_API_KEY`) in its environment. The script commits the merge once no conflict marker
+is left and it builds, pushes it to `main` with the agent's summary in the commit message, and
+closes any `sync/<tag>` PR it settles.
+
+The agent stops only for a breaking change, upstream or in Pivot, that needs Pivot's design
+reworked. Then, or when it fails or leaves a merge that still doesn't build, the merge is
+undone, and a `sync/<tag>` PR carries the agent's explanation for you. The host still deploys
+`main` without that nightly, and the next nightly is tried again the next night. It rebuilds and
+restarts the service whenever `main` moved, which ends any running turn in T3 Pivot. Run it on
+demand with `systemctl --user start t3-pivot-update.service` and read the result with
+`journalctl --user -u t3-pivot-update`. Changes merged into `main` reach the host on the next
+run, and the Mac and iPhone the next morning.
 
 ## Things that stay manual
 
-- A conflict the agent can't settle stops the host's update until you resolve it. Run `pivot:sync`
-  to open a `sync/<tag>` PR for it, and merge that PR's resolution. Nothing updates until it is
-  merged.
-- The desktop app downloads a release and restarts into it when you click the update button.
-- Every machine keeps the two apps separate, so both can run at the same time. T3 Code
-  keeps `~/.t3` and Tailscale HTTPS 443. T3 Pivot has its own data in `~/.t3-pivot` and
-  defaults to Tailscale HTTPS port 8444, so on the Mac it is
-  `https://mbp-aliano.<tailnet>.ts.net:8444`. Projects are added to each app separately.
-- T3 Code updates itself; T3 Pivot follows upstream through the nightly sync above. When
-  T3 Code is ahead of T3 Pivot, a `sync/<tag>` PR is usually waiting.
+- A `sync/<tag>` PR needs your decision: the agent found a breaking change that needs a
+  rework. The Mac's morning run shows a notification while one is open. Nothing from that
+  nightly, or later ones, lands until it is settled.
+- While T3 Pivot is open on the Mac, a new release waits for its update button.
 - Pivot mode's own records live in `~/.t3-pivot/userdata/pivot.sqlite`.

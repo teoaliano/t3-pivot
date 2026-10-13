@@ -4,10 +4,11 @@
 //   sync         open a PR on the fork that merges upstream's newest nightly tag
 //   release      build, sign, notarize and publish T3 Pivot from main (release Mac)
 //   ios-release  upload the iPhone app for main's release to TestFlight (release Mac)
-//   nightly      publish whatever main has not released yet, desktop and iPhone (release Mac)
+//   nightly      publish whatever main has not released yet, desktop and iPhone, and
+//                install it on the release Mac
 //   nightly-install  schedule `nightly` with launchd, from the release Mac's clone
-//   host-update  keep a server host's checkout level with upstream and running it,
-//                settling conflicts the owner rules leave open with an agent
+//   host-update  merge upstream's newest nightly into main, with an agent finishing
+//                what the owner rules leave open, then rebuild and restart the host
 // All commands act as the fork owner's GitHub account, whatever gh's active
 // account is.
 
@@ -57,6 +58,9 @@ const IOS_PROJECT = "T3Pivot";
 // The local ref marking the commit the release Mac last uploaded to TestFlight.
 const IOS_UPLOADED_REF = "refs/pivot/testflight";
 const NIGHTLY_LABEL = "com.teoaliano.t3pivot.nightly";
+// The machine-owned clone `nightly` and `host-update` run from, relative to $HOME.
+const DEDICATED_CLONE = ".t3-pivot/app";
+const INSTALLED_APP = "/Applications/T3 Pivot.app";
 
 export class PivotCommandError extends Schema.TaggedError<PivotCommandError>()(
   "PivotCommandError",
@@ -146,6 +150,13 @@ const runVisible = Effect.fn("pivot.runVisible")(function* (
 
 const lines = (output: string) => output.split("\n").filter((line) => line.length > 0);
 
+/** Whether a command succeeds, for steps whose failure picks a fallback. */
+const succeeds = <E, R>(effect: Effect.Effect<unknown, E | PivotCommandError, R>) =>
+  effect.pipe(
+    Effect.as(true),
+    Effect.catchTags({ PivotCommandError: () => Effect.succeed(false) }),
+  );
+
 /** Tag names from `git ls-remote --tags --refs` output. */
 const lsRemoteTagNames = (output: string) =>
   lines(output).map((line) => line.replace(/^.*\trefs\/tags\//u, ""));
@@ -170,25 +181,47 @@ const nextUpstreamTag = Effect.fn("pivot.nextUpstreamTag")(function* (ref: strin
   return next;
 });
 
-/** Opens the PR merging `tag` into the fork's main, or prints the one already open. */
-const openSyncPr = Effect.fn("pivot.openSyncPr")(function* (
-  tag: string,
-  env: Record<string, string>,
-) {
-  const branch = `sync/${tag}`;
-  const openPr = yield* run(
+interface SyncPr {
+  readonly tag: string;
+  readonly url: string;
+}
+
+/** The fork's open `sync/<tag>` PRs, each waiting on a decision from the maintainer. */
+const openSyncPrs = Effect.fn("pivot.openSyncPrs")(function* (env: Record<string, string>) {
+  const output = yield* run(
     "gh",
     [
-      ...["pr", "list", "--repo", FORK_REPOSITORY, "--head", branch, "--state", "open"],
-      ...["--json", "url", "--jq", ".[0].url // empty"],
+      ...["pr", "list", "--repo", FORK_REPOSITORY, "--state", "open"],
+      ...["--json", "headRefName,url"],
+      ...[
+        "--jq",
+        '.[] | select(.headRefName | startswith("sync/")) | "\\(.headRefName)\\t\\(.url)"',
+      ],
     ],
     env,
   );
-  if (openPr.length > 0) {
-    yield* Console.log(openPr);
+  return lines(output).map((line): SyncPr => {
+    const [branch = "", url = ""] = line.split("\t");
+    return { tag: branch.slice("sync/".length), url };
+  });
+});
+
+/**
+ * Opens the PR merging `tag` into the fork's main, or prints the one already open.
+ * `reason` says why it could not merge on its own, for the PR body.
+ */
+const openSyncPr = Effect.fn("pivot.openSyncPr")(function* (
+  tag: string,
+  env: Record<string, string>,
+  reason?: string,
+) {
+  const open = (yield* openSyncPrs(env)).find((pr) => pr.tag === tag);
+  if (open !== undefined) {
+    yield* Console.log(open.url);
     return;
   }
 
+  const branch = `sync/${tag}`;
   yield* run("git", ["push", "--quiet", FORK_REMOTE, `+${tag}^{commit}:refs/heads/${branch}`], env);
   const prUrl = yield* run(
     "gh",
@@ -200,6 +233,9 @@ const openSyncPr = Effect.fn("pivot.openSyncPr")(function* (
         [
           `Merges upstream's nightly build ${tag} into T3 Pivot, so it matches the T3 Code (Nightly) app.`,
           "",
+          ...(reason === undefined
+            ? []
+            : ["The nightly update could not merge it on its own:", "", reason, ""]),
           "Resolve any conflicts on this branch, review upstream's changes, then merge.",
         ].join("\n"),
       ],
@@ -207,6 +243,27 @@ const openSyncPr = Effect.fn("pivot.openSyncPr")(function* (
     env,
   );
   yield* Console.log(prUrl);
+});
+
+/** Closes open sync PRs whose tag HEAD now contains, since a later merge settled them. */
+const closeSettledSyncPrs = Effect.fn("pivot.closeSettledSyncPrs")(function* (
+  env: Record<string, string>,
+) {
+  for (const pr of yield* openSyncPrs(env)) {
+    const settled = yield* Effect.option(
+      run("git", ["merge-base", "--is-ancestor", `${pr.tag}^{commit}`, "HEAD"]),
+    );
+    if (Option.isNone(settled)) continue;
+    yield* run(
+      "gh",
+      [
+        ...["pr", "close", pr.url, "--delete-branch"],
+        ...["--comment", "Main now contains this nightly, merged by the nightly update."],
+      ],
+      env,
+    );
+    yield* Console.log(`closed ${pr.url}, which main now contains`);
+  }
 });
 
 /** Refuses unless the checkout is on `main` with no uncommitted changes to tracked files. */
@@ -235,6 +292,36 @@ const ensureLevelWithOrigin = Effect.fn("pivot.ensureLevelWithOrigin")(function*
     });
   }
   return head;
+});
+
+/**
+ * Resets the dedicated clone to origin/main and returns HEAD. The clone is machine-owned,
+ * so a change left behind by a build or a crashed run is discarded rather than stopping
+ * the morning. Refuses anywhere else, so it never touches a working checkout.
+ */
+const resetDedicatedClone = Effect.fn("pivot.resetDedicatedClone")(function* (
+  action: string,
+  env: Record<string, string>,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const clone = path.join(process.env.HOME ?? "", DEDICATED_CLONE);
+  const here = yield* fileSystem.realPath(process.cwd());
+  const expected = yield* Effect.option(fileSystem.realPath(clone));
+  if (!Option.contains(expected, here)) {
+    return yield* new PivotRefusedError({
+      action,
+      reason: `it resets its checkout to ${FORK_REMOTE}/main, so it only runs from the dedicated clone at ~/${DEDICATED_CLONE}.`,
+    });
+  }
+
+  yield* run("git", ["fetch", "--quiet", "--tags", FORK_REMOTE, "main"], env);
+  const changes = yield* run("git", ["status", "--porcelain", "--untracked-files=no"]);
+  if (changes.length > 0) yield* Console.log(`discarding local changes:\n${changes}`);
+  // Also ends a merge a crashed run left in progress.
+  yield* run("git", ["reset", "--hard", "--quiet"]);
+  yield* run("git", ["checkout", "--quiet", "--force", "-B", "main", `${FORK_REMOTE}/main`]);
+  return yield* run("git", ["rev-parse", "HEAD"]);
 });
 
 /** The fork release already tagged on HEAD, from the fork's tags fetched last. */
@@ -476,15 +563,65 @@ const iosRelease = Effect.gen(function* () {
   yield* markIosUploaded;
 });
 
+/** Shows a macOS notification; one that cannot be shown is only logged. */
+const notify = (message: string) =>
+  Effect.ignore(
+    run("osascript", [
+      "-e",
+      `display notification ${JSON.stringify(message)} with title "T3 Pivot"`,
+    ]),
+  );
+
+/**
+ * Installs `version`, built in this clone, as the Mac's T3 Pivot. Waits while T3 Pivot is
+ * open, since replacing it would end its running turns; its update button offers the
+ * same release, and the next run installs it if it is still closed.
+ */
+const installApp = Effect.fn("pivot.installApp")(function* (version: string) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const installed = yield* Effect.option(
+    run("plutil", [
+      ...["-extract", "CFBundleShortVersionString", "raw"],
+      `${INSTALLED_APP}/Contents/Info.plist`,
+    ]),
+  );
+  if (Option.contains(installed, version)) return;
+  const zip = `release/pivot-${version}/T3-Pivot-${version}-arm64.zip`;
+  if (!(yield* fileSystem.exists(zip))) {
+    yield* Console.log(`${zip} is not in this clone, so ${version} was not installed.`);
+    return;
+  }
+  if (yield* succeeds(run("pgrep", ["-x", "T3 Pivot"]))) {
+    yield* Console.log(`T3 Pivot is open, so ${version} waits for its update button.`);
+    return;
+  }
+
+  const unpacked = `release/pivot-${version}/install`;
+  yield* fileSystem.remove(unpacked, { recursive: true, force: true });
+  yield* run("ditto", ["-x", "-k", zip, unpacked]);
+  yield* fileSystem.remove(INSTALLED_APP, { recursive: true, force: true });
+  yield* run("ditto", [`${unpacked}/T3 Pivot.app`, INSTALLED_APP]);
+  yield* fileSystem.remove(unpacked, { recursive: true, force: true });
+  yield* Console.log(`installed T3 Pivot ${version}`);
+});
+
 // Runs from the release Mac's dedicated clone at login and every morning (see
 // `nightly-install`). Publishes the desktop release and the TestFlight build
-// that `main` doesn't have yet, so running it again is a no-op.
+// that `main` doesn't have yet and installs the release here, so running it
+// again is a no-op.
 const nightly = Effect.gen(function* () {
   const env = yield* forkAccountEnv;
-  yield* ensureCleanMain("publish nightly");
-  yield* run("git", ["fetch", "--quiet", "--tags", FORK_REMOTE, "main"], env);
-  yield* run("git", ["merge", "--ff-only", "--quiet", `${FORK_REMOTE}/main`]);
-  const head = yield* run("git", ["rev-parse", "HEAD"]);
+  const head = yield* resetDedicatedClone("publish nightly", env);
+
+  const waiting = yield* openSyncPrs(env);
+  if (waiting.length > 0) {
+    yield* Console.log(
+      `upstream merges waiting on you:\n${waiting.map((pr) => pr.url).join("\n")}`,
+    );
+    yield* notify(
+      `${waiting.length} upstream merge${waiting.length === 1 ? " needs" : "s need"} your decision on GitHub.`,
+    );
+  }
 
   const released = yield* headRelease;
   const key = yield* appStoreConnectKey;
@@ -494,11 +631,13 @@ const nightly = Effect.gen(function* () {
   const iosDue = Option.isSome(key) && !Option.contains(uploaded, head);
   if (Option.isSome(released) && !iosDue) {
     yield* Console.log(`already published ${released.value} at ${head.slice(0, 12)}`);
+    yield* installApp(released.value);
     return;
   }
 
   yield* runVisible("pnpm", ["install", "--frozen-lockfile"]);
   const version = Option.isSome(released) ? released.value : yield* release;
+  yield* installApp(version);
   if (Option.isNone(key)) {
     yield* Console.log("TestFlight is not set up, so the iPhone app was not uploaded.");
     return;
@@ -510,16 +649,33 @@ const nightly = Effect.gen(function* () {
 const escapeXml = (value: string) =>
   value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
+/**
+ * The PATH launchd runs `nightly` with: this shell's PATH, with fnm's per-shell
+ * directories, which vanish with the shell, replaced by this Node's own directory.
+ */
+export const launchdPath = (shellPath: string, nodeDirectory: string) => {
+  const ephemeral = (entry: string) => entry.includes("/fnm_multishells/");
+  const entries = shellPath
+    .split(":")
+    .filter((entry) => entry.length > 0)
+    .map((entry) => (ephemeral(entry) ? nodeDirectory : entry));
+  return [...new Set(entries)].join(":");
+};
+
 // Writes a launchd agent that runs `nightly` from this checkout at 07:30 and at
 // every login. launchd runs a calendar job missed during sleep on wake; the
 // login run covers a Mac that was off. Rerun after changing the TestFlight ids.
 const nightlyInstall = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const home = process.env.HOME ?? "";
   const plistPath = `${home}/Library/LaunchAgents/${NIGHTLY_LABEL}.plist`;
   const logPath = `${home}/Library/Logs/t3-pivot-nightly.log`;
   const environment: Record<string, string | undefined> = {
-    PATH: process.env.PATH,
+    PATH: launchdPath(process.env.PATH ?? "", path.dirname(process.execPath)),
+    // launchd sets no locale, and CocoaPods fails without a UTF-8 one.
+    LANG: "en_US.UTF-8",
+    LC_ALL: "en_US.UTF-8",
     T3PIVOT_ASC_KEY_ID: process.env.T3PIVOT_ASC_KEY_ID,
     T3PIVOT_ASC_ISSUER_ID: process.env.T3PIVOT_ASC_ISSUER_ID,
   };
@@ -583,36 +739,25 @@ export class PivotBuildFailedError extends Schema.TaggedError<PivotBuildFailedEr
   }
 }
 
-/** Whether a command succeeds, for steps whose failure picks a fallback. */
-const succeeds = <E, R>(effect: Effect.Effect<unknown, E | PivotCommandError, R>) =>
-  effect.pipe(
-    Effect.as(true),
-    Effect.catchTags({ PivotCommandError: () => Effect.succeed(false) }),
-  );
-
 /** Builds the `t3` server bundle, web client included, into apps/server/dist. */
 const buildServer = Effect.gen(function* () {
   yield* runVisible("pnpm", ["install", "--frozen-lockfile"]);
   yield* runVisible("node_modules/.bin/vp", ["run", "--filter", "t3", "build"]);
 });
 
-export class PivotConflictError extends Schema.TaggedError<PivotConflictError>()(
-  "PivotConflictError",
-  {
-    tag: Schema.String,
-    files: Schema.Array(Schema.String),
-    reason: Schema.String,
-  },
-) {
+export class PivotMergeError extends Schema.TaggedError<PivotMergeError>()("PivotMergeError", {
+  tag: Schema.String,
+  reason: Schema.String,
+}) {
   override get message(): string {
-    return `upstream ${this.tag} conflicts with main in ${this.files.join(", ")}: ${this.reason}. The merge was aborted and the deployed build is unchanged.`;
+    return `could not merge upstream ${this.tag} into main: ${this.reason}`;
   }
 }
 
 // Who settles a conflict first. Pivot-owned files exist only in the fork, so a conflict
 // there keeps main's side. `.repos/` is vendored upstream code the fork never edits
-// (see AGENTS.md), so a conflict there takes upstream's side. Any other conflict goes
-// to the conflict agent below.
+// (see AGENTS.md), so a conflict there takes upstream's side. Anything else goes to
+// the merge agent below.
 const PIVOT_OWNED_PATHS = [
   "scripts/pivot.ts",
   "scripts/pivot-release-plan.ts",
@@ -626,141 +771,151 @@ const UPSTREAM_OWNED_PATHS = [".repos/"];
 const owns = (paths: ReadonlyArray<string>, file: string) =>
   paths.some((path) => (path.endsWith("/") ? file.startsWith(path) : file === path));
 
-// The agent that settles what the owner rules leave open. Its work is capped per
-// merge by files and time, and past either cap the merge aborts.
-const CONFLICT_AGENT_MODEL = "claude-haiku-5-5";
-const CONFLICT_AGENT_EFFORT = "medium";
-const CONFLICT_AGENT_MAX_FILES = 10;
-const CONFLICT_AGENT_TIMEOUT = "10 minutes";
-// File tools only, no shell: the agent cannot run git, commit or push.
-const CONFLICT_AGENT_TOOLS = "Read,Edit,Write,Grep,Glob";
+// The agent that finishes a merge the owner rules leave open or that doesn't build. It
+// has every tool and no time limit, because finishing can take real porting work.
+const MERGE_AGENT_MODEL = "claude-sonnet-5-5";
+const MERGE_AGENT_EFFORT = "high";
+// Where the agent explains a change only the maintainer can decide. It lives in .git,
+// so the merge never commits it.
+const DECISION_FILE = "PIVOT_DECISION.md";
 const CONFLICT_MARKER = /^(<{7}|={7}|>{7})(?=\s|$)/mu;
 
-export interface AgentResolution {
-  readonly file: string;
-  readonly reason: string;
+export interface MergeAgentRequest {
+  readonly tag: string;
+  /** Files still in conflict after the owner rules; empty when only the build fails. */
+  readonly conflicted: ReadonlyArray<string>;
+  readonly buildFailed: boolean;
+  /** The absolute path the agent writes to when the merge needs the maintainer. */
+  readonly decisionPath: string;
 }
 
-export type ConflictResolver = (
-  files: ReadonlyArray<string>,
+/** Finishes the merge in progress in `cwd` and replies with what it changed. */
+export type MergeAgent = (
+  request: MergeAgentRequest,
   cwd?: string,
 ) => Effect.Effect<
-  ReadonlyArray<AgentResolution>,
+  string,
   PivotCommandError | PlatformError,
   ChildProcessSpawner.ChildProcessSpawner
 >;
 
-const conflictPrompt = (files: ReadonlyArray<string>) =>
+/** Builds the checked-out tree, failing when it does not build. */
+export type MergeBuild = Effect.Effect<
+  void,
+  PivotCommandError | PlatformError,
+  ChildProcessSpawner.ChildProcessSpawner
+>;
+
+const mergePrompt = ({ tag, conflicted, buildFailed, decisionPath }: MergeAgentRequest) =>
   [
-    "A git merge in this directory has conflicts in the files listed below.",
-    "For each file, read it and edit it to keep the intent of both sides, with every",
-    "conflict marker (<<<<<<<, =======, >>>>>>>) removed. If you cannot resolve a file with",
-    "confidence, leave its markers in place and say so in its reason.",
-    "Edit only these files. Do not run git, commit, or change anything else.",
-    "When you are done, reply with one line per file in the form `path | one-line reason`.",
+    `This is T3 Pivot, a fork of T3 Code. Upstream's nightly build ${tag} is being merged`,
+    "into main, and the merge is in progress, not committed. Finish it.",
+    ...(conflicted.length > 0
+      ? ["", "These files still have conflicts:", ...conflicted.map((file) => `- ${file}`)]
+      : []),
+    ...(buildFailed
+      ? ["", "The merged tree fails `node_modules/.bin/vp run --filter t3 build`."]
+      : []),
     "",
-    "Files:",
-    ...files.map((file) => `- ${file}`),
+    "Read AGENTS.md first. Keep the intent of both sides: upstream's change, and what T3 Pivot",
+    "adds on top of it. Fix whatever the merge breaks, including Pivot code that has to follow",
+    "an upstream change. You are done when no conflict marker is left, `pnpm install` and",
+    "`node_modules/.bin/vp run --filter t3 build` pass, and the typecheck and tests for the code",
+    "you changed pass. The whole working tree becomes the merge commit, so remove any scratch",
+    "files you create. Do not commit, push, abort the merge or switch branches.",
+    "",
+    "Stop only for a decision the maintainer has to make: a breaking change, upstream or in",
+    "Pivot, that needs Pivot's design reworked rather than ported. Then write what changed,",
+    `why it needs a rework and the options you see to ${decisionPath}, and stop there.`,
+    "Never write that file otherwise.",
+    "",
+    "Reply with what you changed and why, one line per file.",
   ].join("\n");
 
 /**
- * Settles `files` in `cwd` with Claude Haiku 5.5 at medium effort, run headless from
- * the host's service. It authenticates with the host user's Claude Code login, so the
- * unit needs that login (or ANTHROPIC_API_KEY) in its environment. Each reply line that
- * names one of `files` becomes a resolution.
+ * Finishes the merge with Claude Sonnet 5.5 at high effort, run headless from the host's
+ * service with every tool and no permission prompts. It authenticates with the host
+ * user's Claude Code login, so the unit needs that login (or ANTHROPIC_API_KEY).
  */
-export const resolveWithAgent: ConflictResolver = Effect.fn("pivot.resolveWithAgent")(function* (
-  files: ReadonlyArray<string>,
+export const runMergeAgent: MergeAgent = Effect.fn("pivot.runMergeAgent")(function* (
+  request: MergeAgentRequest,
   cwd?: string,
 ) {
-  const reply = yield* run(
+  return yield* run(
     "claude",
     [
       "-p",
-      conflictPrompt(files),
-      ...["--model", CONFLICT_AGENT_MODEL, "--effort", CONFLICT_AGENT_EFFORT],
-      ...["--tools", CONFLICT_AGENT_TOOLS, "--allowedTools", CONFLICT_AGENT_TOOLS],
-      ...["--permission-mode", "dontAsk", "--permission-prompts", "none"],
+      mergePrompt(request),
+      ...["--model", MERGE_AGENT_MODEL, "--effort", MERGE_AGENT_EFFORT],
+      "--dangerously-skip-permissions",
       "--no-session-persistence",
     ],
     {},
     cwd,
   );
-  return lines(reply).flatMap((line) => {
-    const match = /^(.+?) \| (.+)$/u.exec(line.trim());
-    const file = match?.[1];
-    const reason = match?.[2];
-    return file !== undefined && reason !== undefined && files.includes(file)
-      ? [{ file, reason }]
-      : [];
-  });
 });
 
 /**
- * Merges upstream `tag` into the checked-out branch in `cwd`. Conflicts go to their
- * owner first (see PIVOT_OWNED_PATHS and UPSTREAM_OWNED_PATHS), then the rest go to
- * `resolve`. The merge commits only once every conflicted file is clean, so any
- * failure before that aborts it and leaves the checkout as it was. Returns the files
- * `resolve` settled, each with its reason; empty when no conflict needed it.
+ * Merges upstream `tag` into the checked-out branch in `cwd` and commits it once it
+ * builds. Conflicts go to their owner first (see PIVOT_OWNED_PATHS and
+ * UPSTREAM_OWNED_PATHS). Conflicts left over, or a merge that doesn't build, go to
+ * `agent`. Fails with PivotMergeError, the checkout restored to where it was, when the
+ * agent asks for the maintainer's decision, fails, or leaves a merge that still
+ * doesn't build. Returns the agent's summary, empty when the merge needed no agent.
  */
 export const mergeUpstreamTag = Effect.fn("pivot.mergeUpstreamTag")(function* (
   tag: string,
+  steps: { readonly build: MergeBuild; readonly agent: MergeAgent },
   cwd?: string,
-  resolve: ConflictResolver = resolveWithAgent,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const git = (...args: ReadonlyArray<string>) => run("git", args, {}, cwd);
   const message = `chore: merge upstream ${tag}`;
-  const merged = yield* Effect.result(git("merge", "--no-ff", "--no-verify", "-m", message, tag));
-  if (Result.isSuccess(merged)) return [];
-
-  const conflicted = lines(yield* git("diff", "--name-only", "--diff-filter=U"));
-  if (conflicted.length === 0) return yield* merged.failure;
-
-  const abort = git("merge", "--abort");
+  const head = yield* git("rev-parse", "HEAD");
+  // The agent may have run anything, so restore by commit rather than by aborting.
   const fail = (reason: string) =>
-    abort.pipe(Effect.andThen(new PivotConflictError({ tag, files: conflicted, reason })));
-  const unowned = conflicted.filter(
-    (file) => !owns(PIVOT_OWNED_PATHS, file) && !owns(UPSTREAM_OWNED_PATHS, file),
-  );
+    git("reset", "--hard", "--quiet", head).pipe(
+      Effect.andThen(git("clean", "-fdq")),
+      Effect.andThen(new PivotMergeError({ tag, reason })),
+    );
 
   return yield* Effect.gen(function* () {
-    for (const file of conflicted.filter((file) => !unowned.includes(file))) {
+    const merged = yield* Effect.result(git("merge", "--no-ff", "--no-commit", "--no-verify", tag));
+    const conflicted = Result.isFailure(merged)
+      ? lines(yield* git("diff", "--name-only", "--diff-filter=U"))
+      : [];
+    if (Result.isFailure(merged) && conflicted.length === 0) return yield* merged.failure;
+
+    const owned = (file: string) =>
+      owns(PIVOT_OWNED_PATHS, file) || owns(UPSTREAM_OWNED_PATHS, file);
+    for (const file of conflicted.filter(owned)) {
       yield* git("checkout", owns(PIVOT_OWNED_PATHS, file) ? "--ours" : "--theirs", "--", file);
       yield* git("add", "--", file);
     }
+    const unowned = conflicted.filter((file) => !owned(file));
+    const buildFailed = unowned.length === 0 && !(yield* succeeds(steps.build));
 
-    let resolutions: ReadonlyArray<AgentResolution> = [];
-    if (unowned.length > 0) {
-      if (unowned.length > CONFLICT_AGENT_MAX_FILES) {
-        return yield* fail(
-          `${unowned.length} files need the agent, over its cap of ${CONFLICT_AGENT_MAX_FILES}.`,
-        );
+    let summary = "";
+    if (unowned.length > 0 || buildFailed) {
+      const decisionPath = path.resolve(
+        cwd ?? ".",
+        yield* git("rev-parse", "--git-path", DECISION_FILE),
+      );
+      yield* fileSystem.remove(decisionPath, { force: true });
+      const reply = yield* Effect.result(
+        steps.agent({ tag, conflicted: unowned, buildFailed, decisionPath }, cwd),
+      );
+      if (yield* fileSystem.exists(decisionPath)) {
+        const decision = (yield* fileSystem.readFileString(decisionPath)).trim();
+        yield* fileSystem.remove(decisionPath, { force: true });
+        return yield* fail(`it needs your decision.\n\n${decision}`);
       }
-      const before = lines(yield* git("status", "--porcelain", "--untracked-files=all"));
-      const reply = yield* resolve(unowned, cwd).pipe(
-        Effect.timeoutOption(CONFLICT_AGENT_TIMEOUT),
-        Effect.matchEffect({
-          onFailure: (error) => fail(`the agent failed: ${error.message}`),
-          onSuccess: Option.match({
-            onNone: () => fail(`the agent did not finish within ${CONFLICT_AGENT_TIMEOUT}.`),
-            onSome: Effect.succeed,
-          }),
-        }),
-      );
-
-      const after = lines(yield* git("status", "--porcelain", "--untracked-files=all"));
-      const stray = after.filter(
-        (line) => !before.includes(line) && !unowned.includes(line.slice(3)),
-      );
-      if (stray.length > 0) {
-        // Abort does not remove files the agent created, so remove those first.
-        const created = stray.filter((line) => line.startsWith("?? ")).map((line) => line.slice(3));
-        if (created.length > 0) yield* git("clean", "-f", "--", ...created);
-        return yield* fail(
-          `the agent changed files it was not given: ${stray.map((line) => line.slice(3)).join(", ")}.`,
-        );
+      if (Result.isFailure(reply)) return yield* fail(`the agent failed: ${reply.failure.message}`);
+      if (
+        Option.isNone(yield* Effect.option(git("rev-parse", "--verify", "--quiet", "MERGE_HEAD")))
+      ) {
+        return yield* fail("the agent ended the merge instead of leaving it to be committed.");
       }
       for (const file of unowned) {
         const absolute = path.join(cwd ?? "", file);
@@ -769,64 +924,67 @@ export const mergeUpstreamTag = Effect.fn("pivot.mergeUpstreamTag")(function* (
           return yield* fail(`${file} still has conflict markers after the agent.`);
         }
       }
-
-      yield* git("add", "--", ...unowned);
-      resolutions = unowned.map((file) => ({
-        file,
-        reason: reply.find((resolution) => resolution.file === file)?.reason ?? "no reason given",
-      }));
+      yield* git("add", "-A");
+      if (!(yield* succeeds(steps.build))) {
+        return yield* fail("it still does not build after the agent.");
+      }
+      summary = reply.success.trim();
     }
 
-    const body = resolutions.map((resolution) => `${resolution.file}: ${resolution.reason}`);
     yield* git(
       "commit",
       "--no-verify",
       "-m",
       message,
-      ...(body.length > 0 ? ["-m", body.join("\n")] : []),
+      ...(summary.length > 0 ? ["-m", summary] : []),
     );
-    for (const resolution of resolutions) {
-      yield* Console.log(`agent resolved ${resolution.file} in ${tag}: ${resolution.reason}`);
-    }
-    return resolutions;
+    return summary;
   }).pipe(Effect.catchTags({ PivotCommandError: (error) => fail(error.message) }));
 });
 
-// Runs from the host's dedicated checkout, never a working one. It fast-forwards to
-// origin/main, then merges the newest upstream nightly, settling conflicts by file
-// owner and then by the conflict agent. A conflict the agent cannot settle fails the
-// run before any build, and a build that fails leaves the host on its deployed build.
+// Runs nightly from the host's dedicated clone. It resets to origin/main, merges upstream's
+// newest nightly and pushes it to main, then rebuilds and restarts the host when main moved.
+// A merge that needs the maintainer becomes a `sync/<tag>` PR, and the host still deploys
+// main without it.
 const hostUpdate = Effect.gen(function* () {
   const env = yield* forkAccountEnv;
+  yield* resetDedicatedClone("update", env);
 
-  yield* ensureCleanMain("update");
-  yield* run("git", ["fetch", "--quiet", FORK_REMOTE, "main"], env);
-  yield* run("git", ["merge", "--ff-only", "--quiet", `${FORK_REMOTE}/main`]);
-
-  let mergedTag: string | undefined;
-  let resolved: ReadonlyArray<AgentResolution> = [];
+  let built = false;
+  let mergeError: PivotMergeError | undefined;
   const next = yield* nextUpstreamTag("HEAD");
   if (Option.isSome(next)) {
-    resolved = yield* mergeUpstreamTag(next.value);
-    mergedTag = next.value;
+    const merged = yield* Effect.result(
+      mergeUpstreamTag(next.value, { build: buildServer, agent: runMergeAgent }),
+    );
+    if (Result.isSuccess(merged)) {
+      if (merged.success.length > 0) {
+        yield* Console.log(`the agent finished the merge:\n${merged.success}`);
+      }
+      yield* run("git", ["push", "--quiet", FORK_REMOTE, "HEAD:main"], env);
+      yield* Console.log(`merged upstream ${next.value} into main`);
+      yield* closeSettledSyncPrs(env);
+      built = true;
+    } else if (merged.failure._tag === "PivotMergeError") {
+      mergeError = merged.failure;
+      yield* Console.log(mergeError.message);
+      yield* openSyncPr(next.value, env, mergeError.reason);
+    } else {
+      return yield* merged.failure;
+    }
   }
 
   const head = yield* run("git", ["rev-parse", "HEAD"]);
   const deployed = yield* Effect.option(
     run("git", ["rev-parse", "--verify", "--quiet", HOST_DEPLOYED_REF]),
   );
-  if (Option.contains(deployed, head)) {
+  if (Option.contains(deployed, head) && mergeError === undefined) {
     yield* Console.log(`${HOST_SERVICE} already runs ${head.slice(0, 12)}`);
     return;
   }
 
-  if (!(yield* succeeds(buildServer))) {
-    if (resolved.length > 0) {
-      const files = resolved.map((resolution) => resolution.file).join(", ");
-      yield* Console.log(`build failed with agent-resolved files ${files}; reverting the merge.`);
-    } else if (mergedTag !== undefined) {
-      yield* openSyncPr(mergedTag, env);
-    }
+  // A merge that fell through may have built its own tree into dist, so build main again.
+  if (!built && !(yield* succeeds(buildServer))) {
     // The failed build replaced dist, which the running server still reads.
     if (Option.isSome(deployed)) {
       yield* run("git", ["reset", "--hard", "--quiet", deployed.value]);
@@ -835,14 +993,13 @@ const hostUpdate = Effect.gen(function* () {
     return yield* new PivotBuildFailedError({ commit: head.slice(0, 12) });
   }
 
-  if (mergedTag !== undefined) {
-    yield* run("git", ["push", "--quiet", FORK_REMOTE, "HEAD:main"], env);
-    yield* Console.log(`merged upstream ${mergedTag} into main`);
+  if (!Option.contains(deployed, head)) {
+    // Recorded first: a restart started from inside T3 Pivot ends this process.
+    yield* run("git", ["update-ref", HOST_DEPLOYED_REF, head]);
+    yield* Console.log(`restarting ${HOST_SERVICE} on ${head.slice(0, 12)}`);
+    yield* run("systemctl", ["--user", "restart", HOST_SERVICE]);
   }
-  // Recorded first: a restart started from inside T3 Pivot ends this process.
-  yield* run("git", ["update-ref", HOST_DEPLOYED_REF, head]);
-  yield* Console.log(`restarting ${HOST_SERVICE} on ${head.slice(0, 12)}`);
-  yield* run("systemctl", ["--user", "restart", HOST_SERVICE]);
+  if (mergeError !== undefined) return yield* mergeError;
 });
 
 const pivotCli = Command.make("pivot").pipe(

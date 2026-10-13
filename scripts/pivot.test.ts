@@ -1,17 +1,17 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
-import { TestClock } from "effect/testing";
 
 import {
-  type ConflictResolver,
+  launchdPath,
+  type MergeAgent,
+  type MergeAgentRequest,
+  type MergeBuild,
   mergeUpstreamTag,
   PivotCommandError,
-  PivotConflictError,
+  PivotMergeError,
   run,
 } from "./pivot.ts";
 
@@ -76,57 +76,94 @@ const read = (cwd: string, file: string) =>
     return yield* (yield* FileSystem.FileSystem).readFileString(path.join(cwd, file));
   });
 
-/** Writes `content` into `cwd` the way the agent would edit files, then replies. */
+const writeFiles = (cwd: string, files: Record<string, string>) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    for (const [file, content] of Object.entries(files)) {
+      yield* fileSystem.makeDirectory(path.dirname(path.join(cwd, file)), { recursive: true });
+      yield* fileSystem.writeFileString(path.join(cwd, file), content);
+    }
+  }).pipe(Effect.provide(NodeServices.layer));
+
+/** Edits files in the checkout the way the agent would, then replies with `summary`. */
 const agentWrites =
   (
     content: Record<string, string>,
-    reason: string,
-    asked: Array<ReadonlyArray<string>> = [],
-  ): ConflictResolver =>
-  (files, cwd) =>
+    summary: string,
+    asked: Array<MergeAgentRequest> = [],
+  ): MergeAgent =>
+  (request, cwd) => {
+    asked.push(request);
+    return writeFiles(cwd ?? "", content).pipe(Effect.as(summary));
+  };
+
+const agentAsksForDecision =
+  (decision: string): MergeAgent =>
+  (request) =>
     Effect.gen(function* () {
-      asked.push(files);
-      const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      for (const file of files) {
-        yield* fileSystem.writeFileString(path.join(cwd ?? "", file), content[file] ?? "");
-      }
-      return files.map((file) => ({ file, reason }));
+      yield* (yield* FileSystem.FileSystem).writeFileString(request.decisionPath, decision);
+      return "stopped for a decision";
     }).pipe(Effect.provide(NodeServices.layer));
 
-const agentFails: ConflictResolver = () =>
+const agentFails: MergeAgent = () =>
   Effect.fail(new PivotCommandError({ command: "claude -p", exitCode: 1, stderr: "rate limited" }));
 
-const agentMustNotRun: ConflictResolver = () => Effect.die("the agent should not run");
+const agentMustNotRun: MergeAgent = () => Effect.die("the agent should not run");
 
-// The checkout after a conflicted merge the agent failed to settle is back where it was.
+const builds: MergeBuild = Effect.void;
+
+/** A build that fails while `file` in `cwd` contains `needle`. */
+const buildFailsWhile = (cwd: string, file: string, needle: string): MergeBuild =>
+  read(cwd, file).pipe(
+    Effect.flatMap((content) =>
+      content.includes(needle)
+        ? Effect.fail(new PivotCommandError({ command: "vp build", exitCode: 1, stderr: "" }))
+        : Effect.void,
+    ),
+    Effect.provide(NodeServices.layer),
+  );
+
+const parentCount = (cwd: string) =>
+  git(cwd, "rev-list", "--parents", "-n", "1", "HEAD").pipe(
+    Effect.map((line) => line.split(" ").length - 1),
+  );
+
+// A merge that falls through leaves the checkout exactly where it was.
 const assertUntouched = (cwd: string, headBefore: string) =>
   Effect.gen(function* () {
     assert.strictEqual(yield* git(cwd, "rev-parse", "HEAD"), headBefore);
     assert.strictEqual(yield* read(cwd, "shared/server.ts"), "server main\n");
-    assert.strictEqual(yield* git(cwd, "status", "--porcelain"), "");
+    assert.strictEqual(yield* git(cwd, "status", "--porcelain", "--untracked-files=all"), "");
     assert.isFalse(yield* mergeInProgress(cwd));
   });
 
+const assertCommitted = (cwd: string) =>
+  Effect.gen(function* () {
+    assert.strictEqual(yield* parentCount(cwd), 2);
+    assert.strictEqual(yield* git(cwd, "status", "--porcelain", "--untracked-files=all"), "");
+    assert.isFalse(yield* mergeInProgress(cwd));
+  });
+
+const conflictingCheckout = fixtureCheckout(
+  { "scripts/pivot.ts": "pivot main\n", "shared/server.ts": "server main\n" },
+  { "scripts/pivot.ts": "pivot upstream\n", "shared/server.ts": "server upstream\n" },
+);
+
 describe("mergeUpstreamTag", () => {
-  it.effect("merges a nightly that changes different files cleanly", () =>
+  it.effect("commits a nightly that merges cleanly and builds, without the agent", () =>
     Effect.gen(function* () {
       const cwd = yield* fixtureCheckout(
         { "scripts/pivot.ts": "pivot main\n" },
         { "shared/server.ts": "server upstream\n" },
       );
 
-      const resolved = yield* mergeUpstreamTag(TAG, cwd, agentMustNotRun);
+      const summary = yield* mergeUpstreamTag(TAG, { build: builds, agent: agentMustNotRun }, cwd);
 
-      assert.deepStrictEqual(resolved, []);
+      assert.strictEqual(summary, "");
       assert.strictEqual(yield* read(cwd, "scripts/pivot.ts"), "pivot main\n");
       assert.strictEqual(yield* read(cwd, "shared/server.ts"), "server upstream\n");
-      assert.strictEqual(
-        (yield* git(cwd, "rev-list", "--parents", "-n", "1", "HEAD")).split(" ").length,
-        3,
-      );
-      assert.strictEqual(yield* git(cwd, "status", "--porcelain"), "");
-      assert.isFalse(yield* mergeInProgress(cwd));
+      yield* assertCommitted(cwd);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
@@ -137,144 +174,159 @@ describe("mergeUpstreamTag", () => {
         { "scripts/pivot.ts": "pivot upstream\n", ".repos/vendor/lib.ts": "vendor upstream\n" },
       );
 
-      const resolved = yield* mergeUpstreamTag(TAG, cwd, agentMustNotRun);
+      const summary = yield* mergeUpstreamTag(TAG, { build: builds, agent: agentMustNotRun }, cwd);
 
-      assert.deepStrictEqual(resolved, []);
+      assert.strictEqual(summary, "");
       assert.strictEqual(yield* read(cwd, "scripts/pivot.ts"), "pivot main\n");
       assert.strictEqual(yield* read(cwd, ".repos/vendor/lib.ts"), "vendor upstream\n");
-      assert.strictEqual(
-        (yield* git(cwd, "rev-list", "--parents", "-n", "1", "HEAD")).split(" ").length,
-        3,
-      );
-      assert.strictEqual(yield* git(cwd, "status", "--porcelain"), "");
-      assert.isFalse(yield* mergeInProgress(cwd));
+      yield* assertCommitted(cwd);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("sends only the still-conflicted files to the agent and commits its resolution", () =>
+  it.effect("sends the files the owner rules leave open to the agent and commits its work", () =>
     Effect.gen(function* () {
-      const cwd = yield* fixtureCheckout(
-        { "scripts/pivot.ts": "pivot main\n", "shared/server.ts": "server main\n" },
-        { "scripts/pivot.ts": "pivot upstream\n", "shared/server.ts": "server upstream\n" },
-      );
-      const asked: Array<ReadonlyArray<string>> = [];
-
-      const resolved = yield* mergeUpstreamTag(
-        TAG,
-        cwd,
-        agentWrites({ "shared/server.ts": "server merged\n" }, "kept both edits", asked),
+      const cwd = yield* conflictingCheckout;
+      const asked: Array<MergeAgentRequest> = [];
+      const agent = agentWrites(
+        { "shared/server.ts": "server merged\n" },
+        "shared/server.ts | kept both edits",
+        asked,
       );
 
-      assert.deepStrictEqual(asked, [["shared/server.ts"]]);
-      assert.deepStrictEqual(resolved, [{ file: "shared/server.ts", reason: "kept both edits" }]);
+      const summary = yield* mergeUpstreamTag(TAG, { build: builds, agent }, cwd);
+
+      assert.deepStrictEqual(
+        asked.map(({ conflicted, buildFailed }) => ({ conflicted, buildFailed })),
+        [{ conflicted: ["shared/server.ts"], buildFailed: false }],
+      );
+      assert.strictEqual(summary, "shared/server.ts | kept both edits");
       assert.strictEqual(yield* read(cwd, "scripts/pivot.ts"), "pivot main\n");
       assert.strictEqual(yield* read(cwd, "shared/server.ts"), "server merged\n");
-      const commit = yield* git(cwd, "log", "-1", "--format=%P%n%B");
-      assert.strictEqual(commit.split("\n")[0]?.split(" ").length, 2);
-      assert.include(commit, "shared/server.ts: kept both edits");
-      assert.strictEqual(yield* git(cwd, "status", "--porcelain"), "");
-      assert.isFalse(yield* mergeInProgress(cwd));
+      assert.include(yield* git(cwd, "log", "-1", "--format=%B"), "kept both edits");
+      yield* assertCommitted(cwd);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("aborts and fails when the agent fails, leaving the checkout alone", () =>
+  it.effect("has the agent fix a clean merge that doesn't build, new files included", () =>
     Effect.gen(function* () {
       const cwd = yield* fixtureCheckout(
-        { "scripts/pivot.ts": "pivot main\n", "shared/server.ts": "server main\n" },
-        { "scripts/pivot.ts": "pivot upstream\n", "shared/server.ts": "server upstream\n" },
+        { "scripts/pivot.ts": "pivot main\n" },
+        { "shared/server.ts": "server upstream broken\n" },
       );
+      const asked: Array<MergeAgentRequest> = [];
+      const agent = agentWrites(
+        { "shared/server.ts": "server upstream\n", "shared/adapter.ts": "adapter\n" },
+        "ported Pivot to upstream's change",
+        asked,
+      );
+      const build = buildFailsWhile(cwd, "shared/server.ts", "broken");
+
+      yield* mergeUpstreamTag(TAG, { build, agent }, cwd);
+
+      assert.deepStrictEqual(
+        asked.map(({ conflicted, buildFailed }) => ({ conflicted, buildFailed })),
+        [{ conflicted: [], buildFailed: true }],
+      );
+      assert.strictEqual(yield* read(cwd, "shared/adapter.ts"), "adapter\n");
+      assert.include(
+        yield* git(cwd, "show", "--name-only", "--format=", "HEAD"),
+        "shared/adapter.ts",
+      );
+      yield* assertCommitted(cwd);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("falls through with the agent's explanation when it asks for a decision", () =>
+    Effect.gen(function* () {
+      const cwd = yield* conflictingCheckout;
+      const headBefore = yield* git(cwd, "rev-parse", "HEAD");
+      const agent = agentAsksForDecision("Upstream removed the sidebar Pivot extends.");
+
+      const error = yield* Effect.flip(mergeUpstreamTag(TAG, { build: builds, agent }, cwd));
+
+      assert.instanceOf(error, PivotMergeError);
+      assert.include(error.reason, "needs your decision");
+      assert.include(error.reason, "Upstream removed the sidebar Pivot extends.");
+      yield* assertUntouched(cwd, headBefore);
+      assert.isFalse(
+        yield* (yield* FileSystem.FileSystem).exists(
+          (yield* Path.Path).join(cwd, ".git", "PIVOT_DECISION.md"),
+        ),
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("falls through when the agent fails", () =>
+    Effect.gen(function* () {
+      const cwd = yield* conflictingCheckout;
       const headBefore = yield* git(cwd, "rev-parse", "HEAD");
 
-      const error = yield* Effect.flip(mergeUpstreamTag(TAG, cwd, agentFails));
+      const error = yield* Effect.flip(
+        mergeUpstreamTag(TAG, { build: builds, agent: agentFails }, cwd),
+      );
 
-      assert.instanceOf(error, PivotConflictError);
-      assert.deepStrictEqual([...error.files].sort(), ["scripts/pivot.ts", "shared/server.ts"]);
-      assert.include(error.message, "shared/server.ts");
+      assert.instanceOf(error, PivotMergeError);
       assert.include(error.reason, "the agent failed");
       yield* assertUntouched(cwd, headBefore);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("aborts when the agent outlives its time cap", () =>
+  it.effect("falls through when the agent leaves conflict markers behind", () =>
     Effect.gen(function* () {
-      const cwd = yield* fixtureCheckout(
-        { "scripts/pivot.ts": "pivot main\n", "shared/server.ts": "server main\n" },
-        { "scripts/pivot.ts": "pivot upstream\n", "shared/server.ts": "server upstream\n" },
-      );
-      const headBefore = yield* git(cwd, "rev-parse", "HEAD");
-      const started = yield* Deferred.make<void>();
-      const stalled: ConflictResolver = () =>
-        Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never));
-
-      const outcome = yield* Effect.forkChild(Effect.flip(mergeUpstreamTag(TAG, cwd, stalled)));
-      yield* Deferred.await(started);
-      yield* TestClock.adjust("10 minutes");
-      const error = yield* Fiber.join(outcome);
-
-      assert.instanceOf(error, PivotConflictError);
-      assert.include(error.reason, "did not finish");
-      yield* assertUntouched(cwd, headBefore);
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-
-  it.effect("aborts without asking the agent when too many files conflict", () =>
-    Effect.gen(function* () {
-      const files = Array.from({ length: 11 }, (_, index) => `shared/file${index}.ts`);
-      const cwd = yield* fixtureCheckout(
-        Object.fromEntries(files.map((file) => [file, "main\n"])),
-        Object.fromEntries(files.map((file) => [file, "upstream\n"])),
-      );
-      const headBefore = yield* git(cwd, "rev-parse", "HEAD");
-
-      const error = yield* Effect.flip(mergeUpstreamTag(TAG, cwd, agentMustNotRun));
-
-      assert.instanceOf(error, PivotConflictError);
-      assert.include(error.reason, "over its cap of 10");
-      assert.strictEqual(yield* git(cwd, "rev-parse", "HEAD"), headBefore);
-      assert.strictEqual(yield* git(cwd, "status", "--porcelain"), "");
-      assert.isFalse(yield* mergeInProgress(cwd));
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-
-  it.effect("aborts when the agent leaves conflict markers behind", () =>
-    Effect.gen(function* () {
-      const cwd = yield* fixtureCheckout(
-        { "scripts/pivot.ts": "pivot main\n", "shared/server.ts": "server main\n" },
-        { "scripts/pivot.ts": "pivot upstream\n", "shared/server.ts": "server upstream\n" },
-      );
+      const cwd = yield* conflictingCheckout;
       const headBefore = yield* git(cwd, "rev-parse", "HEAD");
       const markers = "<<<<<<< ours\nserver main\n=======\nserver upstream\n>>>>>>> theirs\n";
+      const agent = agentWrites({ "shared/server.ts": markers }, "gave up");
 
-      const error = yield* Effect.flip(
-        mergeUpstreamTag(TAG, cwd, agentWrites({ "shared/server.ts": markers }, "gave up")),
-      );
+      const error = yield* Effect.flip(mergeUpstreamTag(TAG, { build: builds, agent }, cwd));
 
-      assert.instanceOf(error, PivotConflictError);
+      assert.instanceOf(error, PivotMergeError);
       assert.include(error.reason, "shared/server.ts still has conflict markers");
       yield* assertUntouched(cwd, headBefore);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("aborts when the agent edits a file it was not given", () =>
+  it.effect("falls through, removing the agent's files, when the merge still doesn't build", () =>
     Effect.gen(function* () {
-      const cwd = yield* fixtureCheckout(
-        { "scripts/pivot.ts": "pivot main\n", "shared/server.ts": "server main\n" },
-        { "scripts/pivot.ts": "pivot upstream\n", "shared/server.ts": "server upstream\n" },
-      );
+      const cwd = yield* conflictingCheckout;
       const headBefore = yield* git(cwd, "rev-parse", "HEAD");
-      const stray: ConflictResolver = (files, dir) =>
-        Effect.gen(function* () {
-          const fileSystem = yield* FileSystem.FileSystem;
-          const path = yield* Path.Path;
-          yield* fileSystem.writeFileString(path.join(dir ?? "", "shared/extra.ts"), "extra\n");
-          return files.map((file) => ({ file, reason: "resolved" }));
-        }).pipe(Effect.provide(NodeServices.layer));
+      const agent = agentWrites(
+        { "shared/server.ts": "server broken\n", "shared/scratch.ts": "scratch\n" },
+        "tried",
+      );
+      const build = buildFailsWhile(cwd, "shared/server.ts", "broken");
 
-      const error = yield* Effect.flip(mergeUpstreamTag(TAG, cwd, stray));
+      const error = yield* Effect.flip(mergeUpstreamTag(TAG, { build, agent }, cwd));
 
-      assert.instanceOf(error, PivotConflictError);
-      assert.include(error.reason, "shared/extra.ts");
+      assert.instanceOf(error, PivotMergeError);
+      assert.include(error.reason, "still does not build");
       yield* assertUntouched(cwd, headBefore);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
+});
+
+describe("launchdPath", () => {
+  it("replaces fnm's per-shell directories with Node's own directory", () => {
+    const node = "/Users/me/.local/share/fnm/node-versions/v24.21.0/installation/bin";
+    assert.strictEqual(
+      launchdPath(
+        [
+          "/Users/me/.local/share/vite-plus/bin",
+          "/Users/me/.local/state/fnm_multishells/1_2/bin",
+          "/opt/homebrew/bin",
+          "/Users/me/.local/state/fnm_multishells/3_4/bin",
+          "/usr/bin",
+        ].join(":"),
+        node,
+      ),
+      ["/Users/me/.local/share/vite-plus/bin", node, "/opt/homebrew/bin", "/usr/bin"].join(":"),
+    );
+  });
+
+  it("keeps a PATH without fnm's per-shell directories as it is", () => {
+    assert.strictEqual(
+      launchdPath("/usr/local/bin:/usr/bin:", "/opt/node/bin"),
+      "/usr/local/bin:/usr/bin",
+    );
+  });
 });
