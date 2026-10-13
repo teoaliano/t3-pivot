@@ -2,7 +2,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { decisionsHeldBy } from "@t3tools/client-runtime/pivot-state";
 import type { EnvironmentId, PivotDecision, ThreadId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { LayoutDashboardIcon, MessageSquareIcon } from "lucide-react";
+import { LayoutDashboardIcon } from "lucide-react";
 import { useState } from "react";
 
 import { usePivotState } from "../../state/pivot";
@@ -12,10 +12,11 @@ import { buildThreadRouteParams } from "../../threadRoutes";
 import { useChatCanvas } from "../chat/ChatCanvasContext";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
-import { Toggle, ToggleGroup } from "../ui/toggle-group";
+import { Toggle } from "../ui/toggle";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PivotDecisionCard } from "./PivotDecisionCard";
 import { useInPivotView } from "./pivotViewContext";
-import { usePivotViewMode, usePivotViewStore } from "./pivotViewStore";
+import { otherPivotViewMode, usePivotViewMode, usePivotViewStore } from "./pivotViewStore";
 
 /** What a thread is in Pivot mode, for the chat around it. */
 export type PivotChatRole =
@@ -37,7 +38,7 @@ export function usePivotChatRole(environmentId: EnvironmentId, threadId: ThreadI
   return { kind: "none" };
 }
 
-/** The header switch between a Pivot's chat and its Pivot view. Nothing for other threads. */
+/** The header button that flips a Pivot between its chat and its Pivot view. Nothing for other threads. */
 export function PivotViewSwitch(props: {
   environmentId: EnvironmentId;
   threadId: ThreadId;
@@ -50,26 +51,26 @@ export function PivotViewSwitch(props: {
   const mode = usePivotViewMode(ref);
   const setMode = usePivotViewStore((state) => state.setMode);
   if (role.kind !== "pivot" || (inPivotView && props.force !== true)) return null;
+  const next = otherPivotViewMode(mode);
+  const label = next === "pivot" ? "Pivot" : "Chat";
   return (
-    <ToggleGroup
-      aria-label="Show this Pivot as"
-      className="shrink-0"
-      variant="segmented"
-      value={[mode]}
-      onValueChange={(value) => {
-        const next = value[0];
-        if (next === "chat" || next === "pivot") setMode(ref, next);
-      }}
-    >
-      <Toggle aria-label="Chat" value="chat">
-        <MessageSquareIcon className="size-3.5" />
-        Chat
-      </Toggle>
-      <Toggle aria-label="Pivot view" value="pivot">
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Toggle
+            className="shrink-0"
+            aria-label={label}
+            variant="ghost"
+            size="sm"
+            pressed={mode === "pivot"}
+            onPressedChange={() => setMode(ref, next)}
+          />
+        }
+      >
         <LayoutDashboardIcon className="size-3.5" />
-        Pivot
-      </Toggle>
-    </ToggleGroup>
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">{label}</TooltipPopup>
+    </Tooltip>
   );
 }
 
