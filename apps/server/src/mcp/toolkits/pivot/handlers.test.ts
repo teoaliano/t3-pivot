@@ -126,6 +126,7 @@ const dispatch = (
     kind: "ship" | "scout";
     intent: string;
     spec: string;
+    baseBranch: string;
     modelEntry: string;
     modelSelection: typeof modelSelection;
   }> = {},
@@ -600,10 +601,11 @@ describe("Pivot and teammate tools", () => {
     });
 
     it.effect("accepts a local-only ship's done naming its branch", () => {
-      const { layer } = setup();
+      const { workspaceRoot, layer } = setup();
       return Effect.gen(function* () {
         const pivot = yield* createPivot;
         const ship = yield* dispatch(pivot);
+        addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
         expectOk(
           yield* call(ship.threadId, "report_status", {
             status: "done",
@@ -1109,6 +1111,118 @@ describe("delivery and teardown", () => {
       );
       // main is checked out in the project, so its files follow.
       assert.isTrue(NodeFS.existsSync(NodePath.join(workspaceRoot, "fix.txt")));
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("a teammate cannot merge or land, its own work or another's", () => {
+    const { fake, layer } = setup({ remote: true });
+    return Effect.gen(function* () {
+      const { pivot, ship, decisionId } = yield* approvedShip(fake);
+      yield* approve(pivot, decisionId);
+      linkPr(fake, ship.threadId);
+      fake.pullRequests.set(prUrl, greenPr);
+      for (const tool of ["merge_teammate", "land_teammate"]) {
+        expectRefused(
+          yield* call(ship.threadId, tool, { threadId: ship.threadId, decisionId }),
+          "capability_denied",
+          "Only a Pivot",
+        );
+      }
+      assert.deepStrictEqual(fake.merges, []);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("merges in the order the user approved, never a PR before what it stacks on", () => {
+    const { fake, layer } = setup({ remote: true });
+    return Effect.gen(function* () {
+      const pivots = yield* PivotService.PivotService;
+      const { pivot, ship: first } = yield* approvedShip(fake);
+      const second = yield* dispatch(pivot, {
+        title: "Add the logout button",
+        baseBranch: first.branch,
+      });
+      const prOf = (number: number, headBranch: string, baseBranch: string) => ({
+        ...link(),
+        number,
+        url: `https://github.com/o/r/pull/${number}`,
+        snapshot: { ...link().snapshot, headBranch, baseBranch },
+      });
+      const firstPr = prOf(9, first.branch, "main");
+      const secondPr = prOf(10, second.branch, first.branch);
+      for (const [threadId, pr] of [
+        [first.threadId, firstPr],
+        [second.threadId, secondPr],
+      ] as const) {
+        const thread = fake.threads.get(threadId)!;
+        thread.shell = { ...thread.shell, pullRequests: [pr] } as typeof thread.shell;
+        fake.pullRequests.set(pr.url, greenPr);
+      }
+      let decisions = 0;
+      const mergeDecision = (teammate: ThreadId, mergeOrder?: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          decisions += 1;
+          const { decision } = yield* pivots.openDecision(pivot, {
+            teammateThreadId: teammate,
+            key: `merge-${decisions}`,
+            question: "Merge it?",
+          });
+          yield* pivots.escalateDecision(pivot, {
+            decisionId: decision.decisionId,
+            questions: ["Merge it?"],
+            evidence: "CI is green.",
+            consequence: "It ships.",
+            options: [],
+            recommendation: "Merge",
+            asksApproval: true,
+            ...(mergeOrder === undefined ? {} : { mergeOrder }),
+          });
+          yield* pivots.recordUserAnswer({
+            decisionId: decision.decisionId,
+            answer: "Yes.",
+            approved: true,
+          });
+          return decision.decisionId;
+        });
+
+      // Another PR is open and the decision sets no order: the user has not seen one.
+      expectRefused(
+        yield* call(pivot, "merge_teammate", {
+          threadId: first.threadId,
+          decisionId: yield* mergeDecision(first.threadId),
+        }),
+        "invalid_request",
+        `missing from the decision's merge order: ${secondPr.url} (${second.branch})`,
+      );
+      // The stacked PR cannot go first, whatever order the decision names.
+      const outOfOrder = yield* call(pivot, "merge_teammate", {
+        threadId: second.threadId,
+        decisionId: yield* mergeDecision(second.threadId, [second.branch, first.branch]),
+      });
+      expectRefused(outOfOrder, "invalid_request", `stacked on ${first.branch}`);
+      const early = yield* call(pivot, "merge_teammate", {
+        threadId: second.threadId,
+        decisionId: yield* mergeDecision(second.threadId, [first.branch, second.branch]),
+      });
+      expectRefused(early, "invalid_request", `${first.branch} comes before it`);
+      assert.deepStrictEqual(fake.merges, []);
+
+      const order = [first.branch, second.branch];
+      expectOk(
+        yield* call(pivot, "merge_teammate", {
+          threadId: first.threadId,
+          decisionId: yield* mergeDecision(first.threadId, order),
+        }),
+      );
+      expectOk(
+        yield* call(pivot, "merge_teammate", {
+          threadId: second.threadId,
+          decisionId: yield* mergeDecision(second.threadId, order),
+        }),
+      );
+      assert.deepStrictEqual(
+        fake.merges.map((merge) => merge.url),
+        [firstPr.url, secondPr.url],
+      );
     }).pipe(Effect.provide(layer));
   });
 
