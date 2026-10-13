@@ -176,7 +176,9 @@ it.layer(layer)("Pivot and teammate permissions", (it) => {
   );
 
   // Runs Claude's PreToolUse hook the way the CLI does for a Bash call.
-  const bashDecision = (command: string): Promise<{ decision?: string; reason?: string }> => {
+  const bashDecision = (
+    command: string,
+  ): Promise<{ decision: string | undefined; reason: string | undefined }> => {
     const options = makeClaudeQueryOptions({
       modelSelection,
       nativeThreadId: "native-1",
@@ -196,11 +198,13 @@ it.layer(layer)("Pivot and teammate permissions", (it) => {
       "tool-1",
       { signal: new AbortController().signal },
     ).then((output) => {
-      const specific = "hookSpecificOutput" in output ? output.hookSpecificOutput : undefined;
+      const specific = ("hookSpecificOutput" in output ? output.hookSpecificOutput : undefined) as
+        | { permissionDecision?: string; permissionDecisionReason?: string }
+        | undefined;
       return {
         decision: specific?.permissionDecision,
         reason: specific?.permissionDecisionReason,
-      } as { decision?: string; reason?: string };
+      };
     });
   };
 
