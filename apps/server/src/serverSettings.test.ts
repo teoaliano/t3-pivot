@@ -687,6 +687,26 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     ).pipe(Effect.provide(layerServerSettings())),
   );
 
+  it.effect("saves one teammate kind model while the other stays unset", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const serverConfig = yield* ServerConfig.ServerConfig;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+        const ship = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" };
+
+        const next = yield* serverSettings.updateSettings({
+          teammateKindModelSelections: { ship, scout: null },
+        });
+        const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
+        const persisted = yield* decodeServerSettingsJson(raw);
+
+        assert.deepStrictEqual(next.teammateKindModelSelections, { ship, scout: null });
+        assert.deepStrictEqual(persisted.teammateKindModelSelections, { ship, scout: null });
+      }),
+    ).pipe(Effect.provide(layerServerSettings())),
+  );
+
   it.effect("preserves model when switching providers via textGenerationModelSelection", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
