@@ -19,6 +19,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { Command } from "effect/cli";
@@ -81,16 +82,17 @@ export class PivotRefusedError extends Schema.TaggedError<PivotRefusedError>()(
 }
 
 /** Run a command and return its trimmed stdout, failing on a non-zero exit. */
-const run = Effect.fn("pivot.run")(function* (
+export const run = Effect.fn("pivot.run")(function* (
   command: string,
   args: ReadonlyArray<string>,
   env: Record<string, string> = {},
+  cwd?: string,
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   return yield* Effect.scoped(
     Effect.gen(function* () {
       const handle = yield* spawner.spawn(
-        ChildProcess.make(command, args, { env, extendEnv: true, stdin: "ignore" }),
+        ChildProcess.make(command, args, { cwd, env, extendEnv: true, stdin: "ignore" }),
       );
       const [stdout, stderr, exitCode] = yield* Effect.all(
         [
@@ -591,9 +593,77 @@ const buildServer = Effect.gen(function* () {
   yield* runVisible("node_modules/.bin/vp", ["run", "--filter", "t3", "build"]);
 });
 
-// Runs from the host's dedicated checkout, never a working one. An upstream tag
-// that merges cleanly and builds is pushed to main; one that conflicts or breaks
-// the build becomes a sync PR instead, and the host keeps its deployed build.
+export class PivotConflictError extends Schema.TaggedError<PivotConflictError>()(
+  "PivotConflictError",
+  {
+    tag: Schema.String,
+    files: Schema.Array(Schema.String),
+  },
+) {
+  override get message(): string {
+    return `upstream ${this.tag} conflicts with main in ${this.files.join(", ")}. The merge was aborted and the deployed build is unchanged.`;
+  }
+}
+
+// Who settles a conflict. Pivot-owned files exist only in the fork, so a conflict
+// there keeps main's side. `.repos/` is vendored upstream code the fork never edits
+// (see AGENTS.md), so a conflict there takes upstream's side. Any other conflict
+// is a judgment call, and the merge aborts instead of guessing.
+const PIVOT_OWNED_PATHS = [
+  "scripts/pivot.ts",
+  "scripts/pivot-release-plan.ts",
+  "scripts/pivot-release-plan.test.ts",
+  "docs/operations/pivot-releases.md",
+  "apps/server/src/pivot/",
+  ".scratch/pivot-mode/",
+];
+const UPSTREAM_OWNED_PATHS = [".repos/"];
+
+const owns = (paths: ReadonlyArray<string>, file: string) =>
+  paths.some((path) => (path.endsWith("/") ? file.startsWith(path) : file === path));
+
+/**
+ * Merges upstream `tag` into the checked-out branch in `cwd`. A conflict is settled
+ * by the file's owner (see PIVOT_OWNED_PATHS and UPSTREAM_OWNED_PATHS). If any
+ * conflicted file has no owner, or the settling fails, the merge is aborted and
+ * this fails, leaving the checkout as it was.
+ */
+export const mergeUpstreamTag = Effect.fn("pivot.mergeUpstreamTag")(function* (
+  tag: string,
+  cwd?: string,
+) {
+  const git = (...args: ReadonlyArray<string>) => run("git", args, {}, cwd);
+  const message = `chore: merge upstream ${tag}`;
+  const merged = yield* Effect.result(git("merge", "--no-ff", "--no-verify", "-m", message, tag));
+  if (Result.isSuccess(merged)) return;
+
+  const conflicted = lines(yield* git("diff", "--name-only", "--diff-filter=U"));
+  if (conflicted.length === 0) return yield* merged.failure;
+
+  const abort = git("merge", "--abort");
+  const conflict = new PivotConflictError({ tag, files: conflicted });
+  const unowned = conflicted.some(
+    (file) => !owns(PIVOT_OWNED_PATHS, file) && !owns(UPSTREAM_OWNED_PATHS, file),
+  );
+  if (unowned) {
+    yield* abort;
+    return yield* conflict;
+  }
+
+  yield* Effect.gen(function* () {
+    for (const file of conflicted) {
+      const side = owns(PIVOT_OWNED_PATHS, file) ? "--ours" : "--theirs";
+      yield* git("checkout", side, "--", file);
+      yield* git("add", "--", file);
+    }
+    yield* git("commit", "--no-verify", "-m", message);
+  }).pipe(Effect.catchTags({ PivotCommandError: () => abort.pipe(Effect.andThen(conflict)) }));
+});
+
+// Runs from the host's dedicated checkout, never a working one. It fast-forwards to
+// origin/main, then merges the newest upstream nightly, settling conflicts by file
+// owner. A conflict neither owner settles fails the run before any build, and a
+// build that fails leaves the host on its deployed build.
 const hostUpdate = Effect.gen(function* () {
   const env = yield* forkAccountEnv;
 
@@ -604,17 +674,8 @@ const hostUpdate = Effect.gen(function* () {
   let mergedTag: string | undefined;
   const next = yield* nextUpstreamTag("HEAD");
   if (Option.isSome(next)) {
-    const tag = next.value;
-    const merged = yield* succeeds(
-      run("git", ["merge", "--no-ff", "--no-verify", "-m", `chore: merge upstream ${tag}`, tag]),
-    );
-    if (merged) {
-      mergedTag = tag;
-    } else {
-      yield* run("git", ["merge", "--abort"]);
-      yield* Console.log(`upstream ${tag} conflicts with main`);
-      yield* openSyncPr(tag, env);
-    }
+    yield* mergeUpstreamTag(next.value);
+    mergedTag = next.value;
   }
 
   const head = yield* run("git", ["rev-parse", "HEAD"]);
@@ -673,7 +734,7 @@ const pivotCli = Command.make("pivot").pipe(
     ),
     Command.make("host-update").pipe(
       Command.withDescription(
-        "Merge upstream's newest nightly if it is clean, then rebuild and restart this host's T3 Pivot.",
+        "Fast-forward to main, merge upstream's newest nightly, then rebuild and restart this host's T3 Pivot.",
       ),
       Command.withHandler(() => hostUpdate),
     ),
