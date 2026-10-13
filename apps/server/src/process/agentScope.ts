@@ -16,6 +16,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
 import * as ProcessRunner from "../processRunner.ts";
+import { procHost, stopScope } from "./scopeReaper.ts";
 
 /**
  * Agents and terminals share this slice. It sits in app.slice next to the
@@ -289,6 +290,13 @@ export const make = Effect.gen(function* () {
       if (scope !== undefined) yield* track(scope.systemctl, threadId, undefined);
     });
 
+  const stop: AgentScopeShape["stop"] = (threadId) =>
+    Effect.gen(function* () {
+      const tracked = scopeByThread.get(threadId);
+      if (tracked === undefined) return;
+      yield* stopScope(procHost, tracked.unit, `thread ${threadId} finished`);
+    });
+
   return {
     wrap: Effect.fn("AgentScope.wrap")(function* ({ command, args, name, threadId, env }) {
       const resolved = yield* resolve(command, env ?? hostEnvironment);
@@ -311,6 +319,7 @@ export const make = Effect.gen(function* () {
     }),
     oomKilled,
     clear,
+    stop,
   } satisfies AgentScopeShape;
 });
 

@@ -42,6 +42,15 @@ export class PivotGit extends Context.Service<
       cwd: string,
       prefix: string,
     ) => Effect.Effect<ReadonlyArray<string>, PivotGitError>;
+    /**
+     * Deletes the local branch. Without `force` git refuses one that is not merged.
+     * Its worktree has to be gone first.
+     */
+    readonly deleteBranch: (input: {
+      readonly projectRoot: string;
+      readonly branch: string;
+      readonly force: boolean;
+    }) => Effect.Effect<void, PivotGitError>;
     readonly headCommit: (cwd: string) => Effect.Effect<string, PivotGitError>;
     /** What `origin` has for the branch right now, or null when it has none. */
     readonly remoteBranchCommit: (
@@ -281,6 +290,8 @@ export const make = Effect.gen(function* () {
       git(cwd, ["for-each-ref", "--format=%(refname:short)", `refs/heads/${prefix}`]).pipe(
         Effect.map((out) => out.split("\n").filter((line) => line.length > 0)),
       ),
+    deleteBranch: ({ projectRoot, branch, force }) =>
+      git(projectRoot, ["branch", force ? "-D" : "-d", "--", branch]).pipe(Effect.asVoid),
     headCommit: (cwd) => git(cwd, ["rev-parse", "HEAD"]),
     isClean,
     uncommitted,

@@ -86,6 +86,8 @@ export class TeammateHost extends Context.Service<
       readonly text: string;
     }) => Result<void>;
     readonly stop: (threadId: ThreadId) => Result<void>;
+    /** Stops what the teammate's agent scope still runs, once its work is landed or merged. */
+    readonly stopScope: (threadId: ThreadId) => Effect.Effect<void>;
     readonly retryLaunch: (threadId: ThreadId) => Result<PivotThreads.RunStart>;
     readonly relaunch: (input: {
       readonly threadId: ThreadId;
@@ -113,8 +115,9 @@ export class TeammateHost extends Context.Service<
     /** Whether the worktree has no uncommitted or untracked changes. */
     readonly worktreeClean: (worktreePath: string) => Result<boolean>;
     /**
-     * Stops the session and managed processes, removes the worktree when it exists,
-     * and archives the thread. Without `force`, a dirty worktree is refused.
+     * Stops the session and managed processes, deletes the teammate's Claude temp
+     * files, removes the worktree when it exists, deletes the local branch as
+     * `branchDisposal` says, and archives the thread. Without `force`, a dirty worktree is refused.
      */
     readonly teardown: (
       command: string,
@@ -122,6 +125,11 @@ export class TeammateHost extends Context.Service<
         readonly threadId: ThreadId;
         readonly worktreeExists: boolean;
         readonly force: boolean;
+        /**
+         * What happens to the local branch once the worktree is gone: `force` for work
+         * known to have landed, `safe` lets git refuse an unmerged one, `keep` leaves it.
+         */
+        readonly branchDisposal: "force" | "safe" | "keep";
       },
     ) => Result<void>;
   }

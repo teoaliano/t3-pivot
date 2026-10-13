@@ -250,3 +250,65 @@ describe("PivotService.reportStatus done", () => {
     },
   );
 });
+
+describe("PivotService.teardownTeammate", () => {
+  it.effect("removes a landed teammate's worktree and local branch", () => {
+    const { fake, workspaceRoot, layer } = setup();
+    return Effect.gen(function* () {
+      const pivots = yield* PivotService.PivotService;
+      const ship = yield* dispatchShip(fake, workspaceRoot);
+      const pivot = (yield* (yield* PivotStore.PivotStore).getTeammate(ship.teammate))!
+        .pivotThreadId;
+      commitFile(ship.worktree, "login.ts");
+      sh(workspaceRoot, `git merge -q --ff-only ${ship.branch}`);
+
+      yield* pivots.teardownTeammate(pivot, { threadId: ship.teammate });
+
+      assert.isFalse(NodeFS.existsSync(ship.worktree));
+      assert.strictEqual(sh(workspaceRoot, `git branch --list ${ship.branch}`), "");
+      assert.include(sh(workspaceRoot, "git log --format=%s main"), "login.ts");
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("refuses while another teammate is tied to the same worktree", () => {
+    const { fake, workspaceRoot, layer } = setup();
+    return Effect.gen(function* () {
+      const pivots = yield* PivotService.PivotService;
+      const ship = yield* dispatchShip(fake, workspaceRoot);
+      const pivot = (yield* (yield* PivotStore.PivotStore).getTeammate(ship.teammate))!
+        .pivotThreadId;
+      const second = yield* pivots.dispatchTeammate(pivot, {
+        title: "Follow up",
+        kind: "ship",
+        intent: "More.",
+        spec: "More.",
+      });
+      fake.threads.get(second.threadId)!.worktreePath = ship.worktree;
+      commitFile(ship.worktree, "login.ts");
+      sh(workspaceRoot, `git merge -q --ff-only ${ship.branch}`);
+
+      const reason = yield* refusal(pivots.teardownTeammate(pivot, { threadId: ship.teammate }));
+
+      assert.include(reason, second.threadId);
+      assert.isTrue(NodeFS.existsSync(ship.worktree));
+      assert.include(sh(workspaceRoot, "git branch"), ship.branch);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("still refuses unlanded work and deletes nothing", () => {
+    const { fake, workspaceRoot, layer } = setup();
+    return Effect.gen(function* () {
+      const pivots = yield* PivotService.PivotService;
+      const ship = yield* dispatchShip(fake, workspaceRoot);
+      const pivot = (yield* (yield* PivotStore.PivotStore).getTeammate(ship.teammate))!
+        .pivotThreadId;
+      commitFile(ship.worktree, "login.ts");
+
+      const reason = yield* refusal(pivots.teardownTeammate(pivot, { threadId: ship.teammate }));
+
+      assert.include(reason, "has not landed");
+      assert.isTrue(NodeFS.existsSync(ship.worktree));
+      assert.include(sh(workspaceRoot, "git branch"), ship.branch);
+    }).pipe(Effect.provide(layer));
+  });
+});

@@ -38,6 +38,11 @@ export interface AgentScopeShape {
    * it, even when the next session runs without one (Cursor, OpenCode).
    */
   readonly clear: (threadId: string) => Effect.Effect<void>;
+  /**
+   * Stops every process still running in the thread's latest agent scope:
+   * SIGTERM first, then SIGKILL for what survives the grace period.
+   */
+  readonly stop: (threadId: string) => Effect.Effect<void>;
 }
 
 export interface AgentScopeCommand {
@@ -50,6 +55,7 @@ export const AgentScope = Context.Reference<AgentScopeShape>("@t3tools/shared/Ag
     wrap: ({ command, args }) => Effect.succeed({ command, args }),
     oomKilled: () => Effect.succeed(false),
     clear: () => Effect.void,
+    stop: () => Effect.void,
   }),
 });
 

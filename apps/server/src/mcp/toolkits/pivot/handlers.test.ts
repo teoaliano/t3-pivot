@@ -1226,54 +1226,54 @@ describe("delivery and teardown", () => {
     }).pipe(Effect.provide(layer));
   });
 
-  it.effect("tears down landed work, keeping the branch, and refuses unlanded work", () => {
-    const { fake, workspaceRoot, layer } = setup();
-    return Effect.gen(function* () {
-      const { pivot, ship, decisionId } = yield* approvedShip(fake);
-      addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
-      NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "fix.txt"), "fixed\n");
-      sh(ship.worktreePath, "git add -A && git commit -q -m fix");
+  it.effect(
+    "tears down landed work, deleting its worktree and branch, and refuses unlanded work",
+    () => {
+      const { fake, workspaceRoot, layer } = setup();
+      return Effect.gen(function* () {
+        const { pivot, ship, decisionId } = yield* approvedShip(fake);
+        addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
+        NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "fix.txt"), "fixed\n");
+        sh(ship.worktreePath, "git add -A && git commit -q -m fix");
 
-      expectRefused(
-        yield* call(pivot, "teardown_teammate", { threadId: ship.threadId }),
-        "invalid_request",
-        "has not landed",
-      );
-      NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "wip.txt"), "wip\n");
-      expectRefused(
-        yield* call(pivot, "teardown_teammate", { threadId: ship.threadId }),
-        "invalid_request",
-        "uncommitted changes",
-      );
-      NodeFS.rmSync(NodePath.join(ship.worktreePath, "wip.txt"));
-      assert.deepStrictEqual(fake.removedWorktrees, []);
-      assert.strictEqual(fake.threads.get(ship.threadId)?.archived, false);
+        expectRefused(
+          yield* call(pivot, "teardown_teammate", { threadId: ship.threadId }),
+          "invalid_request",
+          "has not landed",
+        );
+        NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "wip.txt"), "wip\n");
+        expectRefused(
+          yield* call(pivot, "teardown_teammate", { threadId: ship.threadId }),
+          "invalid_request",
+          "uncommitted changes",
+        );
+        NodeFS.rmSync(NodePath.join(ship.worktreePath, "wip.txt"));
+        assert.deepStrictEqual(fake.removedWorktrees, []);
+        assert.strictEqual(fake.threads.get(ship.threadId)?.archived, false);
 
-      yield* approve(pivot, decisionId);
-      expectOk(yield* call(pivot, "land_teammate", { threadId: ship.threadId, decisionId }));
-      const torn = expectOk(yield* call(pivot, "teardown_teammate", { threadId: ship.threadId }));
-      assert.strictEqual(torn.reason, "Its commits are in main.");
-      assert.deepStrictEqual(fake.stoppedCheckouts, [ship.worktreePath]);
-      assert.deepStrictEqual(fake.removedWorktrees, [
-        { worktreePath: ship.worktreePath, force: false },
-      ]);
-      assert.isTrue(fake.threads.get(ship.threadId)?.archived);
-      assert.strictEqual(fake.threads.get(ship.threadId)?.stops, 1);
-      assert.strictEqual(
-        sh(workspaceRoot, `git branch --list ${ship.branch}`).replace(/^[*+ ]+/, ""),
-        ship.branch,
-      );
+        yield* approve(pivot, decisionId);
+        expectOk(yield* call(pivot, "land_teammate", { threadId: ship.threadId, decisionId }));
+        const torn = expectOk(yield* call(pivot, "teardown_teammate", { threadId: ship.threadId }));
+        assert.strictEqual(torn.reason, "Its commits are in main.");
+        assert.deepStrictEqual(fake.stoppedCheckouts, [ship.worktreePath]);
+        assert.deepStrictEqual(fake.removedWorktrees, [
+          { worktreePath: ship.worktreePath, force: false },
+        ]);
+        assert.isTrue(fake.threads.get(ship.threadId)?.archived);
+        assert.strictEqual(fake.threads.get(ship.threadId)?.stops, 1);
+        assert.strictEqual(sh(workspaceRoot, `git branch --list ${ship.branch}`), "");
 
-      const store = yield* PivotStore.PivotStore;
-      assert.isNotNull((yield* store.getTeammate(ship.threadId))?.tornDownAt);
-      // Its decision stays open, and its history stays readable.
-      assert.strictEqual(
-        (yield* store.listDecisions({ pivotThreadId: pivot, openOnly: true })).length,
-        1,
-      );
-      expectOk(yield* call(pivot, "teammate_history", { threadId: ship.threadId }));
-    }).pipe(Effect.provide(layer));
-  });
+        const store = yield* PivotStore.PivotStore;
+        assert.isNotNull((yield* store.getTeammate(ship.threadId))?.tornDownAt);
+        // Its decision stays open, and its history stays readable.
+        assert.strictEqual(
+          (yield* store.listDecisions({ pivotThreadId: pivot, openOnly: true })).length,
+          1,
+        );
+        expectOk(yield* call(pivot, "teammate_history", { threadId: ship.threadId }));
+      }).pipe(Effect.provide(layer));
+    },
+  );
 
   it.effect("discards unlanded work only on the user's answer", () => {
     const { fake, workspaceRoot, layer } = setup();

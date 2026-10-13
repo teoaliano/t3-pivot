@@ -1159,6 +1159,7 @@ export const make = Effect.gen(function* () {
       yield* host
         .mergePullRequest({ ...ref, expectedHeadSha: head })
         .pipe(Effect.tapError(() => recordMerge(null).pipe(Effect.ignore)));
+      yield* host.stopScope(teammate.threadId);
       return { threadId: teammate.threadId, url: link.url, mergedHead: head };
     });
 
@@ -1191,6 +1192,7 @@ export const make = Effect.gen(function* () {
         threadId: teammate.threadId,
         head: result.head,
       });
+      yield* (yield* hostOf(command, teammate)).stopScope(teammate.threadId);
       return {
         threadId: teammate.threadId,
         branch: teammate.branch,
@@ -1206,6 +1208,18 @@ export const make = Effect.gen(function* () {
       const teammate = yield* ownTeammate(command, pivot, input.threadId);
       const host = yield* hostOf(command, teammate);
       yield* host.project(command, pivot.projectId);
+      // Teardown deletes the worktree and branch, so nobody else may still be using them.
+      const sharing = (yield* store.listTeammates({ includeTornDown: false })).filter(
+        (other) =>
+          other.threadId !== teammate.threadId &&
+          (other.worktreePath === teammate.worktreePath || other.branch === teammate.branch),
+      );
+      if (sharing.length > 0) {
+        return yield* refuse(
+          command,
+          `Not torn down: ${sharing.map((other) => other.threadId).join(", ")} still ${sharing.length === 1 ? "works" : "work"} on the same worktree or branch. Tear that one down first, or hand the work over.`,
+        );
+      }
       const worktreeExists = yield* host.worktreeExists(teammate.worktreePath);
 
       let reason: string;
@@ -1256,6 +1270,13 @@ export const make = Effect.gen(function* () {
         }
       }
       const discarding = reason.startsWith("Discarded");
+      // Landed work's branch is safe to force-delete; a scout's report-only branch
+      // goes only if git agrees it is merged; discarded work keeps its branch.
+      const branchDisposal = discarding
+        ? ("keep" as const)
+        : teammate.kind === "scout" && teammate.scoutReport !== null
+          ? ("safe" as const)
+          : ("force" as const);
 
       yield* host.teardown(command, {
         projectId: pivot.projectId,
@@ -1264,6 +1285,7 @@ export const make = Effect.gen(function* () {
         branch: teammate.branch,
         worktreeExists,
         force: discarding,
+        branchDisposal,
       });
       yield* store.dispatch({
         type: "teammate.tear-down",

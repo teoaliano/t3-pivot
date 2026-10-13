@@ -14,6 +14,7 @@ import { attachWorktree, modelSelection, projectId, setup, sh } from "./PivotSer
 import * as PivotGit from "./PivotGit.ts";
 import * as PivotThreads from "./PivotThreads.ts";
 import { TeammateHost } from "./TeammateHost.ts";
+import { ClaudeTempRoot, claudeTempName } from "./teammateTemp.ts";
 import type { FakeV2 } from "./PivotThreads.testkit.ts";
 
 const pivotThreadId = ThreadId.make("pivot-thread");
@@ -95,6 +96,8 @@ describe("TeammateHost (local)", () => {
         assert.strictEqual(thread.messages[0]?.senderThreadId, pivotThreadId);
         assert.include(thread.messages[0]?.text, launchInput.intent);
         assert.include(thread.messages[0]?.text, result.branch);
+        assert.include(thread.messages[0]?.text, "timeout 600 <command>");
+        assert.include(thread.messages[0]?.text, "Don't leave dev servers");
         assert.strictEqual(result.runId, fake.threads.get(result.threadId)!.shell.latestRunId);
       }).pipe(Effect.provide(layer));
     },
@@ -301,6 +304,7 @@ describe("TeammateHost (local)", () => {
         threadId: teammate.threadId,
         worktreeExists: true,
         force: true,
+        branchDisposal: "keep",
       });
 
       const thread = fake.threads.get(teammate.threadId)!;
@@ -321,9 +325,59 @@ describe("TeammateHost (local)", () => {
         threadId: teammate.threadId,
         worktreeExists: false,
         force: false,
+        branchDisposal: "keep",
       });
       assert.deepStrictEqual(fake.removedWorktrees, []);
       assert.isTrue(fake.threads.get(teammate.threadId)!.archived);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("teardown deletes the teammate's temp files and no other teammate's", () => {
+    const { fake, workspaceRoot, layer } = setup();
+    const tempRoot = NodeFS.mkdtempSync(NodePath.join(NodeFS.realpathSync("/tmp"), "claude-test-"));
+    return Effect.gen(function* () {
+      const host = yield* TeammateHost;
+      const { teammate, checkout, worktree } = yield* launched(fake, workspaceRoot);
+      const mine = NodePath.join(tempRoot, claudeTempName(worktree));
+      const other = NodePath.join(tempRoot, claudeTempName(`${worktree}-other`));
+      for (const directory of [mine, other]) {
+        NodeFS.mkdirSync(NodePath.join(directory, "session", "tasks"), { recursive: true });
+        NodeFS.writeFileSync(NodePath.join(directory, "session", "tasks", "out"), "x");
+      }
+      yield* host.teardown("teardown_teammate", {
+        ...checkout,
+        threadId: teammate.threadId,
+        worktreeExists: true,
+        force: true,
+        branchDisposal: "keep",
+      });
+
+      assert.isFalse(NodeFS.existsSync(mine));
+      assert.isTrue(NodeFS.existsSync(other));
+    }).pipe(
+      Effect.provideService(ClaudeTempRoot, tempRoot),
+      Effect.provide(layer),
+      Effect.ensuring(Effect.sync(() => NodeFS.rmSync(tempRoot, { recursive: true, force: true }))),
+    );
+  });
+
+  it.effect("teardown removes the worktree and force-deletes the local branch", () => {
+    const { fake, workspaceRoot, layer } = setup();
+    return Effect.gen(function* () {
+      const host = yield* TeammateHost;
+      const { teammate, checkout, worktree } = yield* launched(fake, workspaceRoot);
+      sh(workspaceRoot, `git worktree add -q -b ${checkout.branch} ${worktree} main`);
+
+      yield* host.teardown("teardown_teammate", {
+        ...checkout,
+        threadId: teammate.threadId,
+        worktreeExists: true,
+        force: false,
+        branchDisposal: "force",
+      });
+
+      assert.isFalse(NodeFS.existsSync(worktree));
+      assert.strictEqual(sh(workspaceRoot, `git branch --list ${checkout.branch}`), "");
     }).pipe(Effect.provide(layer));
   });
 });
