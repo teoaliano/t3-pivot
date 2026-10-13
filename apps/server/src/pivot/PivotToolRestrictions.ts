@@ -4,6 +4,7 @@
  *
  * @module PivotToolRestrictions
  */
+import type { OrchestrationV2AppThread } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -63,7 +64,9 @@ const writeAccess = Layer.effect(
     const store = yield* PivotStore.PivotStore;
     const projects = yield* ProjectStore.ProjectStoreV2;
     const path = yield* Path.Path;
-    const scopeFor = Effect.fn("PivotToolRestrictions.scopeFor")(function* (thread) {
+    const scopeFor = Effect.fn("PivotToolRestrictions.scopeFor")(function* (
+      thread: OrchestrationV2AppThread,
+    ) {
       const pivot = yield* store.getPivot(thread.id);
       if (pivot !== null) {
         const home = thread.worktreePath;
