@@ -28,6 +28,13 @@ const toolRestrictions = Layer.effect(
           Effect.map((pivot) => pivot !== null),
           Effect.orElseSucceed(() => false),
         ),
+      // A lookup that fails guards the thread rather than leaving its shell open.
+      forgeMergeRole: (threadId) =>
+        Effect.gen(function* () {
+          if ((yield* store.getPivot(threadId)) !== null) return "pivot" as const;
+          if ((yield* store.getTeammate(threadId)) !== null) return "teammate" as const;
+          return null;
+        }).pipe(Effect.orElseSucceed(() => "teammate" as const)),
     };
   }),
 );

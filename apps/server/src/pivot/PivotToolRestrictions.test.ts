@@ -12,7 +12,10 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 
-import { claudeRuntimeQueryPolicyForRuntimePolicy } from "../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
+import {
+  claudeRuntimeQueryPolicyForRuntimePolicy,
+  makeClaudeQueryOptions,
+} from "../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as RuntimePolicy from "../orchestration-v2/RuntimePolicy.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
@@ -169,6 +172,80 @@ it.layer(layer)("Pivot and teammate permissions", (it) => {
         allowDangerouslySkipPermissions: true,
         installPermissionCallback: false,
       });
+    }),
+  );
+
+  // Runs Claude's PreToolUse hook the way the CLI does for a Bash call.
+  const bashDecision = (
+    role: "pivot" | "teammate",
+    command: string,
+  ): Promise<{ decision?: string; reason?: string }> => {
+    const options = makeClaudeQueryOptions({
+      modelSelection,
+      nativeThreadId: "native-1",
+      resume: false,
+      cwd: "/wt/ship-1",
+      forgeMergeRole: role,
+    });
+    const matcher = options.hooks?.PreToolUse?.[0];
+    assert.equal(matcher?.matcher, "Bash");
+    return matcher!.hooks[0]!(
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: "Bash",
+        tool_input: { command },
+        tool_use_id: "tool-1",
+      } as never,
+      "tool-1",
+      { signal: new AbortController().signal },
+    ).then((output) => {
+      const specific = "hookSpecificOutput" in output ? output.hookSpecificOutput : undefined;
+      return {
+        decision: specific?.permissionDecision,
+        reason: specific?.permissionDecisionReason,
+      } as { decision?: string; reason?: string };
+    });
+  };
+
+  it.effect("marks the Pivot and its teammates, and nobody else, as barred from merging", () =>
+    Effect.gen(function* () {
+      assert.equal((yield* resolve(pivotThreadId, home)).forgeMergeRole, "pivot");
+      assert.equal((yield* resolve(teammateThreadId, "/wt/ship-1")).forgeMergeRole, "teammate");
+      assert.equal(
+        (yield* resolve(ThreadId.make("someone-else"), "/elsewhere")).forgeMergeRole,
+        undefined,
+      );
+    }),
+  );
+
+  it.effect("refuses a teammate's gh pr merge and forge merge call, naming the Pivot's tool", () =>
+    Effect.promise(async () => {
+      const viaCli = await bashDecision("teammate", "gh pr merge 12 --squash");
+      assert.equal(viaCli.decision, "deny");
+      assert.include(viaCli.reason, "merge_teammate");
+      const viaApi = await bashDecision(
+        "teammate",
+        "curl -X PUT https://api.github.com/repos/o/r/pulls/12/merge",
+      );
+      assert.equal(viaApi.decision, "deny");
+    }),
+  );
+
+  it.effect("refuses the Pivot's gh pr merge, naming merge_teammate", () =>
+    Effect.promise(async () => {
+      const refused = await bashDecision("pivot", "gh pr merge 12");
+      assert.equal(refused.decision, "deny");
+      assert.include(refused.reason, "merge_teammate");
+    }),
+  );
+
+  it.effect("keeps gh pr create and reading PR state working", () =>
+    Effect.promise(async () => {
+      for (const role of ["pivot", "teammate"] as const) {
+        for (const command of ["gh pr create --fill", "gh pr view 12 --json state", "git push"]) {
+          assert.equal((await bashDecision(role, command)).decision, undefined);
+        }
+      }
     }),
   );
 });

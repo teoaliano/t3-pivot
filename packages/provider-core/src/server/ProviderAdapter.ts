@@ -59,6 +59,8 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
   project: Schema.optional(
     Schema.Struct({ projectId: Schema.String, workspaceRoot: Schema.String }),
   ),
+  /** Whose shell may not merge or close PRs: a Pivot's, or one of its teammates'. */
+  forgeMergeRole: Schema.optional(Schema.Literals(["pivot", "teammate"])),
   reasoningEffort: Schema.optional(Schema.String),
 });
 export type ProviderAdapterV2RuntimePolicy = typeof ProviderAdapterV2RuntimePolicy.Type;

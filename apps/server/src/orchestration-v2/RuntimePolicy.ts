@@ -14,6 +14,7 @@ import * as Schema from "effect/Schema";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProjectStore from "./ProjectStore.ts";
+import * as ThreadToolRestrictions from "./ThreadToolRestrictions.ts";
 import * as ThreadWriteAccess from "./ThreadWriteAccess.ts";
 
 /**
@@ -137,6 +138,10 @@ export const layerFromProjectStore: Layer.Layer<
                 }),
             ),
           );
+        const forgeMergeRole =
+          yield* (yield* ThreadToolRestrictions.ThreadToolRestrictions).forgeMergeRole(
+            input.thread.id,
+          );
         // Only a scoped thread is a Pivot, and its cwd is its home: the project it works on
         // is named separately so its instructions can point at the checkout.
         const project =
@@ -151,6 +156,7 @@ export const layerFromProjectStore: Layer.Layer<
           interactionMode: input.thread.interactionMode,
           cwd,
           ...(project === undefined ? {} : { project }),
+          ...(forgeMergeRole === null ? {} : { forgeMergeRole }),
           // Reads stay open everywhere; the sandbox only confines writes to the scope.
           ...(writeScope === null
             ? {}
