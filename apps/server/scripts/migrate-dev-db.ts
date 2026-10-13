@@ -52,7 +52,7 @@ export class MigrateDevDbNotInWorktreeError extends Schema.TaggedError<MigrateDe
   {},
 ) {
   override get message(): string {
-    return "Not inside a linked git worktree. Pass --base-dir to target an isolated .t3 directory.";
+    return "Not inside a git checkout. Pass --base-dir to target an isolated .t3 directory.";
   }
 }
 
@@ -635,7 +635,7 @@ export const migrateDevDbCommand = Command.make(
     ),
     baseDir: Flag.String("base-dir").pipe(
       Flag.optional,
-      Flag.withDescription("Isolated .t3 directory. Defaults to the current worktree's .t3."),
+      Flag.withDescription("Isolated .t3 directory. Defaults to the current checkout's .t3."),
     ),
     source: Flag.String("source").pipe(
       Flag.optional,

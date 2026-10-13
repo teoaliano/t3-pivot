@@ -103,4 +103,23 @@ describe("resolveWorktreeT3Home", () => {
       assert.isFalse(NodeFS.existsSync(home ?? ""));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
+
+  it.effect("gives a main checkout its own .t3", () =>
+    Effect.gen(function* () {
+      const { root, nested } = yield* makeRepo("checkout");
+      assert.equal(
+        yield* resolveWorktreeT3Home(nested),
+        NodePath.join(NodePath.resolve(root), ".t3"),
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("has no checkout home in a submodule or outside a repository", () =>
+    Effect.gen(function* () {
+      const submodule = yield* makeRepo("submodule");
+      assert.equal(yield* resolveWorktreeT3Home(submodule.nested), undefined);
+      const outside = yield* makeRepo("bare");
+      assert.equal(yield* resolveWorktreeT3Home(outside.nested), undefined);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
 });
