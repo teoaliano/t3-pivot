@@ -3,7 +3,10 @@
  * `~/.t3` that a user's installed T3 Code runs against.
  *
  * A linked git worktree gets its own (gitignored) `.t3`: feature work in a
- * throwaway branch must not share a database with the real app, and an ambient
+ * throwaway branch must not share a database with the real app. T3 Pivot gives
+ * the main checkout one too: its developers run T3 Code from the same `~/.t3`,
+ * where `~/.t3/dev` would sit beside the live install and `t3 pair` would find
+ * the live server first. An ambient
  * `T3CODE_HOME` counts as an explicit base dir — flipping the state directory
  * from `<base>/dev` to `<base>/userdata`, the live production database.
  */
@@ -86,18 +89,39 @@ export const resolveGitWorktreePath = (
   });
 
 /**
- * The worktree-local data directory for `cwd`, or undefined outside a linked
- * worktree. Deliberately does not require the directory to exist yet: falling
+ * The checkout-local data directory for `cwd`: `<root>/.t3` in a linked
+ * worktree or a main checkout, undefined outside a repository or in a
+ * submodule. Deliberately does not require the directory to exist yet: falling
  * back because it is missing would send callers at the shared home.
  */
 export const resolveWorktreeT3Home = (
   cwd: string,
 ): Effect.Effect<string | undefined, never, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function* () {
-    const worktreePath = yield* resolveGitWorktreePath(cwd);
-    if (worktreePath === undefined) {
-      return undefined;
-    }
     const path = yield* Path.Path;
-    return path.join(worktreePath, ".t3");
+    const worktreePath = yield* resolveGitWorktreePath(cwd);
+    const checkoutPath = worktreePath ?? (yield* resolveMainCheckoutPath(cwd));
+    return checkoutPath === undefined ? undefined : path.join(checkoutPath, ".t3");
+  });
+
+/** The main checkout containing `cwd`: the nearest directory whose `.git` is a directory. */
+const resolveMainCheckoutPath = (
+  cwd: string,
+): Effect.Effect<string | undefined, never, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+
+    let directory = path.resolve(cwd);
+    for (;;) {
+      const info = yield* fileSystem.stat(path.join(directory, ".git")).pipe(Effect.option);
+      if (Option.isSome(info)) {
+        return info.value.type === "Directory" ? directory : undefined;
+      }
+      const parent = path.dirname(directory);
+      if (parent === directory) {
+        return undefined;
+      }
+      directory = parent;
+    }
   });

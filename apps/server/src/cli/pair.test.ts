@@ -258,6 +258,43 @@ describe("t3 pair", () => {
     ).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.effect(
+    "refuses to guess between a live userdata and dev server, until --state picks one",
+    () =>
+      withDescriptorServer((origin) =>
+        Effect.gen(function* () {
+          const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pair-both-test-"));
+          const port = Number(new URL(origin).port);
+          for (const [variant, devUrl] of [
+            ["userdata", undefined],
+            ["dev", new URL("http://localhost:5733")],
+          ] as const) {
+            yield* persistServerRuntimeState({
+              path: NodePath.join(baseDir, variant, "server-runtime.json"),
+              state: yield* makePersistedServerRuntimeState({
+                config: { host: "127.0.0.1", devUrl },
+                port,
+              }),
+            });
+          }
+
+          const error = yield* provideCliTestLayers(
+            runCli(["pair", "--base-dir", baseDir]).pipe(Effect.flip),
+          );
+          const rendered = String(
+            typeof error === "object" && error !== null && "cause" in error ? error.cause : error,
+          );
+          assert.include(rendered, "More than one T3 Code server is running");
+          assert.include(rendered, "--state dev");
+
+          const output = yield* captureStdout(
+            runCli(["pair", "--base-dir", baseDir, "--state", "dev"]),
+          );
+          assert.include(output, "Pairing URL: http://localhost:5733/pair#token=");
+        }),
+      ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("directs to t3 serve or t3 connect when no server is running", () =>
     Effect.gen(function* () {
       const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pair-none-test-"));

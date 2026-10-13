@@ -26,8 +26,10 @@ Add `--browser` to open a browser automatically.
 
 ### State and ports
 
-Linked worktrees default to their own `.t3/userdata`, even when `T3CODE_HOME` is set.
-The main checkout defaults to `~/.t3/dev/userdata`. An explicit `--home-dir` wins in both cases.
+The main checkout and linked worktrees default to their own `.t3/userdata`, even when `T3CODE_HOME`
+is set. An explicit `--home-dir` wins. T3 Pivot keeps the main checkout off `~/.t3` because its
+developers also run T3 Code from there, and `pair` would otherwise find the live server first.
+When one home does run both a `userdata` and a `dev` server, `pair` stops and asks for `--state`.
 Never run a development server against the live `~/.t3/userdata`.
 See [test data](../../AGENTS.md#test-data) for copying a consistent database snapshot.
 

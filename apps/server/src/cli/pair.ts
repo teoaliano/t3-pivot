@@ -4,9 +4,10 @@
  *
  * Discovery reads the `server-runtime.json` a live server persists next to its
  * database, then confirms the process is actually answering by fetching its
- * public environment descriptor. Inside a linked git worktree the worktree's
- * own `.t3` is checked first (matching dev-runner precedence); otherwise the
- * shared T3 home. `--tailscale` publishes the server over Tailscale Serve
+ * public environment descriptor. Inside a checkout its own `.t3` is checked
+ * first (matching dev-runner precedence); otherwise the shared T3 home. When
+ * one home runs both a `userdata` and a `dev` server, pair refuses to guess and
+ * asks for `--state`. `--tailscale` publishes the server over Tailscale Serve
  * HTTPS and pairs through the tailnet URL instead.
  */
 import {
@@ -79,6 +80,22 @@ export class NoRunningServerError extends Schema.TaggedError<NoRunningServerErro
       "No running T3 Code server found.",
       ...this.checkedStatePaths.map((statePath) => `  checked ${statePath}`),
       "Start one with `npx t3 serve`, or connect this machine with T3 Connect: `npx t3 connect`.",
+    ].join("\n");
+  }
+}
+
+export class AmbiguousPairTargetError extends Schema.TaggedError<AmbiguousPairTargetError>()(
+  "AmbiguousPairTargetError",
+  {
+    baseDir: Schema.String,
+    servers: Schema.Array(Schema.Struct({ variant: Schema.String, origin: Schema.String })),
+  },
+) {
+  override get message(): string {
+    return [
+      `More than one T3 Code server is running from ${this.baseDir}:`,
+      ...this.servers.map((server) => `  --state ${server.variant}  ${server.origin}`),
+      "Pass --state to choose which one to pair with.",
     ].join("\n");
   }
 }
@@ -238,14 +255,15 @@ interface DiscoveredPairTarget {
 
 const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
   explicitBaseDir: string | undefined,
+  stateVariant: PairStateVariant | undefined,
 ) {
   const bases: Array<string> = [];
   if (explicitBaseDir !== undefined && explicitBaseDir.trim().length > 0) {
     bases.push(yield* resolveBaseDir(explicitBaseDir));
   } else {
-    // Same precedence as dev-runner: inside a linked worktree its own `.t3`
-    // outranks the shared home, so `t3 pair` in a worktree pairs with the dev
-    // server under test rather than the daily-driver install.
+    // Same precedence as dev-runner: inside a checkout its own `.t3` outranks
+    // the shared home, so `t3 pair` in a checkout pairs with the dev server
+    // under test rather than the daily-driver install.
     const worktreeHome = yield* resolveWorktreeT3Home(process.cwd());
     if (worktreeHome !== undefined) {
       bases.push(worktreeHome);
@@ -256,7 +274,9 @@ const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
 
   const checkedStatePaths: Array<string> = [];
   for (const baseDir of new Set(bases)) {
-    for (const variant of ["userdata", "dev"] as const) {
+    const live: Array<DiscoveredPairTarget> = [];
+    const variants = stateVariant === undefined ? (["userdata", "dev"] as const) : [stateVariant];
+    for (const variant of variants) {
       const derivedPaths = yield* ServerConfig.deriveServerPaths(
         baseDir,
         variant === "dev" ? DEV_VARIANT_PLACEHOLDER_URL : undefined,
@@ -278,13 +298,18 @@ const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
       if (probed._tag !== "descriptor") {
         continue;
       }
-      return {
-        baseDir,
-        variant,
-        state: state.value,
-        descriptor: probed.descriptor,
-      } satisfies DiscoveredPairTarget;
+      live.push({ baseDir, variant, state: state.value, descriptor: probed.descriptor });
     }
+    const [target, ...others] = live;
+    if (target === undefined) continue;
+    // Picking one silently is how a dev pairing token lands on the live install.
+    if (others.length > 0) {
+      return yield* new AmbiguousPairTargetError({
+        baseDir,
+        servers: live.map(({ variant, state }) => ({ variant, origin: state.origin })),
+      });
+    }
+    return target;
   }
   return yield* new NoRunningServerError({ checkedStatePaths });
 });
@@ -463,6 +488,13 @@ const labelFlag = Flag.String("label").pipe(
   Flag.optional,
 );
 
+const stateFlag = Flag.Literals("state", ["userdata", "dev"]).pipe(
+  Flag.withDescription(
+    "Which server to pair with when one data directory runs both a userdata and a dev server.",
+  ),
+  Flag.optional,
+);
+
 const tailscaleFlag = Flag.Boolean("tailscale").pipe(
   Flag.withDescription(
     "Publish the server over Tailscale Serve HTTPS and pair through the tailnet URL.",
@@ -478,6 +510,7 @@ const tailscaleServePortFlag = Flag.Int("tailscale-serve-port").pipe(
 
 export const pairCommand = Command.make("pair", {
   baseDir: baseDirFlag,
+  state: stateFlag,
   scopes: authScopesFlag(AuthStandardClientScopes),
   ttl: ttlFlag,
   label: labelFlag,
@@ -494,7 +527,10 @@ export const pairCommand = Command.make("pair", {
       // an explicit --log-level still wins.
       const logLevel = Option.getOrElse(cliLogLevel, () => "Warn" as const);
 
-      const target = yield* discoverPairTarget(Option.getOrUndefined(flags.baseDir));
+      const target = yield* discoverPairTarget(
+        Option.getOrUndefined(flags.baseDir),
+        Option.getOrUndefined(flags.state),
+      );
 
       const notes: Array<string> = [];
       let pairingBaseUrl: string;
