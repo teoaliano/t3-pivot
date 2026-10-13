@@ -79,9 +79,13 @@ Merging is the Pivot's, not its teammates': only the Pivot sees every open PR an
 order they should land in. `PivotToolRestrictions` marks a teammate's thread
 (`withoutForgeMerge`) and `ShellForgeGuard` refuses `gh pr merge|close`, `glab mr
 merge|close` and the forge merge and close endpoints in its shell, pointing it at the Pivot.
-Only the Claude adapter enforces it, with a `PreToolUse` hook that runs in every permission
-mode; other providers keep the contract in the teammate's instructions. The guard reads one
-command line, so a script file or a variable it cannot see goes unchecked. The Pivot's shell
+The guard also covers any subagent or fork whose lineage root is a teammate or a Pivot, so
+delegating the merge doesn't get around it. Only the Claude adapter enforces it, with a
+`PreToolUse` hook that runs in every permission mode. Codex, Cursor, Grok, OpenCode and
+Antigravity keep the contract in the teammate's instructions: teammates run in full access,
+where those providers never ask T3 before a command. The guard reads one command line, so a
+script file or a variable it cannot see goes unchecked, and a direct `git push` to the
+default branch is left to branch protection. The Pivot's shell
 is not guarded: it may merge, but its instructions allow that only after the user approved
 that PR, with checks green and the reviewed head, as `merge_teammate` enforces.
 

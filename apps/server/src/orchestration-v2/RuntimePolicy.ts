@@ -140,7 +140,7 @@ export const layerFromProjectStore: Layer.Layer<
           );
         const withoutForgeMerge =
           yield* (yield* ThreadToolRestrictions.ThreadToolRestrictions).withoutForgeMerge(
-            input.thread.id,
+            input.thread,
           );
         // Only a scoped thread is a Pivot, and its cwd is its home: the project it works on
         // is named separately so its instructions can point at the checkout.

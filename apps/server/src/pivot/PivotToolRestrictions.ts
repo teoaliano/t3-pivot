@@ -28,12 +28,17 @@ const toolRestrictions = Layer.effect(
           Effect.map((pivot) => pivot !== null),
           Effect.orElseSucceed(() => false),
         ),
-      // A lookup that fails guards the thread rather than leaving its shell open.
-      withoutForgeMerge: (threadId) =>
-        store.getTeammate(threadId).pipe(
-          Effect.map((teammate) => teammate !== null),
-          Effect.orElseSucceed(() => true),
-        ),
+      // Only the Pivot's own shell merges. A teammate, and any thread delegated under a
+      // teammate or a Pivot, is guarded. A lookup that fails guards the thread too.
+      withoutForgeMerge: (thread) =>
+        Effect.gen(function* () {
+          if ((yield* store.getTeammate(thread.id)) !== null) return true;
+          const root = thread.lineage.rootThreadId;
+          if (root === thread.id) return false;
+          return (
+            (yield* store.getTeammate(root)) !== null || (yield* store.getPivot(root)) !== null
+          );
+        }).pipe(Effect.orElseSucceed(() => true)),
     };
   }),
 );

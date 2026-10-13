@@ -125,10 +125,15 @@ const layer = Layer.mergeAll(
   ),
 ).pipe(Layer.provide(PivotDatabase.layerMemory), Layer.provideMerge(NodeServices.layer));
 
-const resolve = (id: ThreadId, worktreePath: string) =>
+const resolve = (id: ThreadId, worktreePath: string, rootThreadId: ThreadId = id) =>
   Effect.gen(function* () {
     const policy = yield* RuntimePolicy.RuntimePolicyV2;
-    return yield* policy.resolve({ thread: thread(id, worktreePath), modelSelection });
+    const base = thread(id, worktreePath);
+    const lineage =
+      rootThreadId === id
+        ? base.lineage
+        : { parentThreadId: rootThreadId, relationshipToParent: "subagent" as const, rootThreadId };
+    return yield* policy.resolve({ thread: { ...base, lineage }, modelSelection });
   });
 
 it.layer(layer)("Pivot and teammate permissions", (it) => {
@@ -214,6 +219,18 @@ it.layer(layer)("Pivot and teammate permissions", (it) => {
       assert.equal((yield* resolve(pivotThreadId, home)).withoutForgeMerge, undefined);
       assert.equal(
         (yield* resolve(ThreadId.make("someone-else"), "/elsewhere")).withoutForgeMerge,
+        undefined,
+      );
+    }),
+  );
+
+  it.effect("bars the shell of a subagent under a teammate or under the Pivot", () =>
+    Effect.gen(function* () {
+      const child = ThreadId.make("child-1");
+      assert.equal((yield* resolve(child, "/wt/ship-1", teammateThreadId)).withoutForgeMerge, true);
+      assert.equal((yield* resolve(child, home, pivotThreadId)).withoutForgeMerge, true);
+      assert.equal(
+        (yield* resolve(child, "/elsewhere", ThreadId.make("someone-else"))).withoutForgeMerge,
         undefined,
       );
     }),

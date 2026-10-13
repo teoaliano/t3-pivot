@@ -21,6 +21,13 @@ describe("ShellForgeGuard", () => {
       "gh pr list | head; gh pr close 3",
       "glab mr merge 4",
       "glab mr close 4",
+      'bash -lc "gh pr merge 12"',
+      "sh -ec 'gh pr close 12'",
+      "for n in 12 13; do gh pr merge $n; done",
+      "if true; then gh pr merge 12; fi",
+      "{ gh pr merge 12; }",
+      "! gh pr merge 12",
+      "gh -R o/r pr merge 12",
     ]) {
       assert.isTrue(refused(command), command);
     }
@@ -64,6 +71,8 @@ describe("ShellForgeGuard", () => {
         "gh pr ready 12",
         "gh pr edit 12 --title t",
         "gh issue close 3",
+        "gh issue create --title pr --body close",
+        "bash -l scripts/check.sh",
         "gh api repos/o/r/pulls/12 --jq .state",
         "gh api 'repos/o/r/pulls?state=closed'",
         "gh api repos/o/r/pulls/12/comments",

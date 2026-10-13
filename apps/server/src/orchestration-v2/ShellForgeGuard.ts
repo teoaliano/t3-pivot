@@ -48,6 +48,9 @@ const WRAPPER_PROGRAMS = new Set([
   "builtin",
 ]);
 
+// Shell words that start a compound command or negate one; the command follows them.
+const LEADING_KEYWORDS = new Set(["if", "then", "else", "elif", "while", "until", "do", "{", "!"]);
+
 interface Segment {
   readonly words: ReadonlyArray<string>;
   // Command substitutions found inside double quotes, which the shell still runs.
@@ -124,17 +127,20 @@ const isKnownProgram = (program: string) =>
 
 const basename = (word: string) => word.slice(word.lastIndexOf("/") + 1);
 
-// Words of `gh pr ...` / `glab mr ...` after the noun, skipping flags and the value of -R.
+// The first two words of `gh pr merge` / `glab mr close`, skipping flags and the value of -R.
+// The noun must be the command's first word, so `gh issue create --title pr` is not a PR call.
 function subcommandAfter(words: ReadonlyArray<string>, noun: string): string | undefined {
-  const at = words.indexOf(noun);
-  if (at === -1) return undefined;
-  for (let i = at + 1; i < words.length; i++) {
+  const positional: Array<string> = [];
+  for (let i = 0; i < words.length && positional.length < 2; i++) {
     const word = words[i]!;
     if (word === "-R" || word === "--repo" || word === "-r") i++;
-    else if (!word.startsWith("-")) return word;
+    else if (!word.startsWith("-")) positional.push(word);
   }
-  return undefined;
+  return positional[0] === noun ? positional[1] : undefined;
 }
+
+// `-c`, or a cluster that includes it such as `-lc` or `-ec`, runs the next word as a script.
+const isScriptFlag = (word: string) => /^-[A-Za-z]*c[A-Za-z]*$/.test(word);
 
 // A request that merges or closes a PR, found in the command's own text: the REST merge
 // endpoints, the GraphQL mutations and GitLab's push options.
@@ -163,7 +169,12 @@ function violationInSegment(segment: Segment, depth: number): Violation | null {
   let words = [...segment.words];
   // Skip VAR=value prefixes and wrappers to reach the program that actually runs.
   for (;;) {
-    while (words.length > 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0]!)) words.shift();
+    while (
+      words.length > 0 &&
+      (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0]!) || LEADING_KEYWORDS.has(words[0]!))
+    ) {
+      words.shift();
+    }
     const head = words[0] === undefined ? undefined : basename(words[0]);
     if (head === undefined || !WRAPPER_PROGRAMS.has(head)) break;
     // A wrapper's own flags may take values (`sudo -u me`), so skip to the program it runs.
@@ -175,11 +186,9 @@ function violationInSegment(segment: Segment, depth: number): Violation | null {
   const rest = words.slice(1);
 
   if (SHELL_PROGRAMS.has(program) || program === "eval") {
-    const script = program === "eval" ? rest.join(" ") : rest[rest.indexOf("-c") + 1];
-    if (script !== undefined && (program === "eval" || rest.includes("-c"))) {
-      return violationIn(script, depth + 1);
-    }
-    return null;
+    const flag = rest.findIndex(isScriptFlag);
+    const script = program === "eval" ? rest.join(" ") : flag === -1 ? undefined : rest[flag + 1];
+    return script === undefined ? null : violationIn(script, depth + 1);
   }
   if (program === "gh" || program === "glab") {
     const sub = subcommandAfter(rest, program === "gh" ? "pr" : "mr");

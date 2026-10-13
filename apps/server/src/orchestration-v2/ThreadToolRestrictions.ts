@@ -7,15 +7,20 @@
  *
  * @module ThreadToolRestrictions
  */
-import type { ThreadId } from "@t3tools/contracts";
+import type { OrchestrationV2AppThread, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
 export class ThreadToolRestrictions extends Context.Reference<{
   /** Whether the thread's agent goes without browser and device tools. */
   readonly withoutBrowserOrDevice: (threadId: ThreadId) => Effect.Effect<boolean>;
-  /** Whether the thread's shell may not merge or close PRs: a Pivot's teammate. */
-  readonly withoutForgeMerge: (threadId: ThreadId) => Effect.Effect<boolean>;
+  /**
+   * Whether the thread's shell may not merge or close PRs: a Pivot's teammate, and any
+   * subagent or fork under a teammate or a Pivot. The thread carries its lineage.
+   */
+  readonly withoutForgeMerge: (
+    thread: Pick<OrchestrationV2AppThread, "id" | "lineage">,
+  ) => Effect.Effect<boolean>;
 }>("t3/orchestration-v2/ThreadToolRestrictions", {
   defaultValue: () => ({
     withoutBrowserOrDevice: () => Effect.succeed(false),
