@@ -26,7 +26,12 @@ export class PivotGitError extends Schema.TaggedError<PivotGitError>()("PivotGit
 
 /** Whether a teammate's work is safe to throw away, and why or why not. */
 export type LandedVerdict =
-  | { readonly landed: true; readonly reason: string }
+  | {
+      readonly landed: true;
+      readonly reason: string;
+      /** The branch tip the verdict was given for. */
+      readonly head: string;
+    }
   | { readonly landed: false; readonly reason: string };
 
 export class PivotGit extends Context.Service<
@@ -43,13 +48,14 @@ export class PivotGit extends Context.Service<
       prefix: string,
     ) => Effect.Effect<ReadonlyArray<string>, PivotGitError>;
     /**
-     * Deletes the local branch. Without `force` git refuses one that is not merged.
-     * Its worktree has to be gone first.
+     * Deletes the local branch. With `tip`, only while the branch is still at that
+     * commit; without it, git refuses a branch that is not merged. A branch checked
+     * out in a worktree is always refused.
      */
     readonly deleteBranch: (input: {
       readonly projectRoot: string;
       readonly branch: string;
-      readonly force: boolean;
+      readonly tip?: string | undefined;
     }) => Effect.Effect<void, PivotGitError>;
     readonly headCommit: (cwd: string) => Effect.Effect<string, PivotGitError>;
     /** What `origin` has for the branch right now, or null when it has none. */
@@ -174,7 +180,11 @@ export const make = Effect.gen(function* () {
 
       if (input.mergedPullRequestHead !== null) {
         if (input.mergedPullRequestHead === local) {
-          return { landed: true, reason: "Its PR merged at its latest commit." } as LandedVerdict;
+          return {
+            landed: true,
+            head: local,
+            reason: "Its PR merged at its latest commit.",
+          } as LandedVerdict;
         }
         if ((yield* commitOf(cwd, input.mergedPullRequestHead)) === null && remote) {
           yield* run(cwd, ["fetch", "--quiet", "origin", input.mergedPullRequestHead]);
@@ -184,6 +194,7 @@ export const make = Effect.gen(function* () {
         ) {
           return {
             landed: true,
+            head: local,
             reason: "Its PR merged with a head containing its work.",
           } as LandedVerdict;
         }
@@ -199,7 +210,11 @@ export const make = Effect.gen(function* () {
         .split("\n")
         .filter((ref) => ref.length > 0 && !ref.endsWith("/HEAD"));
       if (containing.length > 0) {
-        return { landed: true, reason: `Its commits are on ${containing[0]}.` } as LandedVerdict;
+        return {
+          landed: true,
+          head: local,
+          reason: `Its commits are on ${containing[0]}.`,
+        } as LandedVerdict;
       }
       // Content already in the default branch: merging the work into it would change nothing.
       for (const target of remote
@@ -210,6 +225,7 @@ export const make = Effect.gen(function* () {
         if (yield* succeeds(cwd, ["merge-base", "--is-ancestor", local, targetCommit])) {
           return {
             landed: true,
+            head: local,
             reason: `Its commits are in ${input.defaultBranch}.`,
           } as LandedVerdict;
         }
@@ -218,6 +234,7 @@ export const make = Effect.gen(function* () {
         if (merged.code === 0 && merged.stdout.split("\n")[0]?.trim() === targetTree) {
           return {
             landed: true,
+            head: local,
             reason: `Its changes are already in ${input.defaultBranch}.`,
           } as LandedVerdict;
         }
@@ -290,8 +307,18 @@ export const make = Effect.gen(function* () {
       git(cwd, ["for-each-ref", "--format=%(refname:short)", `refs/heads/${prefix}`]).pipe(
         Effect.map((out) => out.split("\n").filter((line) => line.length > 0)),
       ),
-    deleteBranch: ({ projectRoot, branch, force }) =>
-      git(projectRoot, ["branch", force ? "-D" : "-d", "--", branch]).pipe(Effect.asVoid),
+    deleteBranch: Effect.fn("PivotGit.deleteBranch")(function* ({ projectRoot, branch, tip }) {
+      if (tip === undefined) {
+        yield* git(projectRoot, ["branch", "-d", "--", branch]);
+        return;
+      }
+      // Only the tip that was verified as landed goes: a commit made since then stays.
+      const current = yield* commitOf(projectRoot, `refs/heads/${branch}`);
+      if (current !== tip) {
+        return yield* new PivotGitError({ subcommand: "branch", exitCode: null });
+      }
+      yield* git(projectRoot, ["branch", "-D", "--", branch]);
+    }),
     headCommit: (cwd) => git(cwd, ["rev-parse", "HEAD"]),
     isClean,
     uncommitted,

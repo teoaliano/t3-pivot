@@ -15,6 +15,8 @@ export interface HostProcess {
   readonly cwd: string | null;
   /** The `t3code-*.scope` unit the process runs in, if any. */
   readonly unit: string | null;
+  /** Clock ticks since boot when it started; with the pid, names one process for good. */
+  readonly startTime: number;
 }
 
 /** What the reaper needs from the host; tests pass a fake one. */
@@ -25,14 +27,14 @@ export interface ReaperHost {
 
 export const STOP_GRACE = Duration.seconds(5);
 const POLL = Duration.millis(100);
-const CLAUDE_SCOPE = /^t3code-claude-.+\.scope$/;
 
-export const isClaudeScope = (unit: string) => CLAUDE_SCOPE.test(unit);
-
-/** The agent itself (or its launcher), as opposed to what it started. */
-const isClaude = (process: HostProcess) =>
-  /(^|\/)(claude|systemd-run)$/.test(process.program) || // systemd-run is claude still starting
-  (/(^|\/)node$/.test(process.program) && /(^|\/)claude(\.js)?(\s|$)/.test(process.command));
+/**
+ * Whether the unit is one of this server's scopes. Units carry the owner tag
+ * (`t3code-<name>-<owner>-<id>.scope`), so a server never touches the scopes of
+ * another T3 server running as the same user. An empty owner matches nothing.
+ */
+export const ownsUnit = (owner: string, unit: string, name = "[a-z]+") =>
+  /^[0-9a-f]+$/.test(owner) && new RegExp(`^t3code-${name}-${owner}-[0-9a-f]+\\.scope$`).test(unit);
 
 const describe = (process: HostProcess) => ({
   pid: process.pid,
@@ -51,7 +53,9 @@ export const stopProcesses = (
 ) =>
   Effect.gen(function* () {
     if (targets.length === 0) return;
-    const pids = new Set(targets.map((process) => process.pid));
+    // A pid is only reused after its process is gone, so the start time tells them apart.
+    const identity = (process: HostProcess) => `${process.pid}:${process.startTime}`;
+    const ids = new Set(targets.map(identity));
     for (const process of targets) {
       yield* Effect.logInfo("Stopping process", {
         reason,
@@ -61,7 +65,7 @@ export const stopProcesses = (
       yield* host.signal(process.pid, "SIGTERM");
     }
     const survivors = host.snapshot.pipe(
-      Effect.map((table) => table.filter((process) => pids.has(process.pid))),
+      Effect.map((table) => table.filter((process) => ids.has(identity(process)))),
     );
     const deadline = Duration.toMillis(grace);
     let waited = 0;
@@ -93,19 +97,21 @@ export const stopScope = (host: ReaperHost, unit: string, reason: string) =>
   });
 
 /**
- * Stops what is left in every `t3code-claude-*.scope` whose `claude` process is
- * gone. A scope with a live `claude` is left alone.
+ * Stops what is left in every claude scope of this server whose agent is gone.
+ * The server spawns each agent itself, so a scope whose agent still runs holds a
+ * child of `self`. When the agent exits, what it started is reparented away from
+ * the server; a scope left by an earlier run of this server has no child of it at all.
  */
-export const sweepOrphanScopes = (host: ReaperHost) =>
+export const sweepOrphanScopes = (host: ReaperHost, owner: string, self: number) =>
   Effect.gen(function* () {
     const table = yield* host.snapshot;
     const byUnit = new Map<string, Array<HostProcess>>();
     for (const process of table) {
-      if (process.unit === null || !isClaudeScope(process.unit)) continue;
+      if (process.unit === null || !ownsUnit(owner, process.unit, "claude")) continue;
       byUnit.set(process.unit, [...(byUnit.get(process.unit) ?? []), process]);
     }
     for (const [unit, members] of byUnit) {
-      if (members.some(isClaude)) continue;
+      if (members.some((process) => process.ppid === self)) continue;
       yield* Effect.logWarning("Agent scope outlived its claude process", { unit });
       yield* stopProcesses(host, members, `orphaned scope ${unit}`);
     }
@@ -115,17 +121,28 @@ const inside = (cwd: string, root: string) =>
   cwd === root || cwd.startsWith(root.endsWith("/") ? root : `${root}/`);
 
 /**
- * Stops every process whose working directory is inside the worktree: terminals,
- * dev servers and anything they started there. The server `self` and its ancestors
- * are never stopped.
+ * Stops the processes this server's agent and terminal scopes run inside the
+ * worktree: terminals, dev servers and anything they started there. A process
+ * outside this server's scopes is never touched, whatever its working directory,
+ * so a user's own shell or editor in the worktree survives. The server `self` and
+ * its ancestors are never stopped.
  */
-export const stopWorktreeProcesses = (host: ReaperHost, worktreePath: string, self: number) =>
+export const stopWorktreeProcesses = (
+  host: ReaperHost,
+  input: { readonly worktreePath: string; readonly owner: string; readonly self: number },
+) =>
   Effect.gen(function* () {
+    const { worktreePath, owner, self } = input;
+    if (!worktreePath.startsWith("/") || worktreePath.replace(/\/+$/, "") === "") return;
     const table = yield* host.snapshot;
     const keep = serverLineage(table, self);
     const targets = table.filter(
       (process) =>
-        !keep.has(process.pid) && process.cwd !== null && inside(process.cwd, worktreePath),
+        !keep.has(process.pid) &&
+        process.unit !== null &&
+        ownsUnit(owner, process.unit) &&
+        process.cwd !== null &&
+        inside(process.cwd, worktreePath),
     );
     yield* stopProcesses(host, targets, `worktree ${worktreePath}`);
   });
@@ -141,8 +158,11 @@ const readProcess = async (pid: number): Promise<HostProcess | null> => {
     ]);
     const args = cmdline.split("\0").filter((part) => part.length > 0);
     if (args.length === 0) return null; // kernel threads and zombies
-    // Fields after the last ")" start with the state, then the parent pid.
-    const ppid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
+    // Fields after the last ")" start with the state (field 3), then the parent pid;
+    // the start time is field 22.
+    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    const ppid = Number(fields[1]);
+    const startTime = Number(fields[19]);
     const leaf = cgroup.trim().split("\n").at(-1)?.split("/").at(-1) ?? "";
     return {
       pid,
@@ -151,6 +171,7 @@ const readProcess = async (pid: number): Promise<HostProcess | null> => {
       program: args[0]!,
       cwd,
       unit: leaf.startsWith("t3code-") && leaf.endsWith(".scope") ? leaf : null,
+      startTime: Number.isFinite(startTime) ? startTime : 0,
     };
   } catch {
     return null; // the process left while we read it

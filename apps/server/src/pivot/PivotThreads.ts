@@ -37,6 +37,7 @@ import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
 import { AgentScope } from "@t3tools/shared/AgentScope";
+import { AgentScopeOwner } from "../process/agentScope.ts";
 import { procHost, stopWorktreeProcesses } from "../process/scopeReaper.ts";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadLifecycle from "../orchestration-v2/ThreadLifecycleService.ts";
@@ -201,8 +202,6 @@ export class PivotThreads extends Context.Service<
     ) => Effect.Effect<void, PivotThreadsError>;
     /** Stops every managed process the worktree runs and frees its port block. */
     readonly stopProcesses: (worktreePath: string) => Effect.Effect<void>;
-    /** Stops whatever still runs in the thread's agent scope: SIGTERM, then SIGKILL. */
-    readonly stopScope: (threadId: ThreadId) => Effect.Effect<void>;
     /** Removes the worktree; without `force`, T3's clean-tree check refuses a dirty one. */
     readonly removeWorktree: (input: {
       readonly projectRoot: string;
@@ -222,6 +221,7 @@ export const make = Effect.gen(function* () {
   const git = yield* GitWorkflow.GitWorkflowService;
   const setupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
   const agentScope = yield* AgentScope;
+  const scopeOwner = yield* AgentScopeOwner;
 
   const fail = (operation: string, threadId?: string) => (cause: unknown) =>
     new PivotThreadsError({
@@ -521,9 +521,11 @@ export const make = Effect.gen(function* () {
     stopProcesses: (worktreePath) =>
       processes
         .stopAllForCheckout(worktreePath, { releaseReservation: true })
-        .pipe(Effect.andThen(stopWorktreeProcesses(procHost, worktreePath, process.pid))),
-
-    stopScope: agentScope.stop,
+        .pipe(
+          Effect.andThen(
+            stopWorktreeProcesses(procHost, { worktreePath, owner: scopeOwner, self: process.pid }),
+          ),
+        ),
 
     removeWorktree: ({ projectRoot, worktreePath, force }) =>
       git

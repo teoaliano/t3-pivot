@@ -10,11 +10,13 @@ import {
 } from "@t3tools/shared/AgentScope";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveCommandPath } from "@t3tools/shared/shell";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
+import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { procHost, stopScope } from "./scopeReaper.ts";
 
@@ -92,6 +94,19 @@ const CLEAR_FAILED_INTERVAL = "1 second";
 const CLEAR_FAILED_ATTEMPTS = 120;
 const MAX_TRACKED_THREADS = 500;
 
+/**
+ * Names this server in its scope units, so the sweep and teardown only ever stop
+ * scopes this server launched, never those of another T3 server on the machine.
+ * Empty (the default) leaves units unnamed and those cleanups off.
+ */
+export const AgentScopeOwner = Context.Reference<string>("t3/process/AgentScopeOwner", {
+  defaultValue: () => "",
+});
+
+/** The owner tag for a server's state directory: stable across restarts. */
+export const agentScopeOwnerFor = (stateDir: string) =>
+  NodeCrypto.createHash("sha256").update(stateDir).digest("hex").slice(0, 8);
+
 export const make = Effect.gen(function* () {
   const platform = yield* HostProcess.Platform;
   if (platform !== "linux") return AgentScope.defaultValue();
@@ -100,6 +115,7 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const hostEnvironment = yield* HostProcess.Environment;
+  const owner = yield* AgentScopeOwner;
   const layerScope = yield* Effect.scope;
 
   const resolve = (command: string, env: NodeJS.ProcessEnv) =>
@@ -304,7 +320,9 @@ export const make = Effect.gen(function* () {
       if (resolved === null) return { command, args };
       const scope = yield* systemd;
       if (scope === undefined) return agentScopeCommand({ command: resolved, args });
-      const unit = `t3code-${name}-${NodeCrypto.randomUUID().slice(0, 8)}.scope`;
+      const id = NodeCrypto.randomUUID().slice(0, 8);
+      const unit =
+        owner.length === 0 ? `t3code-${name}-${id}.scope` : `t3code-${name}-${owner}-${id}.scope`;
       if (threadId !== undefined) yield* track(scope.systemctl, threadId, unit);
       const systemdScope: AgentSystemdScope = {
         systemdRun: scope.systemdRun,
@@ -324,3 +342,12 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(AgentScope, make).pipe(Layer.provide(ProcessRunner.layer));
+
+/** Names this server's scope units after its state directory. */
+export const layerOwner = Layer.effect(
+  AgentScopeOwner,
+  Effect.gen(function* () {
+    const config = yield* ServerConfig.ServerConfig;
+    return agentScopeOwnerFor(config.stateDir);
+  }),
+);

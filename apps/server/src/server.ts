@@ -1200,6 +1200,7 @@ const layerMakeServer = Layer.unwrap(
       Layer.provide(VcsProcess.layer),
       // Every agent and terminal spawn reads this, so it sits below everything.
       Layer.provideMerge(AgentScopeLive.layer),
+      Layer.provideMerge(AgentScopeLive.layerOwner),
       Layer.provideMerge(layerPlatformServices),
     );
   }),

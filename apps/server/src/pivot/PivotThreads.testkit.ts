@@ -70,7 +70,6 @@ export interface FakeV2 {
   /** Merges asked of the forge, with the head they were pinned to. */
   readonly merges: Array<{ readonly url: string; readonly expectedHeadSha: string }>;
   readonly stoppedCheckouts: Array<string>;
-  readonly stoppedScopes: Array<string>;
   /** Setup script outcomes by thread; none when unset. */
   readonly setupOutcomes: Map<string, SetupScriptOutcome>;
   /** Threads whose held queue was released. */
@@ -100,7 +99,6 @@ export const makeFakeV2 = (): FakeV2 => ({
   pullRequests: new Map(),
   merges: [],
   stoppedCheckouts: [],
-  stoppedScopes: [],
   releasedQueues: [],
   setupOutcomes: new Map(),
   removedWorktrees: [],
@@ -296,10 +294,6 @@ export const layer = (fake: FakeV2) =>
       stopProcesses: (worktreePath) =>
         Effect.sync(() => {
           fake.stoppedCheckouts.push(worktreePath);
-        }),
-      stopScope: (threadId) =>
-        Effect.sync(() => {
-          fake.stoppedScopes.push(threadId);
         }),
       removeWorktree: ({ projectRoot, worktreePath, force }) =>
         Effect.sync(() => {

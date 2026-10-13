@@ -954,6 +954,8 @@ describe("delivery and teardown", () => {
       );
       assert.deepStrictEqual(merged, { threadId: ship.threadId, url: prUrl, mergedHead: "abc123" });
       assert.deepStrictEqual(fake.merges, [{ url: prUrl, expectedHeadSha: "abc123" }]);
+      // A merged teammate's session stops, which also stops what its scope still runs.
+      assert.strictEqual(fake.threads.get(ship.threadId)?.stops, 1);
     }).pipe(Effect.provide(layer));
   });
 
@@ -1260,7 +1262,8 @@ describe("delivery and teardown", () => {
           { worktreePath: ship.worktreePath, force: false },
         ]);
         assert.isTrue(fake.threads.get(ship.threadId)?.archived);
-        assert.strictEqual(fake.threads.get(ship.threadId)?.stops, 1);
+        // Landing stops the session once, and teardown stops it again before cleanup.
+        assert.strictEqual(fake.threads.get(ship.threadId)?.stops, 2);
         assert.strictEqual(sh(workspaceRoot, `git branch --list ${ship.branch}`), "");
 
         const store = yield* PivotStore.PivotStore;

@@ -96,8 +96,8 @@ describe("TeammateHost (local)", () => {
         assert.strictEqual(thread.messages[0]?.senderThreadId, pivotThreadId);
         assert.include(thread.messages[0]?.text, launchInput.intent);
         assert.include(thread.messages[0]?.text, result.branch);
-        assert.include(thread.messages[0]?.text, "timeout 600 <command>");
-        assert.include(thread.messages[0]?.text, "Don't leave dev servers");
+        assert.include(thread.messages[0]?.text, "timeout -k 30 <seconds> <command>");
+        assert.include(thread.messages[0]?.text, "stop every dev server");
         assert.strictEqual(result.runId, fake.threads.get(result.threadId)!.shell.latestRunId);
       }).pipe(Effect.provide(layer));
     },
@@ -361,22 +361,46 @@ describe("TeammateHost (local)", () => {
     );
   });
 
-  it.effect("teardown removes the worktree and force-deletes the local branch", () => {
+  it.effect("teardown removes the worktree and deletes the branch at its verified tip", () => {
     const { fake, workspaceRoot, layer } = setup();
     return Effect.gen(function* () {
       const host = yield* TeammateHost;
       const { teammate, checkout, worktree } = yield* launched(fake, workspaceRoot);
+      const tip = sh(workspaceRoot, `git rev-parse ${checkout.branch}`);
 
       yield* host.teardown("teardown_teammate", {
         ...checkout,
         threadId: teammate.threadId,
         worktreeExists: true,
         force: false,
-        branchDisposal: "force",
+        branchDisposal: { tip },
       });
 
       assert.isFalse(NodeFS.existsSync(worktree));
       assert.strictEqual(sh(workspaceRoot, `git branch --list ${checkout.branch}`), "");
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("teardown keeps a branch that moved past the verified tip", () => {
+    const { fake, workspaceRoot, layer } = setup();
+    return Effect.gen(function* () {
+      const host = yield* TeammateHost;
+      const { teammate, checkout, worktree } = yield* launched(fake, workspaceRoot);
+      const verified = sh(workspaceRoot, `git rev-parse ${checkout.branch}`);
+      // The teammate commits after the landed check, before its session stops.
+      sh(worktree, "git commit -q --allow-empty -m late");
+
+      yield* host.teardown("teardown_teammate", {
+        ...checkout,
+        threadId: teammate.threadId,
+        worktreeExists: true,
+        force: false,
+        branchDisposal: { tip: verified },
+      });
+
+      assert.isFalse(NodeFS.existsSync(worktree));
+      assert.notStrictEqual(sh(workspaceRoot, `git branch --list ${checkout.branch}`), "");
+      assert.isTrue(fake.threads.get(teammate.threadId)!.archived);
     }).pipe(Effect.provide(layer));
   });
 });

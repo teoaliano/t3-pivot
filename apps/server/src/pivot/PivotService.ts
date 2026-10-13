@@ -1210,7 +1210,7 @@ export const make = Effect.gen(function* () {
       yield* host.project(command, pivot.projectId);
       // Teardown deletes the worktree and branch, so nobody else may still be using them.
       const others = (yield* store.listTeammates({ includeTornDown: false })).filter(
-        (other) => other.threadId !== teammate.threadId,
+        (other) => other.threadId !== teammate.threadId && other.projectId === teammate.projectId,
       );
       const sharing: Array<PivotStore.TeammateRow> = [];
       for (const other of others) {
@@ -1231,6 +1231,7 @@ export const make = Effect.gen(function* () {
       const worktreeExists = yield* host.worktreeExists(teammate.worktreePath);
 
       let reason: string;
+      let landedHead: string | null = null;
       if (teammate.kind === "scout" && teammate.scoutReport !== null) {
         reason = "Its scout report is recorded.";
         // The report is the deliverable, but files it left uncommitted are still the user's.
@@ -1267,6 +1268,7 @@ export const make = Effect.gen(function* () {
         });
         if (verdict.landed) {
           reason = verdict.reason;
+          landedHead = verdict.head;
         } else if (input.discardDecisionId !== undefined) {
           yield* userApproval(command, pivot, teammate, input.discardDecisionId, "Discarding work");
           reason = `Discarded on the user's word: ${verdict.reason}`;
@@ -1278,13 +1280,14 @@ export const make = Effect.gen(function* () {
         }
       }
       const discarding = reason.startsWith("Discarded");
-      // Landed work's branch is safe to force-delete; a scout's report-only branch
-      // goes only if git agrees it is merged; discarded work keeps its branch.
-      const branchDisposal = discarding
-        ? ("keep" as const)
-        : teammate.kind === "scout" && teammate.scoutReport !== null
-          ? ("safe" as const)
-          : ("force" as const);
+      // Landed work's branch goes while it is still at the verified tip; a scout's
+      // report-only branch goes only if git agrees it is merged; discarded work keeps it.
+      const branchDisposal =
+        discarding || (landedHead === null && teammate.kind !== "scout")
+          ? ("keep" as const)
+          : landedHead === null
+            ? ("safe" as const)
+            : { tip: landedHead };
 
       yield* host.teardown(command, {
         projectId: pivot.projectId,

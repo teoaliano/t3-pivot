@@ -126,10 +126,11 @@ export class TeammateHost extends Context.Service<
         readonly worktreeExists: boolean;
         readonly force: boolean;
         /**
-         * What happens to the local branch once the worktree is gone: `force` for work
-         * known to have landed, `safe` lets git refuse an unmerged one, `keep` leaves it.
+         * What happens to the local branch once the worktree is gone: `{ tip }` for work
+         * verified as landed at that commit (a later commit keeps the branch), `safe` lets
+         * git refuse an unmerged one, `keep` leaves it.
          */
-        readonly branchDisposal: "force" | "safe" | "keep";
+        readonly branchDisposal: { readonly tip: string } | "safe" | "keep";
       },
     ) => Result<void>;
   }

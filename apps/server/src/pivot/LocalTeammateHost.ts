@@ -116,7 +116,16 @@ export const make = Effect.gen(function* () {
     send: ({ threadId, senderThreadId, text }) =>
       threads.send({ threadId, senderThreadId, text, mode: "queue" }),
     stop: threads.stop,
-    stopScope: threads.stopScope,
+    // Landed or merged: the session stops first, so the agent never sees its own process
+    // killed under it, and then what its scope still runs goes.
+    stopScope: (threadId) =>
+      threads
+        .stop(threadId)
+        .pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("Could not stop the landed teammate's session", { threadId, cause }),
+          ),
+        ),
     retryLaunch: threads.retryLaunch,
     relaunch: threads.relaunch,
     pullRequestDetail: threads.pullRequestDetail,
@@ -176,13 +185,16 @@ export const make = Effect.gen(function* () {
             force: input.force,
           });
         }
+        yield* threads.archive(input.threadId);
+        // Last, so a teardown that stops early still finds the branch it verified.
         if (input.branchDisposal !== "keep") {
-          // A branch that cannot go (checked out elsewhere, unmerged under `safe`) stays.
+          // A branch that cannot go (checked out elsewhere, unmerged, moved past the
+          // verified tip) stays.
           yield* git
             .deleteBranch({
               projectRoot: project.workspaceRoot,
               branch: input.branch,
-              force: input.branchDisposal === "force",
+              tip: input.branchDisposal === "safe" ? undefined : input.branchDisposal.tip,
             })
             .pipe(
               Effect.tap(() => Effect.logInfo("Deleted teammate branch", { branch: input.branch })),
@@ -191,7 +203,6 @@ export const make = Effect.gen(function* () {
               ),
             );
         }
-        yield* threads.archive(input.threadId);
       }),
   });
 });
