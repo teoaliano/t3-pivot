@@ -47,6 +47,7 @@ import {
   type ProjectId,
   type ServerSettingsError,
   type ThreadId,
+  type ThreadPullRequestLink,
 } from "@t3tools/contracts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { deriveTeammateStatus } from "@t3tools/shared/teammateStatus";
@@ -1003,6 +1004,122 @@ export const make = Effect.gen(function* () {
       );
     });
 
+  /** Whether the PR merged: its synced state, else its live state when the sync lags. */
+  const pullRequestMerged = (projectId: ProjectId, link: ThreadPullRequestLink) =>
+    link.snapshot?.state === "merged"
+      ? Effect.succeed(true)
+      : threads
+          .pullRequestDetail({
+            projectId,
+            host: link.host,
+            repository: link.repository,
+            number: link.number,
+          })
+          .pipe(
+            Effect.map((detail) => detail.state === "merged"),
+            Effect.orElseSucceed(() => false),
+          );
+
+  /**
+   * Why landing `teammate` now would break merge order, or nothing. It refuses a branch
+   * stacked on another teammate's unlanded work, a branch whose predecessors in the
+   * decision's `mergeOrder` have not landed, and any unmerged PR of the Pivot's, its own
+   * links included, that the order leaves out, so no finished work is forgotten.
+   */
+  const mergeOrderRefusals = (
+    command: string,
+    pivot: PivotStore.PivotRow,
+    teammate: PivotStore.TeammateRow,
+    decision: PivotDecision,
+  ) =>
+    Effect.gen(function* () {
+      const teammates = yield* store.listTeammates({
+        pivotThreadId: pivot.threadId,
+        includeTornDown: true,
+      });
+      const live = teammates.filter((other) => other.tornDownAt === null);
+      const pullRequests = (yield* Effect.forEach(
+        [
+          ...live.map((other) => [other.threadId, other.branch] as const),
+          [pivot.threadId, null] as const,
+        ],
+        ([threadId, branch]) =>
+          threads.shell(threadId).pipe(
+            Effect.map((shell) =>
+              (shell?.pullRequests ?? [])
+                .filter((link) => link.source !== "stack-dismissed")
+                .map((link) => ({
+                  link,
+                  branch: link.snapshot?.headBranch ?? branch ?? link.url,
+                })),
+            ),
+          ),
+      )).flat();
+      const landedLocally = Effect.fn("PivotService.landedLocally")(function* (
+        other: PivotStore.TeammateRow,
+      ) {
+        const project = yield* gitProject(command, pivot.projectId);
+        const verdict = yield* git.landed({
+          projectRoot: project.workspaceRoot,
+          worktreePath: other.worktreePath,
+          branch: other.branch,
+          defaultBranch: yield* git.defaultBranch(project.workspaceRoot),
+          mergedPullRequestHead: null,
+        });
+        return verdict.landed;
+      });
+      /** Whether the work on `branch` has landed; null for a branch that is no work of the Pivot's. */
+      const landed = Effect.fn("PivotService.branchLanded")(function* (branch: string) {
+        const owner = teammates.find((other) => other.branch === branch);
+        if (owner?.tornDownAt != null) return true;
+        if (owner?.deliveryMode === "local-only") return yield* landedLocally(owner);
+        const links = pullRequests.filter((pr) => pr.branch === branch);
+        if (owner === undefined && links.length === 0) return null;
+        for (const { link } of links) {
+          if (yield* pullRequestMerged(teammate.projectId, link)) return true;
+        }
+        return false;
+      });
+
+      const reasons: Array<string> = [];
+      const own = yield* linkedPullRequest(teammate);
+      const bases = new Set([teammate.baseBranch, own?.snapshot?.baseBranch]);
+      for (const other of live) {
+        if (other.threadId === teammate.threadId || !bases.has(other.branch)) continue;
+        if (!(yield* landed(other.branch))) {
+          reasons.push(
+            `It is stacked on ${other.branch} ("${other.title}"), which has not landed. Land that first.`,
+          );
+        }
+      }
+
+      const order = decision.escalation?.mergeOrder ?? [];
+      const position = order.indexOf(teammate.branch);
+      if (order.length > 0 && position === -1) {
+        reasons.push(`The decision's merge order does not list ${teammate.branch}.`);
+      }
+      for (const branch of order.slice(0, Math.max(position, 0))) {
+        const verdict = yield* landed(branch);
+        if (verdict === null) {
+          reasons.push(`The merge order lists ${branch}, which is no branch of your teammates'.`);
+        } else if (!verdict) {
+          reasons.push(`${branch} comes before it in the merge order and has not landed.`);
+        }
+      }
+      const unordered = yield* Effect.filter(
+        pullRequests.filter((pr) => pr.branch !== teammate.branch && !order.includes(pr.branch)),
+        (pr) =>
+          pullRequestMerged(teammate.projectId, pr.link).pipe(Effect.map((merged) => !merged)),
+      );
+      if (unordered.length > 0) {
+        const listed = unordered.map((pr) => `${pr.link.url} (${pr.branch})`).join(", ");
+        reasons.push(
+          `Unmerged and missing from the decision's merge order: ${listed}. Escalate the merge with a mergeOrder listing every unmerged branch, so the user approves the order.`,
+        );
+      }
+      return reasons;
+    });
+
   const mergeTeammate: PivotService["Service"]["mergeTeammate"] = (caller, input) =>
     Effect.gen(function* () {
       const command = "merge_teammate";
@@ -1041,6 +1158,7 @@ export const make = Effect.gen(function* () {
             : [`The user's answer does not waive check "${name}" by name.`],
         ),
         ...mergeRefusals(detail, waived),
+        ...(yield* mergeOrderRefusals(command, pivot, teammate, decision)),
       ];
       if (reasons.length > 0) {
         return yield* refuse(command, `Not merging ${link.url}:\n- ${reasons.join("\n- ")}`);
@@ -1071,7 +1189,14 @@ export const make = Effect.gen(function* () {
       if (teammate.deliveryMode !== "local-only") {
         return yield* refuse(command, "This project delivers PRs; merge with merge_teammate.");
       }
-      yield* userApproval(command, pivot, teammate, input.decisionId, "Landing");
+      const decision = yield* userApproval(command, pivot, teammate, input.decisionId, "Landing");
+      const outOfOrder = yield* mergeOrderRefusals(command, pivot, teammate, decision);
+      if (outOfOrder.length > 0) {
+        return yield* refuse(
+          command,
+          `Not landing ${teammate.branch}:\n- ${outOfOrder.join("\n- ")}`,
+        );
+      }
       const project = yield* gitProject(command, pivot.projectId);
       if (!(yield* git.isClean(teammate.worktreePath))) {
         return yield* refuse(

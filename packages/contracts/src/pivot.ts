@@ -87,6 +87,11 @@ export const PivotDecisionEscalation = Schema.Struct({
    * answer records which, alongside their words.
    */
   asksApproval: Schema.optional(Schema.Boolean),
+  /**
+   * For a merge or landing: branches in the order they merge, so the user approves the
+   * order with the merge. Every unmerged PR of the Pivot's has to be in it.
+   */
+  mergeOrder: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
 });
 export type PivotDecisionEscalation = typeof PivotDecisionEscalation.Type;
 

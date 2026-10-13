@@ -355,6 +355,11 @@ function ApprovalDecision({
                     <>
                       <span className="text-secondary-label">{escalation.evidence}</span>
                       <span className="text-secondary-label">{escalation.consequence}</span>
+                      {escalation.mergeOrder !== undefined && escalation.mergeOrder.length > 0 ? (
+                        <span className="text-secondary-label">
+                          Merge order: {escalation.mergeOrder.join(" → ")}
+                        </span>
+                      ) : null}
                       <span className="text-secondary-label">
                         Recommended: {escalation.recommendation}
                       </span>
