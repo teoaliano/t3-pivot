@@ -366,7 +366,6 @@ describe("TeammateHost (local)", () => {
     return Effect.gen(function* () {
       const host = yield* TeammateHost;
       const { teammate, checkout, worktree } = yield* launched(fake, workspaceRoot);
-      sh(workspaceRoot, `git worktree add -q -b ${checkout.branch} ${worktree} main`);
 
       yield* host.teardown("teardown_teammate", {
         ...checkout,

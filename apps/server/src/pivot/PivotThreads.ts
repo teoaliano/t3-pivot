@@ -519,10 +519,9 @@ export const make = Effect.gen(function* () {
 
     // Terminals and dev servers are found by working directory, not by name.
     stopProcesses: (worktreePath) =>
-      Effect.zipRight(
-        processes.stopAllForCheckout(worktreePath, { releaseReservation: true }),
-        stopWorktreeProcesses(procHost, worktreePath, process.pid),
-      ),
+      processes
+        .stopAllForCheckout(worktreePath, { releaseReservation: true })
+        .pipe(Effect.andThen(stopWorktreeProcesses(procHost, worktreePath, process.pid))),
 
     stopScope: agentScope.stop,
 

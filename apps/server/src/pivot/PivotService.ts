@@ -1209,11 +1209,19 @@ export const make = Effect.gen(function* () {
       const host = yield* hostOf(command, teammate);
       yield* host.project(command, pivot.projectId);
       // Teardown deletes the worktree and branch, so nobody else may still be using them.
-      const sharing = (yield* store.listTeammates({ includeTornDown: false })).filter(
-        (other) =>
-          other.threadId !== teammate.threadId &&
-          (other.worktreePath === teammate.worktreePath || other.branch === teammate.branch),
+      const others = (yield* store.listTeammates({ includeTornDown: false })).filter(
+        (other) => other.threadId !== teammate.threadId,
       );
+      const sharing: Array<PivotStore.TeammateRow> = [];
+      for (const other of others) {
+        const resolved = yield* withRecordedWorktree(other);
+        if (
+          resolved.worktreePath === teammate.worktreePath ||
+          resolved.branch === teammate.branch
+        ) {
+          sharing.push(resolved);
+        }
+      }
       if (sharing.length > 0) {
         return yield* refuse(
           command,
