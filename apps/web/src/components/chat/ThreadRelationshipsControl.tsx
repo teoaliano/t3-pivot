@@ -31,6 +31,8 @@ import {
   type EnvironmentId,
   type OrchestrationV2Subagent,
   type OrchestrationV2ThreadShell,
+  type ServerProvider,
+  type TeammateStatus,
   type ThreadId,
 } from "@t3tools/contracts";
 import { deriveSubagentElapsedMs } from "@t3tools/shared/orchestrationTiming";
@@ -51,7 +53,17 @@ import {
 import { useMemo, useState, type ReactNode } from "react";
 
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
+import { cn } from "../../lib/utils";
 import { buildThreadRouteParams } from "../../threadRoutes";
+import { useNowMinute } from "../../hooks/useNowMinute";
+import { usePivotState } from "../../state/pivot";
+import {
+  elapsedLabel,
+  TEAMMATE_TONE_CLASSES,
+  type TeammateCard,
+  teammateCardShellOf,
+} from "../pivot/pivotCards.logic";
+import { sidebarPivotGroup } from "../sidebar/pivotNesting.logic";
 import {
   useProjects,
   useServerConfigs,
@@ -126,18 +138,17 @@ export function ThreadLineageRowList(props: {
   );
 }
 
-function ThreadLineageGroup(props: {
+function ThreadLineageGroup<Row>(props: {
   readonly label: string | null;
-  readonly rows: ReadonlyArray<ThreadRelationshipWalkRow>;
+  readonly rows: ReadonlyArray<Row>;
+  readonly isFailed: (row: Row) => boolean;
   readonly expanded: boolean;
-  readonly children: (rows: ReadonlyArray<ThreadRelationshipWalkRow>) => ReactNode;
+  readonly children: (rows: ReadonlyArray<Row>) => ReactNode;
 }) {
   const [expanded, setExpanded] = useState(props.expanded);
   const [visibleCount, setVisibleCount] = useState(THREAD_LINEAGE_INITIAL_COUNT);
   const { visibleRows, hiddenCount } = resolveThreadLineageWindow(props.rows, visibleCount);
-  const failedCount = props.rows.filter(
-    ({ edge }) => edge.status === "failed" || edge.status === "error",
-  ).length;
+  const failedCount = props.rows.filter(props.isFailed).length;
   if (props.rows.length === 0) return null;
   return (
     <div>
@@ -163,6 +174,71 @@ function ThreadLineageGroup(props: {
         </ThreadLineageRowList>
       ) : null}
     </div>
+  );
+}
+
+const isFailedEdge = ({ edge }: ThreadRelationshipWalkRow) =>
+  edge.status === "failed" || edge.status === "error";
+
+/** The relationship dot's status for each teammate state; the row's label still says the teammate's own status. */
+const TEAMMATE_RELATIONSHIP_STATUS: Record<TeammateStatus, string> = {
+  working: "running",
+  waiting: "waiting",
+  "needs-decision": "waiting",
+  blocked: "waiting",
+  paused: "idle",
+  done: "completed",
+  failed: "failed",
+  unreported: "cancelled",
+};
+
+/**
+ * A Pivot teammate under Lineage, in the relationship row layout: its status label in
+ * place of the relationship's, and the elapsed time while it runs.
+ */
+function PivotTeammateLineageRow(props: {
+  readonly card: TeammateCard;
+  readonly provider: ServerProvider | undefined;
+  readonly nowMs: number;
+  readonly onOpen: (threadId: ThreadId) => void;
+}) {
+  const { card } = props;
+  const tone = TEAMMATE_TONE_CLASSES[card.tone];
+  // Minute-quantized, as the Pivot's own cards: a per-second tick would re-render inside the tooltip trigger.
+  const elapsed = card.tone === "working" ? elapsedLabel(card.since, props.nowMs) : null;
+  return (
+    <li className="group relative flex h-8 items-center rounded-lg">
+      <Tooltip>
+        <TooltipTrigger
+          delay={200}
+          render={
+            <ThreadDetailsControl
+              size="sm"
+              variant="ghost"
+              part="row"
+              onClick={() => props.onOpen(card.threadId)}
+            />
+          }
+        >
+          <ThreadRelationshipIcon
+            driver={props.provider?.driver}
+            provider={props.provider}
+            fallbackIcon={BotIcon}
+            status={TEAMMATE_RELATIONSHIP_STATUS[card.status]}
+          />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-left text-sm font-medium leading-4 text-foreground/85">
+              {card.title}
+            </span>
+          </span>
+          <span className={cn("shrink-0 text-2xs font-normal tabular-nums", tone.text)}>
+            {card.label}
+            {elapsed !== null ? ` ${elapsed}` : null}
+          </span>
+        </TooltipTrigger>
+        <TooltipPopup side="left">{card.detail ?? "Open teammate in this chat"}</TooltipPopup>
+      </Tooltip>
+    </li>
   );
 }
 
@@ -275,6 +351,24 @@ export function ThreadRelationshipsPanel(props: {
   }, [archivedShells, projection, props.environmentId, threadShells]);
   const currentThread = projection?.thread ?? graph.nodes.get(props.threadId)?.thread;
   const currentProject = projects.find((project) => project.id === currentThread?.projectId);
+  // A Pivot's teammates are its lineage too, but no edge links them: they come from the
+  // Pivot's records, not the thread graph. Settled ones leave, as in the sidebar.
+  const pivotState = usePivotState(props.environmentId);
+  const teammates = useMemo(() => {
+    const shellByThreadId = new Map(
+      threadShells
+        .filter((thread) => thread.environmentId === props.environmentId)
+        .map((thread) => [thread.id, thread] as const),
+    );
+    return (
+      sidebarPivotGroup(pivotState, props.threadId, (threadId) => {
+        const shell = shellByThreadId.get(threadId);
+        return shell === undefined ? null : teammateCardShellOf(shell.source, shell.pullRequests);
+      })?.teammates ?? []
+    );
+  }, [pivotState, props.environmentId, props.threadId, threadShells]);
+  const nowMinute = useNowMinute();
+  const nowMs = useMemo(() => Date.parse(`${nowMinute}:00.000Z`), [nowMinute]);
   const navigate = useNavigate();
   const mergeBack = useAtomCommand(threadEnvironment.mergeBack);
   const stopSession = useAtomCommand(threadEnvironment.stopSession);
@@ -323,9 +417,15 @@ export function ThreadRelationshipsPanel(props: {
       : "active";
   });
   const groups = [
-    { id: "related", label: null, rows: related, expanded: true },
-    { id: "active", label: null, rows: active, expanded: true },
-    { id: "previous", label: "Previous agents", rows: previous, expanded: false },
+    { id: "related", label: null, rows: related, expanded: true, isFailed: isFailedEdge },
+    { id: "active", label: null, rows: active, expanded: true, isFailed: isFailedEdge },
+    {
+      id: "previous",
+      label: "Previous agents",
+      rows: previous,
+      expanded: false,
+      isFailed: isFailedEdge,
+    },
   ];
   // Subagents without a child thread yet have no row, so count them separately.
   const runningCount =
@@ -333,7 +433,7 @@ export function ThreadRelationshipsPanel(props: {
       (agent) => agent.childThreadId === null && agent.status === "running",
     ).length ?? 0) + active.filter(({ edge }) => edge.status === "running").length;
 
-  if (relationshipRows.length === 0 && runningCount === 0) {
+  if (relationshipRows.length === 0 && runningCount === 0 && teammates.length === 0) {
     return null;
   }
 
@@ -437,6 +537,24 @@ export function ThreadRelationshipsPanel(props: {
         ) : null
       }
     >
+      <ThreadLineageGroup
+        label="Teammates"
+        rows={teammates}
+        expanded
+        isFailed={(card) => card.status === "failed"}
+      >
+        {(visibleCards) =>
+          visibleCards.map((card) => (
+            <PivotTeammateLineageRow
+              key={card.threadId}
+              card={card}
+              provider={providers?.find((entry) => entry.instanceId === card.providerInstanceId)}
+              nowMs={nowMs}
+              onOpen={openThread}
+            />
+          ))
+        }
+      </ThreadLineageGroup>
       {groups.map((group) => (
         <ThreadLineageGroup key={`${scopedThreadKey(ref)}:${group.id}`} {...group}>
           {(visibleRows) =>

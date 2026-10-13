@@ -10,11 +10,10 @@ import type { SidebarThreadStatus } from "../Sidebar.logic";
 import { type TeammateCard, type TeammateCardShell, teammateCard } from "../pivot/pivotCards.logic";
 
 /**
- * Pivot mode in the sidebar. A Pivot's teammates leave the shelves and sit under
- * their Pivot's row, in dispatch order, shown while the row is expanded. Settled
- * teammates leave that list the way settled threads leave the inbox. A teammate
- * whose Pivot is not in the list stays a top-level row, so nothing becomes
- * unreachable.
+ * Pivot mode in the sidebar. A Pivot's teammates leave the shelves: the sidebar lists
+ * only Pivots, and each Pivot's teammates sit in its right panel. Search still finds
+ * them, grouped by Pivot in dispatch order. A teammate whose Pivot is not in the list
+ * stays a top-level row, so nothing becomes unreachable.
  */
 
 interface ThreadRef {
@@ -65,30 +64,6 @@ export function nestPivotTeammates<T extends ThreadRef>(
       ]),
     ),
   };
-}
-
-export interface SidebarPivotRow<T> {
-  readonly thread: T;
-  /** The Pivot row a teammate sits under; null for a top-level row. */
-  readonly nestedUnderKey: string | null;
-}
-
-/** A shelf's rows with each expanded Pivot's teammates right after it. */
-export function interleavePivotTeammates<T extends ThreadRef>(
-  rows: ReadonlyArray<T>,
-  teammatesByPivotKey: ReadonlyMap<string, ReadonlyArray<T>>,
-  expandedPivotKeys: ReadonlySet<string>,
-): ReadonlyArray<SidebarPivotRow<T>> {
-  const result: Array<SidebarPivotRow<T>> = [];
-  for (const thread of rows) {
-    result.push({ thread, nestedUnderKey: null });
-    const key = keyOf(thread);
-    if (!expandedPivotKeys.has(key)) continue;
-    for (const teammate of teammatesByPivotKey.get(key) ?? []) {
-      result.push({ thread: teammate, nestedUnderKey: key });
-    }
-  }
-  return result;
 }
 
 export interface SidebarPivotGroup {

@@ -2,11 +2,15 @@ import { act, cloneElement, type ReactElement, type ReactNode } from "react";
 import { create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import {
   EnvironmentId,
+  ProjectId,
   ThreadId,
   type ModelSelection,
+  type PivotRecord,
   type ProviderOptionDescriptor,
   type OrchestrationV2ContextTransfer,
+  type TeammateRecord,
 } from "@t3tools/contracts";
+import type { PivotState } from "@t3tools/client-runtime/pivot-state";
 import * as DateTime from "effect/DateTime";
 import { afterEach, expect, it, vi } from "vite-plus/test";
 
@@ -20,6 +24,7 @@ const state = vi.hoisted(() => ({
   command: vi.fn().mockResolvedValue({ _tag: "Success" }),
   workflowCommand: vi.fn().mockResolvedValue({ _tag: "Success" }),
   toast: vi.fn(),
+  pivotState: null as unknown,
 }));
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => state.navigate }));
@@ -29,6 +34,8 @@ vi.mock("../../state/entities", () => ({
   useProjects: () => state.projects,
   useServerConfigs: () => state.configs,
 }));
+vi.mock("../../state/pivot", () => ({ usePivotState: () => state.pivotState }));
+vi.mock("../../hooks/useNowMinute", () => ({ useNowMinute: () => "2026-10-06T01:05" }));
 vi.mock("../../lib/archivedThreadsState", () => ({
   useArchivedThreadSnapshots: () => ({ snapshots: [] }),
 }));
@@ -74,6 +81,7 @@ afterEach(async () => {
   state.workflowCommand.mockReset().mockResolvedValue({ _tag: "Success" });
   state.toast.mockClear();
   state.projection = null;
+  state.pivotState = null;
 });
 
 it("stops the entire native workflow through its parent without changing state before acknowledgement", async () => {
@@ -1272,3 +1280,128 @@ it.each(["source", "target"])(
     }
   },
 );
+
+const pivotRecord = (threadId: string): PivotRecord => ({
+  threadId: ThreadId.make(threadId),
+  projectId: ProjectId.make("project"),
+  createdAt: "2026-10-06T00:00:00.000Z",
+  retiredAt: null,
+  successorThreadId: null,
+  openDecisionCount: 0,
+  escalatedDecisionCount: 0,
+});
+
+const teammateRecord = (
+  threadId: string,
+  pivotThreadId: string,
+  dispatchedAt: string,
+  tornDownAt: string | null = null,
+): TeammateRecord => ({
+  threadId: ThreadId.make(threadId),
+  pivotThreadId: ThreadId.make(pivotThreadId),
+  projectId: ProjectId.make("project"),
+  kind: "ship",
+  title: threadId,
+  branch: `pivot/${threadId}`,
+  report: null,
+  resume: null,
+  hasEscalatedDecision: false,
+  hasScoutReport: false,
+  dispatchedAt,
+  tornDownAt,
+});
+
+const teammateShell = (
+  environmentId: EnvironmentId,
+  id: string,
+  status: string,
+  title: string,
+) => ({
+  environmentId,
+  id: ThreadId.make(id),
+  pullRequests: [],
+  source: {
+    id,
+    title,
+    status,
+    providerInstanceId: "codex",
+    lineage: { parentThreadId: null, relationshipToParent: null },
+    latestRunId: null,
+    pendingRuntimeRequest: null,
+    pendingBackgroundTasks: [],
+    lastError: null,
+    usageLimitResetAt: null,
+    latestRunStartedAt: null,
+    latestRunCompletedAt: null,
+  },
+});
+
+const pivotPanelProjection = {
+  thread: { id: "pivot", lineage: { relationshipToParent: null }, activeProviderThreadId: null },
+  runs: [],
+  providerThreads: [],
+  providerSessions: [],
+  contextTransfers: [],
+  subagents: [],
+};
+
+it("lists a Pivot's live teammates under Lineage in dispatch order and leaves settled ones out", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const environmentId = EnvironmentId.make("test");
+  state.projection = pivotPanelProjection;
+  state.pivotState = {
+    pivots: { pivot: pivotRecord("pivot") },
+    teammates: {
+      second: teammateRecord("second", "pivot", "2026-10-06T02:00:00.000Z"),
+      first: teammateRecord("first", "pivot", "2026-10-06T01:00:00.000Z"),
+      cleaned: teammateRecord(
+        "cleaned",
+        "pivot",
+        "2026-10-06T00:30:00.000Z",
+        "2026-10-06T03:00:00.000Z",
+      ),
+    },
+    decisions: {},
+  } satisfies PivotState;
+  state.shells = [
+    teammateShell(environmentId, "first", "running", "First teammate"),
+    teammateShell(environmentId, "second", "completed", "Second teammate"),
+    teammateShell(environmentId, "cleaned", "completed", "Cleaned teammate"),
+  ];
+  await act(async () => {
+    renderer = create(
+      <ThreadRelationshipsPanel environmentId={environmentId} threadId={ThreadId.make("pivot")} />,
+    );
+  });
+  const text = renderer.root
+    .findAll((node) => typeof node.type === "string")
+    .flatMap((node) => node.children.filter((child) => typeof child === "string"))
+    .join(" ")
+    .replace(/\s+/g, " ");
+  expect(text).toContain("Teammates");
+  expect(text).toContain("Working");
+  expect(text.indexOf("First teammate")).toBeGreaterThan(-1);
+  expect(text.indexOf("First teammate")).toBeLessThan(text.indexOf("Second teammate"));
+  expect(text).not.toContain("Cleaned teammate");
+});
+
+it("lists nothing under another thread's Lineage", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const environmentId = EnvironmentId.make("test");
+  state.projection = {
+    ...pivotPanelProjection,
+    thread: { ...pivotPanelProjection.thread, id: "plain" },
+  };
+  state.pivotState = {
+    pivots: { pivot: pivotRecord("pivot") },
+    teammates: { first: teammateRecord("first", "pivot", "2026-10-06T01:00:00.000Z") },
+    decisions: {},
+  } satisfies PivotState;
+  state.shells = [teammateShell(environmentId, "first", "running", "First teammate")];
+  await act(async () => {
+    renderer = create(
+      <ThreadRelationshipsPanel environmentId={environmentId} threadId={ThreadId.make("plain")} />,
+    );
+  });
+  expect(renderer.toJSON()).toBeNull();
+});
