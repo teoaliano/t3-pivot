@@ -205,7 +205,7 @@ import {
 } from "./Sidebar.logic";
 import { sortThreads } from "../lib/threadSort";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
-import { interleavePivotTeammates, nestPivotTeammates } from "./sidebar/pivotNesting.logic";
+import { nestPivotTeammates } from "./sidebar/pivotNesting.logic";
 import { usePivotStatesStore } from "./pivot/pivotStatesStore";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useIsMobile } from "~/hooks/useMediaQuery";
@@ -324,8 +324,6 @@ function buildThreadJumpLabelMap(input: {
 
 interface SidebarThreadRowProps {
   thread: SidebarThreadSummary;
-  /** A Pivot's teammate, indented under its row. */
-  nested: boolean;
   orderedProjectThreadKeys: readonly string[];
   isActive: boolean;
   openPullRequestsInRightPanel: boolean;
@@ -748,7 +746,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         data-testid={`thread-row-${thread.id}`}
         className={cn(
           "relative isolate flex h-8 w-full min-w-0 cursor-pointer select-none items-center gap-2 overflow-hidden rounded-md text-left text-xs outline-hidden focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring group-data-[collapsible=icon]:hidden [&>span:last-child]:truncate [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-muted-foreground",
-          props.nested ? "ps-6 pe-2" : "px-2",
+          "px-2",
           isActive
             ? "bg-sidebar-row-active font-medium text-sidebar-foreground hover:bg-sidebar-row-active"
             : isSelected
@@ -973,8 +971,6 @@ interface SidebarProjectThreadListProps {
   hiddenThreadStatus: ThreadStatusPill | null;
   orderedProjectThreadKeys: readonly string[];
   renderedThreads: readonly SidebarThreadSummary[];
-  /** Teammates, indented under their Pivot. */
-  nestedThreadKeys: ReadonlySet<string>;
   showEmptyThreadState: boolean;
   shouldShowThreadPanel: boolean;
   isThreadListExpanded: boolean;
@@ -1031,7 +1027,6 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     hiddenThreadStatus,
     orderedProjectThreadKeys,
     renderedThreads,
-    nestedThreadKeys,
     showEmptyThreadState,
     shouldShowThreadPanel,
     isThreadListExpanded,
@@ -1087,7 +1082,6 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
             <SidebarThreadRow
               key={threadKey}
               thread={thread}
-              nested={nestedThreadKeys.has(threadKey)}
               orderedProjectThreadKeys={orderedProjectThreadKeys}
               isActive={activeRouteThreadKey === threadKey}
               openPullRequestsInRightPanel={openPullRequestsInRightPanel}
@@ -1349,60 +1343,43 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     return counts;
   }, [memberProjectByScopedKey, project.memberProjects, projectThreads]);
 
-  const { projectStatus, visibleProjectThreads, orderedProjectThreadKeys, nestedThreadKeys } =
-    useMemo(() => {
-      const lastVisitedAtByThreadKey = new Map(
-        projectThreads.map((thread, index) => [
-          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-          resolveThreadLastVisitedAt(
-            thread.lastVisitedAt,
-            threadLastVisitedAts[index] ?? undefined,
-          ),
-        ]),
+  const { projectStatus, visibleProjectThreads, orderedProjectThreadKeys } = useMemo(() => {
+    const lastVisitedAtByThreadKey = new Map(
+      projectThreads.map((thread, index) => [
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        resolveThreadLastVisitedAt(thread.lastVisitedAt, threadLastVisitedAts[index] ?? undefined),
+      ]),
+    );
+    const resolveProjectThreadStatus = (thread: SidebarThreadSummary) => {
+      const lastVisitedAt = lastVisitedAtByThreadKey.get(
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
       );
-      const resolveProjectThreadStatus = (thread: SidebarThreadSummary) => {
-        const lastVisitedAt = lastVisitedAtByThreadKey.get(
-          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-        );
-        return resolveThreadStatusPill({
-          thread: {
-            ...thread,
-            ...(lastVisitedAt !== null && lastVisitedAt !== undefined ? { lastVisitedAt } : {}),
-          },
-        });
-      };
-      // T3 Pivot: a Pivot's teammates follow its row, in dispatch order.
-      const nesting = nestPivotTeammates(
-        sortThreads(
-          projectThreads.filter((thread) => thread.archivedAt === null),
-          threadSortOrder,
-        ),
-        (environmentId) => pivotStatesByEnvironment[environmentId] ?? null,
-      );
-      const rows = interleavePivotTeammates(
-        nesting.topLevel,
-        nesting.teammatesByPivotKey,
-        new Set(nesting.teammatesByPivotKey.keys()),
-      );
-      const visibleProjectThreads = rows.map((row) => row.thread);
-      const projectStatus = resolveProjectStatusIndicator(
-        visibleProjectThreads.map((thread) => resolveProjectThreadStatus(thread)),
-      );
-      return {
-        orderedProjectThreadKeys: visibleProjectThreads.map((thread) =>
-          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-        ),
-        projectStatus,
-        visibleProjectThreads,
-        nestedThreadKeys: new Set(
-          rows.flatMap((row) =>
-            row.nestedUnderKey === null
-              ? []
-              : [scopedThreadKey(scopeThreadRef(row.thread.environmentId, row.thread.id))],
-          ),
-        ),
-      };
-    }, [pivotStatesByEnvironment, projectThreads, threadLastVisitedAts, threadSortOrder]);
+      return resolveThreadStatusPill({
+        thread: {
+          ...thread,
+          ...(lastVisitedAt !== null && lastVisitedAt !== undefined ? { lastVisitedAt } : {}),
+        },
+      });
+    };
+    // T3 Pivot: a Pivot's teammates live in its right panel, not the project list.
+    const visibleProjectThreads = nestPivotTeammates(
+      sortThreads(
+        projectThreads.filter((thread) => thread.archivedAt === null),
+        threadSortOrder,
+      ),
+      (environmentId) => pivotStatesByEnvironment[environmentId] ?? null,
+    ).topLevel;
+    const projectStatus = resolveProjectStatusIndicator(
+      visibleProjectThreads.map((thread) => resolveProjectThreadStatus(thread)),
+    );
+    return {
+      orderedProjectThreadKeys: visibleProjectThreads.map((thread) =>
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+      ),
+      projectStatus,
+      visibleProjectThreads,
+    };
+  }, [pivotStatesByEnvironment, projectThreads, threadLastVisitedAts, threadSortOrder]);
   const pinnedCollapsedThread = useMemo(() => {
     const activeThreadKey = activeRouteThreadKey ?? undefined;
     if (!activeThreadKey || projectExpanded) {
@@ -2576,7 +2553,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         hiddenThreadStatus={hiddenThreadStatus}
         orderedProjectThreadKeys={orderedProjectThreadKeys}
         renderedThreads={renderedThreads}
-        nestedThreadKeys={nestedThreadKeys}
         showEmptyThreadState={showEmptyThreadState}
         shouldShowThreadPanel={shouldShowThreadPanel}
         isThreadListExpanded={isThreadListExpanded}

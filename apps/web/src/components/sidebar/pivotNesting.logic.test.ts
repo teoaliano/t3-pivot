@@ -11,7 +11,6 @@ import { describe, expect, it } from "vite-plus/test";
 import type { TeammateCardShell } from "../pivot/pivotCards.logic";
 
 import {
-  interleavePivotTeammates,
   nestPivotTeammates,
   pivotGroupHasTeammates,
   sidebarPivotGroup,
@@ -79,25 +78,13 @@ describe("Pivot nesting in the sidebar", () => {
     ]);
   });
 
-  it("shows an expanded Pivot's teammates right after it", () => {
+  it("keeps a Pivot's teammates out of the sidebar list, while search still finds them", () => {
     const threads = ["active", "first", "second", "plain"].map(row);
     const nesting = nestPivotTeammates(threads, () => state);
-    const collapsed = interleavePivotTeammates(
-      nesting.topLevel,
-      nesting.teammatesByPivotKey,
-      new Set(),
-    );
-    expect(collapsed.map((entry) => entry.thread.id)).toEqual(["active", "plain"]);
-    const expanded = interleavePivotTeammates(
-      nesting.topLevel,
-      nesting.teammatesByPivotKey,
-      new Set(["env-1:active"]),
-    );
-    expect(expanded.map((entry) => [entry.thread.id, entry.nestedUnderKey])).toEqual([
-      ["active", null],
-      ["first", "env-1:active"],
-      ["second", "env-1:active"],
-      ["plain", null],
+    expect(nesting.topLevel.map((thread) => thread.id)).toEqual(["active", "plain"]);
+    expect(nesting.teammatesByPivotKey.get("env-1:active")?.map((thread) => thread.id)).toEqual([
+      "first",
+      "second",
     ]);
   });
 

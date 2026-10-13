@@ -2,7 +2,7 @@ import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
 import { usePivotStatesStore } from "./pivot/pivotStatesStore";
 import { teammateCardShellOf } from "./pivot/pivotCards.logic";
-import { SidebarPivotSummary, SidebarTeammateList } from "./pivot/SidebarPivotStrip";
+import { SidebarPivotSummary } from "./pivot/SidebarPivotStrip";
 import {
   nestPivotTeammates,
   pivotNestingKey,
@@ -2511,10 +2511,6 @@ export default function Sidebar() {
   });
   const newThreadContext = useHandleNewThread();
   const pivotStatesByEnvironment = usePivotStatesStore((store) => store.byEnvironment);
-  // Pivots start expanded; the user folds the ones they want out of the way.
-  const [collapsedPivotKeys, setCollapsedPivotKeys] = useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
   // T3 Pivot: each Pivot's row sums up its teammates that are not settled, read from
   // the Pivot records.
   const pivotGroupsByKey = useMemo(() => {
@@ -2533,14 +2529,6 @@ export default function Sidebar() {
     }
     return groups;
   }, [pivotStatesByEnvironment, threads]);
-  const togglePivotExpanded = useCallback((pivotKey: string) => {
-    setCollapsedPivotKeys((current) => {
-      const next = new Set(current);
-      if (next.has(pivotKey)) next.delete(pivotKey);
-      else next.add(pivotKey);
-      return next;
-    });
-  }, []);
   const openAddProjectCommandPalette = useCallback(
     () => openCommandPalette({ open: "add-project" }),
     [],
@@ -2884,7 +2872,7 @@ export default function Sidebar() {
     const preciseNow = new Date().toISOString();
     // Subagent child threads live in the parent's Agents surface, not the
     // sidebar roster (v2 models them as real threads with lineage).
-    // T3 Pivot: teammates leave the shelves and sit under their Pivot's row.
+    // T3 Pivot: teammates leave the shelves; their Pivot's right panel lists them.
     const pivotNesting = nestPivotTeammates(
       filterSidebarV2VisibleThreads(threads, scopedProjectKeys),
       (environmentId) => pivotStatesByEnvironment[environmentId] ?? null,
@@ -5462,13 +5450,7 @@ export default function Sidebar() {
                       const renderPivotSummary = (thread: EnvironmentThreadShell) => {
                         const pivotKey = pivotNestingKey(thread);
                         const group = pivotGroupsByKey.get(pivotKey);
-                        return group === undefined ? null : (
-                          <SidebarPivotSummary
-                            group={group}
-                            expanded={!collapsedPivotKeys.has(pivotKey)}
-                            onToggle={() => togglePivotExpanded(pivotKey)}
-                          />
-                        );
+                        return group === undefined ? null : <SidebarPivotSummary group={group} />;
                       };
                       const renderThreadRowInner = (
                         thread: EnvironmentThreadShell,
@@ -5630,25 +5612,6 @@ export default function Sidebar() {
                         if (item.kind === "thread") {
                           const thread = threadByKey.get(item.key)!;
                           items.push(renderThreadRow(thread, item.section));
-                          // T3 Pivot: an expanded Pivot's teammates, right under its row.
-                          const pivotKey = pivotNestingKey(thread);
-                          const pivotGroup = pivotGroupsByKey.get(pivotKey);
-                          if (pivotGroup !== undefined && !collapsedPivotKeys.has(pivotKey)) {
-                            if (pivotGroup.teammates.length > 0) {
-                              items.push(
-                                <SidebarTeammateList
-                                  key={`${item.key}:teammates`}
-                                  environmentId={thread.environmentId}
-                                  group={pivotGroup}
-                                  activeThreadId={
-                                    routeThreadRef?.environmentId === thread.environmentId
-                                      ? routeThreadRef.threadId
-                                      : null
-                                  }
-                                />,
-                              );
-                            }
-                          }
                           continue;
                         }
                         switch (item.marker) {
