@@ -419,7 +419,7 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     });
   });
 
-  it("maps a file-scoped write policy to reads plus edits of the listed file only", () => {
+  it("maps a file-scoped write policy to reads, the shell and edits of the listed file only", () => {
     const queryPolicy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
       ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
         runtimeMode: "full-access",
@@ -433,9 +433,19 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
 
     assert.deepEqual(queryPolicy, {
       permissionMode: "dontAsk",
-      tools: [...ClaudeAdapterV2.CLAUDE_READ_ONLY_ALLOWED_TOOLS, "Edit", "Write"],
+      tools: [
+        ...ClaudeAdapterV2.CLAUDE_READ_ONLY_ALLOWED_TOOLS,
+        "Bash",
+        "TaskOutput",
+        "TaskStop",
+        "Edit",
+        "Write",
+      ],
       allowedTools: [
         ...ClaudeAdapterV2.CLAUDE_READ_ONLY_ALLOWED_TOOLS,
+        "Bash",
+        "TaskOutput",
+        "TaskStop",
         "Edit(//home/me/pivot-homes/p1/preferences.md)",
         "Write(//home/me/pivot-homes/p1/preferences.md)",
       ],

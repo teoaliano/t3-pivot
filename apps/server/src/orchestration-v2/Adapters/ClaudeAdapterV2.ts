@@ -1711,8 +1711,12 @@ export interface ClaudeRuntimeQueryPolicy {
   readonly installPermissionCallback: boolean;
 }
 
-// Claude has no OS sandbox to confine a shell, so a file-scoped write policy takes
-// the whole thread out of Bash: built-in reads, plus edits to the listed files only.
+// The shell and the tools that manage its background commands.
+const CLAUDE_SHELL_TOOLS = ["Bash", "TaskOutput", "TaskStop"] as const;
+
+// A file-scoped write policy gives built-in reads, the shell, and edits to the listed
+// files only. Claude has no OS sandbox T3 can rely on, so the shell itself is not
+// confined: the edit rules bind Edit and Write, and the agent's instructions bind Bash.
 // The rule form is an absolute path with a `//` prefix, e.g. `Edit(//home/me/x.md)`.
 function claudeFileScopedQueryPolicy(
   writableFiles: ReadonlyArray<string>,
@@ -1723,8 +1727,8 @@ function claudeFileScopedQueryPolicy(
   });
   return {
     permissionMode: "dontAsk",
-    tools: [...CLAUDE_READ_ONLY_ALLOWED_TOOLS, "Edit", "Write"],
-    allowedTools: [...CLAUDE_READ_ONLY_ALLOWED_TOOLS, ...editRules],
+    tools: [...CLAUDE_READ_ONLY_ALLOWED_TOOLS, ...CLAUDE_SHELL_TOOLS, "Edit", "Write"],
+    allowedTools: [...CLAUDE_READ_ONLY_ALLOWED_TOOLS, ...CLAUDE_SHELL_TOOLS, ...editRules],
     installPermissionCallback: false,
   };
 }
