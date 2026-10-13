@@ -1,12 +1,14 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { decisionsHeldBy } from "@t3tools/client-runtime/pivot-state";
 import type { EnvironmentId, PivotDecision, ThreadId } from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { LayoutDashboardIcon } from "lucide-react";
 import { useState } from "react";
 
+import { shortcutLabelForCommand } from "../../keybindings";
 import { usePivotState } from "../../state/pivot";
-import { serverEnvironment } from "../../state/server";
+import { primaryServerKeybindingsAtom, serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { useChatCanvas } from "../chat/ChatCanvasContext";
@@ -50,16 +52,18 @@ export function PivotViewSwitch(props: {
   const ref = scopeThreadRef(props.environmentId, props.threadId);
   const mode = usePivotViewMode(ref);
   const setMode = usePivotViewStore((state) => state.setMode);
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   if (role.kind !== "pivot" || (inPivotView && props.force !== true)) return null;
   const next = otherPivotViewMode(mode);
-  const label = next === "pivot" ? "Pivot" : "Chat";
+  const shortcut = shortcutLabelForCommand(keybindings, "pivot.toggleView");
+  const hint = next === "pivot" ? "Switch to Pivot view" : "Switch to chat";
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <Toggle
             className="shrink-0"
-            aria-label={label}
+            aria-label="Pivot view"
             variant="ghost"
             size="sm"
             pressed={mode === "pivot"}
@@ -69,7 +73,9 @@ export function PivotViewSwitch(props: {
       >
         <LayoutDashboardIcon className="size-3.5" />
       </TooltipTrigger>
-      <TooltipPopup side="bottom">{label}</TooltipPopup>
+      <TooltipPopup side="bottom">
+        {shortcut === null ? hint : `${hint} (${shortcut})`}
+      </TooltipPopup>
     </Tooltip>
   );
 }
