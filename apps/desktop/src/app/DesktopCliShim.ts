@@ -14,7 +14,14 @@ import { makeComponentLogger } from "./DesktopObservability.ts";
 // so its launcher mounts the AppImage itself instead of pointing into it.
 const { logInfo, logWarning } = makeComponentLogger("desktop-cli-shim");
 
-export const MARKER = "Written by T3 Code: runs the desktop app's bundled t3 CLI.";
+export const MARKER = "Written by T3 Pivot: runs the desktop app's bundled t3 CLI.";
+// Pivot wrote this marker until 0.0.4606. Only the launcher in Pivot's own home
+// accepts it; a `t3` link on PATH with it belongs to an installed T3 Code.
+const LEGACY_MARKER = "Written by T3 Code: runs the desktop app's bundled t3 CLI.";
+
+/** Whether the file at the launcher path in this app's T3 home was written by the app. */
+export const isOwnLauncher = (content: string) =>
+  content.includes(MARKER) || content.includes(LEGACY_MARKER);
 
 /** Server entry inside the app, relative to its server root (an asar archive when packaged). */
 const SERVER_ENTRY = "apps/server/dist/bin.mjs";
@@ -161,7 +168,7 @@ export const install = Effect.gen(function* () {
 
   return yield* Effect.gen(function* () {
     const existing = yield* fs.readFileString(shimPath).pipe(Effect.option);
-    if (Option.isSome(existing) && !existing.value.includes(MARKER)) {
+    if (Option.isSome(existing) && !isOwnLauncher(existing.value)) {
       // Someone else's file; leave it, and let commands fall back to plain `t3`.
       yield* logWarning("leaving a t3 launcher the app did not write", { shimPath });
       return Option.none<string>();

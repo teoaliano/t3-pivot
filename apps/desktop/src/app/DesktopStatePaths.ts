@@ -2,6 +2,11 @@ import * as Option from "effect/Option";
 
 export type JoinPath = (first: string, ...segments: string[]) => string;
 
+// T3 Pivot keeps its own T3 home so it runs beside T3 Code without sharing
+// data. Development runs keep upstream's ~/.t3/dev.
+const PIVOT_T3_HOME_DIRNAME = ".t3-pivot";
+const DEVELOPMENT_T3_HOME_DIRNAME = ".t3";
+
 function normalizeConfiguredBaseDir(t3Home: Option.Option<string>): Option.Option<string> {
   if (Option.isNone(t3Home)) {
     return Option.none();
@@ -12,11 +17,15 @@ function normalizeConfiguredBaseDir(t3Home: Option.Option<string>): Option.Optio
 
 export function resolveDesktopBaseDir(input: {
   readonly homeDirectory: string;
+  readonly isDevelopment: boolean;
   readonly joinPath: JoinPath;
   readonly t3Home: Option.Option<string>;
 }): string {
   return Option.getOrElse(normalizeConfiguredBaseDir(input.t3Home), () =>
-    input.joinPath(input.homeDirectory, ".t3"),
+    input.joinPath(
+      input.homeDirectory,
+      input.isDevelopment ? DEVELOPMENT_T3_HOME_DIRNAME : PIVOT_T3_HOME_DIRNAME,
+    ),
   );
 }
 

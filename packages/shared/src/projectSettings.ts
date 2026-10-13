@@ -178,7 +178,9 @@ function resolveProjectOverrides(
     // environment-level guards do for these keys. An instance this project
     // enabled via `providerInstances[id].enabled` still counts as enabled here.
     if (
-      (key === "textGenerationModelSelection" || key === "defaultModelSelection") &&
+      (key === "textGenerationModelSelection" ||
+        key === "defaultModelSelection" ||
+        key === "pivotModelSelection") &&
       value !== undefined &&
       value !== null &&
       !resolveProjectProviderInstanceEnabled(

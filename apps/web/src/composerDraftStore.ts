@@ -76,6 +76,7 @@ import { create } from "zustand";
 import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
 import { useShallow } from "zustand/react/shallow";
 import { createDeferredStorage, createMemoryStorage } from "./lib/storage";
+import { newDraftId, newThreadId } from "./lib/utils";
 import { getDefaultServerModel } from "./providerModels";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import { UnifiedSettings } from "@t3tools/contracts/settings";
@@ -338,6 +339,7 @@ const PersistedDraftThreadState = Schema.Struct({
       }),
     ),
   ),
+  pivot: Schema.optionalKey(Schema.Literal(true)),
 });
 type PersistedDraftThreadState = typeof PersistedDraftThreadState.Type;
 
@@ -463,6 +465,12 @@ export interface DraftSessionState {
   envMode: DraftThreadEnvMode;
   startFromOrigin: boolean;
   promotedTo?: ScopedThreadRef | null;
+  /**
+   * A New Pivot composer, not a new thread. Its first send creates the Pivot on
+   * the draft's environment. Pivot drafts are never mapped to a logical project,
+   * so new-thread entry points cannot reuse them.
+   */
+  pivot?: true;
 }
 
 export type DraftThreadState = DraftSessionState;
@@ -579,6 +587,11 @@ interface ComposerDraftStoreState {
       loadBalancedEnvironmentId?: EnvironmentId | null;
     },
   ) => void;
+  /**
+   * Opens a New Pivot composer for a project. Unmapped on purpose: it is not the
+   * logical project's new-thread draft and must never be reused as one.
+   */
+  createPivotDraft: (projectRef: ScopedProjectRef, logicalProjectKey: string) => DraftId;
   clearProjectDraftThreadId: (projectRef: ScopedProjectRef) => void;
   clearProjectDraftThreadById: (
     projectRef: ScopedProjectRef,
@@ -1835,6 +1848,7 @@ function normalizePersistedDraftThreads(
         candidateDraftThread.environmentSelection === "auto"
           ? { environmentSelection: candidateDraftThread.environmentSelection }
           : {}),
+        ...(candidateDraftThread.pivot === true ? { pivot: true as const } : {}),
         ...(typeof candidateDraftThread.loadBalancedEnvironmentId === "string" &&
         candidateDraftThread.loadBalancedEnvironmentId.length > 0
           ? { loadBalancedEnvironmentId: candidateDraftThread.loadBalancedEnvironmentId }
@@ -2609,6 +2623,7 @@ function toHydratedDraftThreadState(
           persistedDraftThread.promotedTo.threadId as ThreadId,
         )
       : null,
+    ...(persistedDraftThread.pivot ? { pivot: true as const } : {}),
   };
 }
 
@@ -2900,6 +2915,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                 options.envMode ?? (nextWorktreePath ? "worktree" : (existing.envMode ?? "local")),
               startFromOrigin: nextStartFromOrigin,
               promotedTo: existing.promotedTo ?? null,
+              ...(existing.pivot ? { pivot: true as const } : {}),
             };
             const isUnchanged =
               nextDraftThread.environmentId === existing.environmentId &&
@@ -2925,6 +2941,19 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               },
             };
           });
+        },
+        createPivotDraft: (projectRef, logicalProjectKey) => {
+          const draftId = newDraftId();
+          set((state) => ({
+            draftThreadsByThreadKey: {
+              ...state.draftThreadsByThreadKey,
+              [draftId]: {
+                ...createDraftThreadState(projectRef, newThreadId(), logicalProjectKey, undefined),
+                pivot: true,
+              },
+            },
+          }));
+          return draftId;
         },
         clearProjectDraftThreadId: (projectRef) => {
           set((state) => {

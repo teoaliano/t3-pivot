@@ -716,6 +716,8 @@ export class GitHubPullRequestApi extends Context.Service<
       readonly removeAgentCreditsOnMerge?: boolean;
       readonly mergeMethod?: PullRequestMergeMethod;
       readonly updateMethod?: PullRequestUpdateMethod;
+      /** For `merge`: pinned as the expected head, so a moved head refuses. */
+      readonly expectedHeadSha?: string;
     }) => Effect.Effect<void, GitHubPullRequestApiError>;
 
     readonly commentOnPullRequest: (input: {
@@ -2638,7 +2640,8 @@ export const make = Effect.gen(function* () {
           });
         }
         let body: string | undefined;
-        let expectedHead: string | undefined;
+        let expectedHead: string | undefined =
+          action === "merge" ? input.expectedHeadSha : undefined;
         if (input.removeAgentCreditsOnMerge === true && input.mergeMethod !== "rebase") {
           const message = yield* graphqlRead({
             cwd: input.cwd,
@@ -2659,7 +2662,8 @@ export const make = Effect.gen(function* () {
             const cleaned = removeAgentCredits(message.viewerMergeBodyText);
             if (cleaned !== message.viewerMergeBodyText) {
               body = cleaned;
-              expectedHead = message.headRefOid;
+              // A caller's pinned head wins: the message was read for that head or a later one.
+              expectedHead ??= message.headRefOid;
             }
           }
         }

@@ -14,6 +14,7 @@ import * as Schema from "effect/Schema";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProjectStore from "./ProjectStore.ts";
+import * as ThreadWriteAccess from "./ThreadWriteAccess.ts";
 
 /**
  * ERRORS
@@ -125,10 +126,35 @@ export const layerFromProjectStore: Layer.Layer<
               }),
             ),
           ));
+        const writeScope = yield* (yield* ThreadWriteAccess.ThreadWriteAccess)
+          .scopeFor(input.thread)
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new RuntimePolicyResolveError({
+                  projectId: input.thread.projectId,
+                  providerInstanceId: input.modelSelection.instanceId,
+                  cause,
+                }),
+            ),
+          );
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
           interactionMode: input.thread.interactionMode,
           cwd,
+          // Reads stay open everywhere; the sandbox only confines writes to the scope.
+          ...(writeScope === null
+            ? {}
+            : {
+                sandboxPolicy: {
+                  type: "workspaceWrite",
+                  writableRoots: [...writeScope.writableRoots],
+                  networkAccess: true,
+                  excludeSlashTmp: true,
+                  excludeTmpdirEnvVar: true,
+                },
+                writableFiles: [...writeScope.writableFiles],
+              }),
         });
       }),
     });

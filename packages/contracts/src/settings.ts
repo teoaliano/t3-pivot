@@ -961,6 +961,28 @@ export const WorktreeCleanup = Schema.NullOr(
 );
 export type WorktreeCleanup = typeof WorktreeCleanup.Type;
 
+/**
+ * A named model a Pivot can start teammates on. The Pivot reads `description`
+ * to pick an entry for a task and passes `name` to `dispatch_teammate`; the
+ * server resolves it to `modelSelection`, effort included.
+ */
+export const TEAMMATE_MODEL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/;
+export const TeammateModelEntry = Schema.Struct({
+  name: TrimmedNonEmptyString.check(Schema.isPattern(TEAMMATE_MODEL_NAME_PATTERN)),
+  modelSelection: ModelSelection,
+  description: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  /** The entry used when the Pivot names none. Without one marked, the first entry is. */
+  isDefault: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+});
+export type TeammateModelEntry = typeof TeammateModelEntry.Type;
+
+/** The model each built-in teammate kind runs on when a dispatch names no entry. Null leaves it to the default entry. */
+export const TeammateKindModelSelections = Schema.Struct({
+  ship: Schema.NullOr(ModelSelection),
+  scout: Schema.NullOr(ModelSelection),
+});
+export type TeammateKindModelSelections = typeof TeammateKindModelSelections.Type;
+
 export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "worktreeCleanup",
   "defaultModelSelection",
@@ -986,6 +1008,9 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "sidebarAutoSettleAfterDays",
   "continueThreadsAfterServerUpdate",
   "responseStreamingMode",
+  "pivotModelSelection",
+  "teammateModels",
+  "teammateKindModelSelections",
 ] as const;
 export type ProjectScopedServerSettingKey = (typeof PROJECT_SCOPED_SERVER_SETTING_KEYS)[number];
 
@@ -1033,6 +1058,10 @@ export const ProjectSettingsOverrides = Schema.Struct({
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
   responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
+  pivotModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  /** Replaces the environment's list as a whole; entries never merge. */
+  teammateModels: Schema.optionalKey(Schema.Array(TeammateModelEntry)),
+  teammateKindModelSelections: Schema.optionalKey(TeammateKindModelSelections),
   providerInstances: Schema.optionalKey(
     Schema.Record(ProviderInstanceId, ProjectProviderInstanceOverride),
   ),
@@ -1054,6 +1083,7 @@ const NULLABLE_PROJECT_SETTINGS_OVERRIDES: ReadonlySet<ProjectScopedServerSettin
   }[ProjectScopedServerSettingKey]
 >([
   "defaultModelSelection",
+  "pivotModelSelection",
   "sourceControlWriterModelSelection",
   "reviewGuideModelSelection",
   "pullRequestMergeMethod",
@@ -1159,6 +1189,17 @@ export const ServerSettings = Schema.Struct({
   ),
   defaultRuntimeMode: RuntimeMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE)),
+  ),
+  /** The model a new Pivot runs on. Null uses the new-thread default. */
+  pivotModelSelection: Schema.NullOr(ModelSelection).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  /** The models a Pivot chooses from when it starts a teammate. */
+  teammateModels: Schema.Array(TeammateModelEntry).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  teammateKindModelSelections: TeammateKindModelSelections.pipe(
+    Schema.withDecodingDefault(Effect.succeed({ ship: null, scout: null })),
   ),
   /**
    * Per-project overrides of the keys in `PROJECT_SCOPED_SERVER_SETTING_KEYS`,
@@ -1552,6 +1593,10 @@ export const ServerSettingsPatch = Schema.Struct({
   ),
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
+  pivotModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  /** Replaces the whole list. */
+  teammateModels: Schema.optionalKey(Schema.Array(TeammateModelEntry)),
+  teammateKindModelSelections: Schema.optionalKey(TeammateKindModelSelections),
   /**
    * Per-project entry replacement: each entry replaces that project's whole
    * override set and `null` removes it. Clearing one override means resending

@@ -154,6 +154,25 @@ describe("DesktopEnvironment", () => {
     }),
   );
 
+  it.effect("names packaged runs T3 Pivot and development runs T3 Pivot (Dev)", () =>
+    Effect.gen(function* () {
+      const packaged = yield* makeEnvironment({ isPackaged: true });
+      const development = yield* makeEnvironment(
+        {},
+        { VITE_DEV_SERVER_URL: "http://localhost:5173" },
+      );
+
+      assert.deepEqual(packaged.branding, {
+        baseName: "T3 Pivot",
+        stageLabel: "Alpha",
+        displayName: "T3 Pivot",
+      });
+      assert.equal(packaged.displayName, "T3 Pivot");
+      assert.equal(packaged.appUserModelId, "com.teoaliano.t3pivot");
+      assert.equal(development.displayName, "T3 Pivot (Dev)");
+    }),
+  );
+
   it.effect("keeps implicit development state separate from production state", () =>
     Effect.gen(function* () {
       const development = yield* makeEnvironment(
@@ -163,7 +182,8 @@ describe("DesktopEnvironment", () => {
       const production = yield* makeEnvironment();
 
       assert.equal(development.stateDir, "/Users/alice/.t3/dev");
-      assert.equal(production.stateDir, "/Users/alice/.t3/userdata");
+      assert.equal(production.baseDir, "/Users/alice/.t3-pivot");
+      assert.equal(production.stateDir, "/Users/alice/.t3-pivot/userdata");
     }),
   );
 

@@ -1,0 +1,170 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>D · Deck inside the chat</title>
+    <link rel="stylesheet" href="shared.css" />
+  </head>
+  <body data-hint="Try: open a Pivot, click a card in the strip, then Focus (or press F)">
+    <div class="app" id="app">
+      <aside class="sb" id="sb"></aside>
+      <main class="main" id="main"></main>
+    </div>
+    <script src="shared.js"></script>
+    <script src="bar.js"></script>
+    <script>
+      // Option D: no separate Pivot view to switch to. A Pivot thread always shows its teammate deck
+      // above its chat, with the sidebar. Focus hides the sidebar and gives the full-screen layout.
+      const { data, h, card, mountChat, mountPivotView, statusDot } = Proto;
+      const app = document.getElementById("app"),
+        sb = document.getElementById("sb"),
+        main = document.getElementById("main");
+      const ui = { expanded: {}, selected: null, focus: false, open: null };
+
+      function focusPivot(id) {
+        ui.focus = true;
+        app.classList.add("full");
+        mountPivotView(main, id, {
+          exit: {
+            label: "⤡ Leave focus",
+            onExit: () => {
+              ui.focus = false;
+              app.classList.remove("full");
+              openPivot(id);
+            },
+          },
+        });
+      }
+      function openPivot(id) {
+        ui.selected = id;
+        const p = Proto.pivotById(id);
+        const deck = h(
+          "div",
+          { class: "deck" },
+          p.teammates.map((t) =>
+            card(t, p, {
+              compact: true,
+              open: ui.open === t.id,
+              onOpen: (tid) => {
+                ui.open = ui.open === tid ? null : tid;
+                openPivot(id);
+              },
+            }),
+          ),
+        );
+        const chatRoot = h("div", { class: "main", style: "flex:1" });
+        mountChat(chatRoot, {
+          title: p.title,
+          project: p.project,
+          messages: p.messages,
+          placeholder: "Talk to the Pivot",
+          right: h(
+            "button",
+            { class: "btn primary", title: "F", onclick: () => focusPivot(id) },
+            "⤢ Focus",
+          ),
+        });
+        const header = chatRoot.firstChild;
+        const row = h(
+          "div",
+          { style: "flex:1;display:flex;min-height:0" },
+          h(
+            "div",
+            { style: "flex:1;display:flex;flex-direction:column;min-width:0" },
+            ...[...chatRoot.childNodes].slice(1),
+          ),
+          ui.open
+            ? h(
+                "div",
+                { class: "pv-side", style: "margin:10px" },
+                Proto.teammatePanel(
+                  p.teammates.find((t) => t.id === ui.open),
+                  p,
+                  {
+                    onClose: () => {
+                      ui.open = null;
+                      openPivot(id);
+                    },
+                    rerender: () => openPivot(id),
+                    writable: true,
+                  },
+                ),
+              )
+            : null,
+        );
+        main.replaceChildren(header, deck, row);
+        renderSidebar();
+      }
+      function openThread(item) {
+        ui.selected = item.id;
+        mountChat(main, {
+          title: item.title,
+          project: item.project,
+          messages: [
+            { who: "user", text: "…" },
+            { who: "pivot", text: "An ordinary T3 chat." },
+          ],
+        });
+        renderSidebar();
+      }
+      function renderSidebar() {
+        const list = h("div", { class: "sb-list" });
+        for (const project of data.projects) {
+          list.append(h("div", { class: "sb-project" }, project.name));
+          for (const p of data.pivots.filter((p) => p.project === project.id)) {
+            list.append(
+              h(
+                "button",
+                {
+                  class: "sb-item " + (ui.selected === p.id ? "on" : ""),
+                  onclick: () => {
+                    ui.open = null;
+                    openPivot(p.id);
+                  },
+                },
+                h("span", { class: "grow" }, p.title),
+                p.decisions.length ? h("span", { class: "badge warn" }, p.decisions.length) : null,
+                h("span", { class: "badge" }, p.teammates.length + " ◆"),
+              ),
+            );
+          }
+          for (const c of data.chats.filter((c) => c.project === project.id))
+            list.append(
+              h(
+                "button",
+                {
+                  class: "sb-item " + (ui.selected === c.id ? "on" : ""),
+                  onclick: () => openThread(c),
+                },
+                h("span", { class: "grow" }, c.title),
+              ),
+            );
+        }
+        sb.replaceChildren(
+          h("div", { class: "sb-search" }, "Search"),
+          h(
+            "div",
+            { class: "sb-row-actions" },
+            h(
+              "button",
+              { class: "sb-new", onclick: () => Proto.toast("New chat or New Pivot") },
+              "+ New",
+            ),
+          ),
+          list,
+        );
+      }
+      document.addEventListener("keydown", (e) => {
+        if (
+          e.key.toLowerCase() === "f" &&
+          !ui.focus &&
+          ui.selected?.startsWith("p") &&
+          !/TEXTAREA|INPUT/.test(document.activeElement.tagName)
+        )
+          focusPivot(ui.selected);
+      });
+      renderSidebar();
+      main.replaceChildren(h("div", { class: "empty" }, "Open a Pivot from the sidebar"));
+    </script>
+  </body>
+</html>

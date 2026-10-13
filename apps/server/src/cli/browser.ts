@@ -68,7 +68,7 @@ const setupBaseDir = Effect.fn("browserSetup.baseDir")(function* (explicit: Opti
     .pipe(Effect.orElseSucceed(() => ""));
   const home = entry.trim().split(":")[5];
   const path = yield* Path.Path;
-  return home ? path.join(home, ".t3") : yield* resolveBaseDir(undefined);
+  return home ? path.join(home, ".t3-pivot") : yield* resolveBaseDir(undefined);
 });
 
 /** Whether apt has an installable candidate for `name`. */
@@ -114,9 +114,12 @@ const browserSetupCommand = Command.make("setup", { baseDir: baseDirFlag }).pipe
 
       const needsProfile = yield* PreviewBrowserHost.sandboxBlocked;
       const browser = yield* installedBrowser(yield* setupBaseDir(baseDir));
-      const missing = Option.isSome(browser)
-        ? yield* PreviewBrowserHost.missingLibraries(browser.value)
-        : [];
+      const missing = [
+        ...(Option.isSome(browser)
+          ? yield* PreviewBrowserHost.missingLibraries(browser.value)
+          : []),
+        ...((yield* PreviewBrowserHost.fontsMissing) ? ["fonts (fontconfig)"] : []),
+      ];
       const hasApt = yield* fs.exists("/usr/bin/apt-get").pipe(Effect.orElseSucceed(() => false));
 
       if (!needsProfile && missing.length === 0) {

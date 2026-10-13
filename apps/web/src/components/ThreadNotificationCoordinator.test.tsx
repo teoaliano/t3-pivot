@@ -108,6 +108,7 @@ vi.mock("../hooks/useSettings", () => ({
 vi.mock("../state/environments", () => ({
   useEnvironmentIds: () => ["env-1"],
 }));
+vi.mock("../state/pivot", () => ({ usePivotState: () => null }));
 vi.mock("../state/shell", () => ({
   environmentShell: { stateValueAtom: vi.fn() },
 }));

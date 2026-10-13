@@ -1,4 +1,6 @@
 import {
+  DESKTOP_BACKEND_DATABASE_NEWER_EXIT_CODE,
+  DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE,
   DesktopBackendBootstrap,
   type DesktopBackendBootstrap as DesktopBackendBootstrapValue,
   DesktopTelemetryControlMessage,
@@ -127,6 +129,8 @@ interface MakeInstanceInput {
   readonly onPreflightFailed?: (
     failure: DesktopBackendManager.PreflightFailure,
   ) => Effect.Effect<boolean>;
+  readonly onHomeInUse?: Effect.Effect<void>;
+  readonly onDatabaseNewer?: Effect.Effect<void>;
   readonly config?: DesktopBackendManager.DesktopBackendStartConfig;
   readonly configResolve?: Effect.Effect<
     DesktopBackendManager.DesktopBackendStartConfig,
@@ -187,6 +191,8 @@ function makeTestInstance(input: MakeInstanceInput) {
     ...(input.onReady ? { onReady: () => input.onReady! } : {}),
     ...(input.onShutdown ? { onShutdown: () => input.onShutdown! } : {}),
     ...(input.onPreflightFailed ? { onPreflightFailed: input.onPreflightFailed } : {}),
+    ...(input.onHomeInUse ? { onHomeInUse: () => input.onHomeInUse! } : {}),
+    ...(input.onDatabaseNewer ? { onDatabaseNewer: () => input.onDatabaseNewer! } : {}),
   });
 
   return instance.pipe(Effect.provide(layerServices));
@@ -1202,6 +1208,82 @@ describe("DesktopBackendManager", () => {
         assert.equal(yield* Queue.size(starts), 0);
         yield* TestClock.adjust(Duration.millis(1));
         assert.equal(yield* Queue.take(starts), 3);
+      }).pipe(Effect.provide(TestClock.layer())),
+    ),
+  );
+
+  it.effect("stops restarting and reports when another server owns the T3 home", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const reported = yield* Deferred.make<void>();
+        let startCount = 0;
+
+        const spawnerLayer = Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() =>
+            Effect.sync(() => {
+              startCount += 1;
+              return makeProcess({
+                exitCode: Effect.succeed(
+                  ChildProcessSpawner.ExitCode(DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE),
+                ),
+              });
+            }),
+          ),
+        );
+
+        const instance = yield* makeTestInstance({
+          spawnerLayer,
+          httpClientLayer: layerHttpClient(() => Effect.never),
+          onHomeInUse: Deferred.succeed(reported, undefined).pipe(Effect.asVoid),
+        });
+
+        yield* instance.start;
+        yield* Deferred.await(reported);
+        yield* TestClock.adjust(Duration.seconds(30));
+
+        const snapshot = yield* instance.snapshot;
+        assert.equal(startCount, 1);
+        assert.isFalse(snapshot.desiredRunning);
+        assert.isFalse(snapshot.restartScheduled);
+      }).pipe(Effect.provide(TestClock.layer())),
+    ),
+  );
+
+  it.effect("stops restarting and reports when a newer build migrated the database", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const reported = yield* Deferred.make<void>();
+        let startCount = 0;
+
+        const spawnerLayer = Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() =>
+            Effect.sync(() => {
+              startCount += 1;
+              return makeProcess({
+                exitCode: Effect.succeed(
+                  ChildProcessSpawner.ExitCode(DESKTOP_BACKEND_DATABASE_NEWER_EXIT_CODE),
+                ),
+              });
+            }),
+          ),
+        );
+
+        const instance = yield* makeTestInstance({
+          spawnerLayer,
+          httpClientLayer: layerHttpClient(() => Effect.never),
+          onDatabaseNewer: Deferred.succeed(reported, undefined).pipe(Effect.asVoid),
+        });
+
+        yield* instance.start;
+        yield* Deferred.await(reported);
+        yield* TestClock.adjust(Duration.seconds(30));
+
+        const snapshot = yield* instance.snapshot;
+        assert.equal(startCount, 1);
+        assert.isFalse(snapshot.desiredRunning);
+        assert.isFalse(snapshot.restartScheduled);
       }).pipe(Effect.provide(TestClock.layer())),
     ),
   );

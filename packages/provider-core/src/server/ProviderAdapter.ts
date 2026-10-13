@@ -50,6 +50,11 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
   cwd: Schema.NullOr(Schema.String),
   approvalPolicy: Schema.optional(Schema.Unknown),
   sandboxPolicy: Schema.optional(Schema.Unknown),
+  /**
+   * Files the agent may edit, when the provider cannot scope writes by directory.
+   * Set with a workspace-write sandbox; everything else stays read-only.
+   */
+  writableFiles: Schema.optional(Schema.Array(Schema.String)),
   reasoningEffort: Schema.optional(Schema.String),
 });
 export type ProviderAdapterV2RuntimePolicy = typeof ProviderAdapterV2RuntimePolicy.Type;

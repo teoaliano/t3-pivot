@@ -6,7 +6,7 @@ import * as NodePath from "node:path";
 
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { type CliShimTarget, renderCliShim } from "./DesktopCliShim.ts";
+import { type CliShimTarget, isOwnLauncher, renderCliShim } from "./DesktopCliShim.ts";
 
 const directories: Array<string> = [];
 afterEach(() => {
@@ -177,5 +177,22 @@ describe("renderCliShim", () => {
     // A Ctrl-C that ends the batch would leave the console switched.
     expect(ascii).not.toContain("chcp");
     expect(ascii.split("\r\n")).toContain("exit /b %t3_exit%");
+  });
+});
+
+describe("isOwnLauncher", () => {
+  it("claims launchers written before and after the T3 Pivot marker", () => {
+    const target: CliShimTarget = {
+      kind: "direct",
+      executable: "/app/T3 Pivot",
+      entry: "/app/bin.mjs",
+    };
+    expect(isOwnLauncher(renderCliShim({ target, shimPath: "/h/bin/t3", t3Home: "/h" }))).toBe(
+      true,
+    );
+    expect(
+      isOwnLauncher("#!/bin/sh\n# Written by T3 Code: runs the desktop app's bundled t3 CLI.\n"),
+    ).toBe(true);
+    expect(isOwnLauncher("#!/bin/sh\nexec /usr/local/bin/node t3.js\n")).toBe(false);
   });
 });

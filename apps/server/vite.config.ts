@@ -1,4 +1,8 @@
+// @effect-diagnostics nodeBuiltinImport:off - Build config runs before an Effect runtime exists.
 import "vite-plus/test/config";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 import { defineConfig, mergeConfig } from "vite-plus";
 
 import baseConfig from "../../vite.config.ts";
@@ -20,6 +24,18 @@ import {
 } from "../../scripts/lib/cli-external-packages.ts";
 
 export { shouldBundleCliDependency };
+
+// Every `src/pivot/text/*.md`, keyed by file name without extension, inlined into the
+// bundle as `__PIVOT_TEXTS__` because the bundle has no text directory beside it.
+const pivotTextDir = NodeURL.fileURLToPath(new URL("./src/pivot/text", import.meta.url));
+const pivotTexts = Object.fromEntries(
+  NodeFS.readdirSync(pivotTextDir)
+    .filter((file) => file.endsWith(".md"))
+    .map((file) => [
+      file.slice(0, -".md".length),
+      NodeFS.readFileSync(NodePath.join(pivotTextDir, file), "utf8"),
+    ]),
+);
 
 const repoEnv = loadRepoEnv();
 const cliBuildChannel = /^[^-+]+-(?:nightly|preview)\./.test(packageJson.version)
@@ -111,6 +127,7 @@ export default mergeConfig(
         js: "#!/usr/bin/env node\n",
       },
       define: {
+        __PIVOT_TEXTS__: JSON.stringify(pivotTexts),
         __T3CODE_BUILD_CHANNEL__: JSON.stringify(cliBuildChannel),
         __T3CODE_BUILD_RELAY_URL__: JSON.stringify(repoEnv.T3CODE_RELAY_URL?.trim() ?? ""),
         __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(
