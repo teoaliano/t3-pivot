@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import {
   checkStartFailureMemory,
@@ -113,10 +114,10 @@ describe("checkStartFailureMemory", () => {
   it.effect("skips quietly off Linux without reading anything", () =>
     Effect.gen(function* () {
       const reads: string[] = [];
-      const result = yield* checkStartFailureMemory("darwin", (path) => {
+      const result = yield* checkStartFailureMemory((path) => {
         reads.push(path);
         return undefined;
-      });
+      }).pipe(Effect.provideService(HostProcess.Platform, "darwin"));
       expect(result).toBeUndefined();
       expect(reads).toEqual([]);
     }),

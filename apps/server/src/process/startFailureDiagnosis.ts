@@ -4,6 +4,7 @@ import * as NodeFS from "node:fs";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
 const CGROUP_ROOT = "/sys/fs/cgroup";
 const AGENT_SLICE = "app-t3code-agents.slice";
@@ -149,10 +150,11 @@ export function formatStartFailureMemory(diagnosis: StartFailureMemoryDiagnosis)
 }
 
 /** Skips quietly (`undefined`) off Linux. */
-export const checkStartFailureMemory = (
-  platform: NodeJS.Platform = process.platform,
-  read: ReadText = readTextFromDisk,
-) => Effect.sync(() => (platform === "linux" ? diagnoseStartFailureMemory({ read }) : undefined));
+export const checkStartFailureMemory = (read: ReadText = readTextFromDisk) =>
+  Effect.gen(function* () {
+    const platform = yield* HostProcess.Platform;
+    return platform === "linux" ? diagnoseStartFailureMemory({ read }) : undefined;
+  });
 
 interface ErrorDetail {
   readonly name?: string;
