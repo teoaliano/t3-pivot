@@ -9,6 +9,7 @@ import {
   formatStartFailureMemory,
   parseMemoryPressure,
   type ReadText,
+  userFacingStartFailureMemory,
 } from "./startFailureDiagnosis.ts";
 
 const SELF = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-t3code.service\n";
@@ -53,6 +54,14 @@ describe("diagnoseStartFailureMemory", () => {
     expect(formatStartFailureMemory(diagnosis)).toContain("at its memory limit (9.3 GB of 9.4 GB)");
   });
 
+  it("measures against memory.high, where the kernel starts throttling", () => {
+    const diagnosis = diagnoseStartFailureMemory({
+      read: slice(9.5e9, "11800000000", { [`${SLICE}/memory.high`]: "9400000000\n" }),
+    });
+    expect(diagnosis).toMatchObject({ kind: "slice", status: "over" });
+    expect(formatStartFailureMemory(diagnosis)).toContain("(9.5 GB of 9.4 GB)");
+  });
+
   it("handles a slice with no limit", () => {
     const diagnosis = diagnoseStartFailureMemory({ read: slice(2e9, "max") });
     expect(diagnosis).toMatchObject({ kind: "slice", status: "unlimited" });
@@ -75,6 +84,18 @@ describe("diagnoseStartFailureMemory", () => {
       read: fakeFiles({ "/proc/self/cgroup": SELF, [`${SLICE}/memory.current`]: "100" }),
     });
     expect(noMax).toMatchObject({ kind: "slice", status: "unlimited" });
+  });
+});
+
+describe("userFacingStartFailureMemory", () => {
+  it("tells the user only when memory plausibly caused the failure", () => {
+    const over = diagnoseStartFailureMemory({ read: slice(9.8e9, "9400000000") });
+    expect(userFacingStartFailureMemory(over)).toContain("over its memory limit");
+    const within = diagnoseStartFailureMemory({ read: slice(5e9, "9400000000") });
+    expect(userFacingStartFailureMemory(within)).toBeUndefined();
+    const missing = diagnoseStartFailureMemory({ read: fakeFiles({}) });
+    expect(userFacingStartFailureMemory(missing)).toBeUndefined();
+    expect(userFacingStartFailureMemory(undefined)).toBeUndefined();
   });
 });
 
@@ -114,5 +135,12 @@ describe("describeCause", () => {
     });
     expect(details[0]?.stack).toContain("session failed to open");
     expect(details[1]).toEqual({ message: "boom" });
+  });
+
+  it("survives a failure that cannot be serialized and names interrupts", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(describeCause(Cause.fail(circular))[0]?.message).toBe("[object Object]");
+    expect(describeCause(Cause.interrupt())).toEqual([{ message: "Interrupted" }]);
   });
 });

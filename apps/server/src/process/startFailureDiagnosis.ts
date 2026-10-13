@@ -13,7 +13,7 @@ const NEAR_LIMIT_SHARE = 0.95;
 
 export interface AgentSliceMemory {
   readonly currentBytes: number;
-  /** `undefined` when the slice has no limit (`memory.max` is `max`). */
+  /** `memory.high` when set, else `memory.max`; `undefined` when the slice has no limit. */
   readonly maxBytes: number | undefined;
 }
 
@@ -67,8 +67,8 @@ function agentSliceDirs(selfCgroup: string | undefined): ReadonlyArray<string> {
   if (path === undefined) return [];
   const appSliceEnd = path.indexOf("/app.slice");
   if (appSliceEnd < 0) return [];
-  const prefix = `${CGROUP_ROOT}${path.slice(0, appSliceEnd)}/app.slice`;
-  return [`${prefix}/${AGENT_SLICE}`, `${prefix}/app-t3code.slice/${AGENT_SLICE}`];
+  // systemd nests dashed slice names: app-t3code-agents.slice lives in app-t3code.slice.
+  return [`${CGROUP_ROOT}${path.slice(0, appSliceEnd)}/app.slice/app-t3code.slice/${AGENT_SLICE}`];
 }
 
 /**
@@ -82,17 +82,25 @@ export function diagnoseStartFailureMemory(input: {
   for (const dir of agentSliceDirs(input.read("/proc/self/cgroup"))) {
     const currentBytes = parseBytes(input.read(`${dir}/memory.current`));
     if (currentBytes === undefined) continue;
-    const maxText = input.read(`${dir}/memory.max`)?.trim();
-    const maxBytes = parseBytes(maxText);
+    const maxBytes = parseBytes(input.read(`${dir}/memory.max`));
+    const highBytes = parseBytes(input.read(`${dir}/memory.high`));
+    // memory.max is enforced by reclaim and OOM kills, so use is rarely above it. Past
+    // memory.high the kernel throttles every agent, which is what stalls a start.
+    const limit = highBytes ?? maxBytes;
     const status =
-      maxBytes === undefined
+      limit === undefined
         ? "unlimited"
-        : currentBytes > maxBytes
+        : currentBytes >= limit
           ? "over"
-          : currentBytes >= maxBytes * NEAR_LIMIT_SHARE
+          : currentBytes >= limit * NEAR_LIMIT_SHARE
             ? "near"
             : "within";
-    return { kind: "slice", memory: { currentBytes, maxBytes }, status, pressure };
+    return {
+      kind: "slice",
+      memory: { currentBytes, maxBytes: limit },
+      status,
+      pressure,
+    };
   }
   return { kind: "slice-not-found", pressure };
 }
@@ -104,7 +112,19 @@ const formatPressure = (pressure: MemoryPressure | undefined) =>
     ? undefined
     : `system memory pressure is ${pressure.someAvg10}% (some, 10 s average)`;
 
-/** The sentence appended to the error the user sees. */
+/**
+ * The sentence for the error the user sees, only when memory plausibly caused the
+ * failure. Every other reading goes to the log alone.
+ */
+export function userFacingStartFailureMemory(
+  diagnosis: StartFailureMemoryDiagnosis | undefined,
+): string | undefined {
+  if (diagnosis?.kind !== "slice") return undefined;
+  if (diagnosis.status !== "over" && diagnosis.status !== "near") return undefined;
+  return formatStartFailureMemory(diagnosis);
+}
+
+/** The memory reading in words, for the log. */
 export function formatStartFailureMemory(diagnosis: StartFailureMemoryDiagnosis): string {
   const pressure = formatPressure(diagnosis.pressure);
   if (diagnosis.kind === "slice-not-found") {
@@ -142,10 +162,18 @@ interface ErrorDetail {
   readonly cause?: ErrorDetail;
 }
 
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
 function describeError(error: unknown, depth = 0): ErrorDetail {
   if (typeof error !== "object" || error === null) return { message: String(error) };
   const record = error as Record<string, unknown>;
-  const message = typeof record.message === "string" ? record.message : JSON.stringify(error);
+  const message = typeof record.message === "string" ? record.message : safeStringify(error);
   return {
     ...(typeof record.name === "string" ? { name: record.name } : {}),
     message,
@@ -167,7 +195,7 @@ export function describeCause(cause: Cause.Cause<unknown>): ReadonlyArray<ErrorD
       ? [describeError(reason.error)]
       : Cause.isDieReason(reason)
         ? [describeError(reason.defect)]
-        : [],
+        : [{ message: "Interrupted" }],
   );
 }
 

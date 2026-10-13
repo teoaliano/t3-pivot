@@ -22,6 +22,7 @@ import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 
+import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
@@ -29,6 +30,7 @@ import {
   StartFailureMemoryCheck,
   describeCause,
   formatStartFailureMemory,
+  userFacingStartFailureMemory,
 } from "../process/startFailureDiagnosis.ts";
 import * as EventSink from "./EventSink.ts";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
@@ -574,8 +576,13 @@ export const layer: Layer.Layer<
             runId,
             signal: failed.signal,
             failures: describeCause(Cause.fail(failed.error)),
-            ...(memory === undefined ? {} : { memory }),
+            ...(memory === undefined ? {} : { memory: formatStartFailureMemory(memory) }),
           });
+          // An agent the kernel killed for memory is the plainest answer of all.
+          const oomKilled = yield* (yield* AgentScope).oomKilled(projection.thread.id);
+          const memoryReason = oomKilled
+            ? "Couldn't start: the agent was killed because memory ran out. Stop idle dev servers or teammates and retry."
+            : userFacingStartFailureMemory(memory);
           yield* settleRunBeforeStart({
             signal: failed.signal,
             status: "failed",
@@ -587,8 +594,7 @@ export const layer: Layer.Layer<
               title: failed.title,
               failure: makeProviderFailure({
                 cause: failed.error,
-                message:
-                  memory === undefined ? reason : `${reason}\n${formatStartFailureMemory(memory)}`,
+                message: memoryReason === undefined ? reason : `${reason}\n${memoryReason}`,
                 class: "provider_error",
               }),
             },
