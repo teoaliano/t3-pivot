@@ -168,9 +168,11 @@ function Root({
         // The first row's last action sits in the banner's corner: its outer corner follows the
         // banner's curve (2xl minus the 1 spacing inset), and floating banners curve below too.
         // Actions may also arrive grouped in one wrapper element (usage-limit recovery).
-        "[&>[data-composer-banner-row]:first-child>[data-slot=composer-banner-actions]>[data-slot=button]:last-child]:rounded-se-xl",
-        "[&>[data-composer-banner-row]:first-child>[data-slot=composer-banner-actions]>:last-child>[data-slot=button]:last-of-type]:rounded-se-xl",
-        "[&>:first-child>[data-composer-banner-row]:first-child>[data-slot=composer-banner-actions]>[data-slot=button]:last-child]:rounded-se-xl",
+        // Approval rows center their actions vertically, so they are not in the corner and keep
+        // the control's own radius.
+        "[&>[data-composer-banner-row]:first-child:not([data-composer-banner-layout=approval])>[data-slot=composer-banner-actions]>[data-slot=button]:last-child]:rounded-se-xl",
+        "[&>[data-composer-banner-row]:first-child:not([data-composer-banner-layout=approval])>[data-slot=composer-banner-actions]>:last-child>[data-slot=button]:last-of-type]:rounded-se-xl",
+        "[&>:first-child>[data-composer-banner-row]:first-child:not([data-composer-banner-layout=approval])>[data-slot=composer-banner-actions]>[data-slot=button]:last-child]:rounded-se-xl",
         placement === "floating" && [
           "[&>[data-composer-banner-row]:only-child>[data-slot=composer-banner-actions]>[data-slot=button]:last-child]:rounded-ee-xl",
           "[&>[data-composer-banner-row]:only-child>[data-slot=composer-banner-actions]>:last-child>[data-slot=button]:last-of-type]:rounded-ee-xl",
