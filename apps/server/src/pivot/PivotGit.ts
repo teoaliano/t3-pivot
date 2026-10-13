@@ -50,6 +50,8 @@ export class PivotGit extends Context.Service<
     ) => Effect.Effect<string | null, PivotGitError>;
     /** Whether the checkout has no uncommitted or untracked changes. */
     readonly isClean: (cwd: string) => Effect.Effect<boolean, PivotGitError>;
+    /** The uncommitted or untracked changes in the checkout, as `git status` shows them. */
+    readonly uncommitted: (cwd: string) => Effect.Effect<ReadonlyArray<string>, PivotGitError>;
     /**
      * Whether a teammate's work has landed, so its worktree can go: reachable from a
      * remote-tracking ref, or its PR merged with a head containing the local work, or
@@ -131,8 +133,12 @@ export const make = Effect.gen(function* () {
       Effect.map((output) => (output.code === 0 ? output.stdout.trim() : null)),
     );
 
-  const isClean = (cwd: string) =>
-    git(cwd, ["status", "--porcelain"]).pipe(Effect.map((out) => out.length === 0));
+  const uncommitted = (cwd: string) =>
+    git(cwd, ["status", "--porcelain"]).pipe(
+      Effect.map((out) => out.split("\n").filter((line) => line.length > 0)),
+    );
+
+  const isClean = (cwd: string) => uncommitted(cwd).pipe(Effect.map((lines) => lines.length === 0));
 
   const landed = Effect.fn("PivotGit.landed")(
     function* (input: {
@@ -277,6 +283,7 @@ export const make = Effect.gen(function* () {
       ),
     headCommit: (cwd) => git(cwd, ["rev-parse", "HEAD"]),
     isClean,
+    uncommitted,
     landed,
     fastForward,
     remoteBranchCommit: (cwd, branch) =>

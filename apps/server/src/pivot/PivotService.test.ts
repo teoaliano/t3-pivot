@@ -7,8 +7,9 @@ import * as Effect from "effect/Effect";
 
 import * as ServerConfig from "../config.ts";
 import * as PivotService from "./PivotService.ts";
-import { modelSelection, projectId, setup } from "./PivotService.testkit.ts";
+import { attachWorktree, modelSelection, projectId, setup, sh } from "./PivotService.testkit.ts";
 import * as PivotStore from "./PivotStore.ts";
+import * as FakeThreads from "./PivotThreads.testkit.ts";
 import { renderTeammateModels } from "./pivotTeammateModels.ts";
 import { loadPivotText } from "./pivotTexts.ts";
 
@@ -163,4 +164,89 @@ describe("PivotService.decisionLog", () => {
       assert.include(notAPivot, "not a Pivot");
     }).pipe(Effect.provide(layer));
   });
+});
+
+/** A ship the Pivot dispatched, on a real worktree of the project's repository. */
+const dispatchShip = (fake: FakeThreads.FakeV2, repo: string) =>
+  Effect.gen(function* () {
+    const pivots = yield* PivotService.PivotService;
+    const pivot = (yield* pivots.create({ projectId, modelSelection, takeover: false })).threadId;
+    const dispatched = yield* pivots.dispatchTeammate(pivot, {
+      title: "Fix the login bug",
+      kind: "ship",
+      intent: "Make the login button work on Safari.",
+      spec: "Reproduce, fix, test.",
+    });
+    const worktree = attachWorktree(fake, repo, dispatched.threadId, dispatched.branch);
+    return { teammate: dispatched.threadId, branch: dispatched.branch, worktree };
+  });
+
+/** Writes a file in the worktree and commits it. */
+const commitFile = (worktree: string, name: string) => {
+  NodeFS.writeFileSync(NodePath.join(worktree, name), "change\n");
+  sh(worktree, `git add -A && git commit -q -m "${name}"`);
+};
+
+describe("PivotService.reportStatus done", () => {
+  it.effect("refuses done for a ship with uncommitted work, and names it", () => {
+    const { fake, workspaceRoot, layer } = setup();
+    return Effect.gen(function* () {
+      const pivots = yield* PivotService.PivotService;
+      const ship = yield* dispatchShip(fake, workspaceRoot);
+      NodeFS.writeFileSync(NodePath.join(ship.worktree, "login.ts"), "export {};\n");
+
+      const reason = yield* refusal(
+        pivots.reportStatus(ship.teammate, { status: "done", summary: "Fixed" }),
+      );
+      assert.include(reason, "login.ts");
+      assert.include(reason, "Commit it");
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("accepts done for a ship whose work is committed", () => {
+    const { fake, workspaceRoot, layer } = setup();
+    return Effect.gen(function* () {
+      const pivots = yield* PivotService.PivotService;
+      const ship = yield* dispatchShip(fake, workspaceRoot);
+      commitFile(ship.worktree, "login.ts");
+
+      const reported = yield* pivots.reportStatus(ship.teammate, {
+        status: "done",
+        summary: "Fixed",
+      });
+      assert.strictEqual(reported.status, "done");
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect(
+    "refuses done for a ship on a project with a remote while its commit is unpushed",
+    () => {
+      const { fake, workspaceRoot, layer } = setup({ remote: true });
+      return Effect.gen(function* () {
+        const pivots = yield* PivotService.PivotService;
+        const ship = yield* dispatchShip(fake, workspaceRoot);
+        fake.threads.get(ship.teammate)!.shell = {
+          linkedPullRequest: {
+            projectId,
+            repository: "acme/app",
+            number: 1,
+            url: "https://github.com/acme/app/pull/1",
+          },
+        };
+        commitFile(ship.worktree, "login.ts");
+
+        const reason = yield* refusal(
+          pivots.reportStatus(ship.teammate, { status: "done", summary: "Fixed" }),
+        );
+        assert.include(reason, "is not pushed");
+
+        sh(ship.worktree, `git push -q -u origin ${ship.branch}`);
+        const reported = yield* pivots.reportStatus(ship.teammate, {
+          status: "done",
+          summary: "Fixed",
+        });
+        assert.strictEqual(reported.status, "done");
+      }).pipe(Effect.provide(layer));
+    },
+  );
 });

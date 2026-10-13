@@ -9,7 +9,13 @@ import { ThreadToolRestrictions } from "../orchestration-v2/ThreadToolRestrictio
 import * as PivotCarryOn from "./PivotCarryOn.ts";
 import * as PivotToolRestrictions from "./PivotToolRestrictions.ts";
 import * as PivotService from "./PivotService.ts";
-import { harness, modelSelection, projectId, setup } from "./PivotService.testkit.ts";
+import {
+  attachWorktree,
+  harness,
+  modelSelection,
+  projectId,
+  setup,
+} from "./PivotService.testkit.ts";
 import * as PivotStore from "./PivotStore.ts";
 import * as PivotSupervisor from "./PivotSupervisor.ts";
 import type { FakeV2 } from "./PivotThreads.testkit.ts";
@@ -38,12 +44,15 @@ const running = (fake: FakeV2, title = "Fix the login bug") =>
     const pivot =
       existing?.threadId ??
       (yield* pivots.create({ projectId, modelSelection, takeover: false })).threadId;
-    const teammate = (yield* pivots.dispatchTeammate(pivot, {
+    const dispatched = yield* pivots.dispatchTeammate(pivot, {
       title,
       kind: "ship",
       intent: "Make the login button work on Safari.",
       spec: "Reproduce, fix, test.",
-    })).threadId;
+    });
+    const teammate = dispatched.threadId;
+    // A done ship's worktree is checked before its report is accepted.
+    attachWorktree(fake, fake.projects.get(projectId)!.workspaceRoot, teammate, dispatched.branch);
     yield* shell(fake, teammate, { status: "running", activeRunId: RunId.make(`run-${teammate}`) });
     yield* tick;
     return { pivot, teammate };

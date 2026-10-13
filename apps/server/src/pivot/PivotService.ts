@@ -1186,6 +1186,15 @@ export const make = Effect.gen(function* () {
       const command = "report_status";
       const teammate = yield* liveTeammate(command, caller);
       const shell = yield* threads.shell(teammate.threadId);
+      if (input.status === "done" && teammate.kind === "ship") {
+        const unsaved = yield* git.uncommitted(teammate.worktreePath);
+        if (unsaved.length > 0) {
+          return yield* refuse(
+            command,
+            `\`done\` needs all work committed. Uncommitted: ${unsaved.join(", ")}. Commit it, then report again.`,
+          );
+        }
+      }
       if (
         input.status === "done" &&
         teammate.kind === "ship" &&

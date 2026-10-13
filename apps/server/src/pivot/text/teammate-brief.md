@@ -53,5 +53,6 @@ Before anything else, check that your working directory and `git rev-parse --sho
 5. A scout records its findings with `record_scout_report`. The definition of done says when.
 6. Edit the project's `AGENTS.md` or `CLAUDE.md` only to correct text that is wrong, including text your own change made wrong, or when the spec asks you to. Never add knowledge because it seems missing; every line there is read by every agent on the project.
 7. Messages from the Pivot arrive in this chat, marked as the Pivot's. They carry more of the user's intent or the Pivot's instructions; follow them. A message the user types here directly is authoritative too.
+8. A ship is done only when all its work is committed on its branch and, when the project has a remote, pushed and linked to its PR. Uncommitted or unpushed work is not done. A scout is done when its report is recorded and its worktree holds no changes it needs.
 
 {{definitionOfDone}}
