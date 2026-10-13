@@ -6,7 +6,8 @@
 //   ios-release  upload the iPhone app for main's release to TestFlight (release Mac)
 //   nightly      publish whatever main has not released yet, desktop and iPhone (release Mac)
 //   nightly-install  schedule `nightly` with launchd, from the release Mac's clone
-//   host-update  keep a server host's checkout level with upstream and running it
+//   host-update  keep a server host's checkout level with upstream and running it,
+//                settling conflicts the owner rules leave open with an agent
 // All commands act as the fork owner's GitHub account, whatever gh's active
 // account is.
 
@@ -19,6 +20,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import type { PlatformError } from "effect/PlatformError";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -598,17 +601,18 @@ export class PivotConflictError extends Schema.TaggedError<PivotConflictError>()
   {
     tag: Schema.String,
     files: Schema.Array(Schema.String),
+    reason: Schema.String,
   },
 ) {
   override get message(): string {
-    return `upstream ${this.tag} conflicts with main in ${this.files.join(", ")}. The merge was aborted and the deployed build is unchanged.`;
+    return `upstream ${this.tag} conflicts with main in ${this.files.join(", ")}: ${this.reason}. The merge was aborted and the deployed build is unchanged.`;
   }
 }
 
-// Who settles a conflict. Pivot-owned files exist only in the fork, so a conflict
+// Who settles a conflict first. Pivot-owned files exist only in the fork, so a conflict
 // there keeps main's side. `.repos/` is vendored upstream code the fork never edits
-// (see AGENTS.md), so a conflict there takes upstream's side. Any other conflict
-// is a judgment call, and the merge aborts instead of guessing.
+// (see AGENTS.md), so a conflict there takes upstream's side. Any other conflict goes
+// to the conflict agent below.
 const PIVOT_OWNED_PATHS = [
   "scripts/pivot.ts",
   "scripts/pivot-release-plan.ts",
@@ -622,48 +626,176 @@ const UPSTREAM_OWNED_PATHS = [".repos/"];
 const owns = (paths: ReadonlyArray<string>, file: string) =>
   paths.some((path) => (path.endsWith("/") ? file.startsWith(path) : file === path));
 
+// The agent that settles what the owner rules leave open. Its work is capped per
+// merge by files and time, and past either cap the merge aborts.
+const CONFLICT_AGENT_MODEL = "claude-haiku-5-5";
+const CONFLICT_AGENT_EFFORT = "medium";
+const CONFLICT_AGENT_MAX_FILES = 10;
+const CONFLICT_AGENT_TIMEOUT = "10 minutes";
+// File tools only, no shell: the agent cannot run git, commit or push.
+const CONFLICT_AGENT_TOOLS = "Read,Edit,Write,Grep,Glob";
+const CONFLICT_MARKER = /^(<{7}|={7}|>{7})(?=\s|$)/mu;
+
+export interface AgentResolution {
+  readonly file: string;
+  readonly reason: string;
+}
+
+export type ConflictResolver = (
+  files: ReadonlyArray<string>,
+  cwd?: string,
+) => Effect.Effect<
+  ReadonlyArray<AgentResolution>,
+  PivotCommandError | PlatformError,
+  ChildProcessSpawner.ChildProcessSpawner
+>;
+
+const conflictPrompt = (files: ReadonlyArray<string>) =>
+  [
+    "A git merge in this directory has conflicts in the files listed below.",
+    "For each file, read it and edit it to keep the intent of both sides, with every",
+    "conflict marker (<<<<<<<, =======, >>>>>>>) removed. If you cannot resolve a file with",
+    "confidence, leave its markers in place and say so in its reason.",
+    "Edit only these files. Do not run git, commit, or change anything else.",
+    "When you are done, reply with one line per file in the form `path | one-line reason`.",
+    "",
+    "Files:",
+    ...files.map((file) => `- ${file}`),
+  ].join("\n");
+
 /**
- * Merges upstream `tag` into the checked-out branch in `cwd`. A conflict is settled
- * by the file's owner (see PIVOT_OWNED_PATHS and UPSTREAM_OWNED_PATHS). If any
- * conflicted file has no owner, or the settling fails, the merge is aborted and
- * this fails, leaving the checkout as it was.
+ * Settles `files` in `cwd` with Claude Haiku 5.5 at medium effort, run headless from
+ * the host's service. It authenticates with the host user's Claude Code login, so the
+ * unit needs that login (or ANTHROPIC_API_KEY) in its environment. Each reply line that
+ * names one of `files` becomes a resolution.
+ */
+export const resolveWithAgent: ConflictResolver = Effect.fn("pivot.resolveWithAgent")(function* (
+  files: ReadonlyArray<string>,
+  cwd?: string,
+) {
+  const reply = yield* run(
+    "claude",
+    [
+      "-p",
+      conflictPrompt(files),
+      ...["--model", CONFLICT_AGENT_MODEL, "--effort", CONFLICT_AGENT_EFFORT],
+      ...["--tools", CONFLICT_AGENT_TOOLS, "--allowedTools", CONFLICT_AGENT_TOOLS],
+      ...["--permission-mode", "dontAsk", "--permission-prompts", "none"],
+      "--no-session-persistence",
+    ],
+    {},
+    cwd,
+  );
+  return lines(reply).flatMap((line) => {
+    const match = /^(.+?) \| (.+)$/u.exec(line.trim());
+    const file = match?.[1];
+    const reason = match?.[2];
+    return file !== undefined && reason !== undefined && files.includes(file)
+      ? [{ file, reason }]
+      : [];
+  });
+});
+
+/**
+ * Merges upstream `tag` into the checked-out branch in `cwd`. Conflicts go to their
+ * owner first (see PIVOT_OWNED_PATHS and UPSTREAM_OWNED_PATHS), then the rest go to
+ * `resolve`. The merge commits only once every conflicted file is clean, so any
+ * failure before that aborts it and leaves the checkout as it was. Returns the files
+ * `resolve` settled, each with its reason; empty when no conflict needed it.
  */
 export const mergeUpstreamTag = Effect.fn("pivot.mergeUpstreamTag")(function* (
   tag: string,
   cwd?: string,
+  resolve: ConflictResolver = resolveWithAgent,
 ) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const git = (...args: ReadonlyArray<string>) => run("git", args, {}, cwd);
   const message = `chore: merge upstream ${tag}`;
   const merged = yield* Effect.result(git("merge", "--no-ff", "--no-verify", "-m", message, tag));
-  if (Result.isSuccess(merged)) return;
+  if (Result.isSuccess(merged)) return [];
 
   const conflicted = lines(yield* git("diff", "--name-only", "--diff-filter=U"));
   if (conflicted.length === 0) return yield* merged.failure;
 
   const abort = git("merge", "--abort");
-  const conflict = new PivotConflictError({ tag, files: conflicted });
-  const unowned = conflicted.some(
+  const fail = (reason: string) =>
+    abort.pipe(Effect.andThen(new PivotConflictError({ tag, files: conflicted, reason })));
+  const unowned = conflicted.filter(
     (file) => !owns(PIVOT_OWNED_PATHS, file) && !owns(UPSTREAM_OWNED_PATHS, file),
   );
-  if (unowned) {
-    yield* abort;
-    return yield* conflict;
-  }
 
-  yield* Effect.gen(function* () {
-    for (const file of conflicted) {
-      const side = owns(PIVOT_OWNED_PATHS, file) ? "--ours" : "--theirs";
-      yield* git("checkout", side, "--", file);
+  return yield* Effect.gen(function* () {
+    for (const file of conflicted.filter((file) => !unowned.includes(file))) {
+      yield* git("checkout", owns(PIVOT_OWNED_PATHS, file) ? "--ours" : "--theirs", "--", file);
       yield* git("add", "--", file);
     }
-    yield* git("commit", "--no-verify", "-m", message);
-  }).pipe(Effect.catchTags({ PivotCommandError: () => abort.pipe(Effect.andThen(conflict)) }));
+
+    let resolutions: ReadonlyArray<AgentResolution> = [];
+    if (unowned.length > 0) {
+      if (unowned.length > CONFLICT_AGENT_MAX_FILES) {
+        return yield* fail(
+          `${unowned.length} files need the agent, over its cap of ${CONFLICT_AGENT_MAX_FILES}.`,
+        );
+      }
+      const before = lines(yield* git("status", "--porcelain", "--untracked-files=all"));
+      const reply = yield* resolve(unowned, cwd).pipe(
+        Effect.timeoutOption(CONFLICT_AGENT_TIMEOUT),
+        Effect.matchEffect({
+          onFailure: (error) => fail(`the agent failed: ${error.message}`),
+          onSuccess: Option.match({
+            onNone: () => fail(`the agent did not finish within ${CONFLICT_AGENT_TIMEOUT}.`),
+            onSome: Effect.succeed,
+          }),
+        }),
+      );
+
+      const after = lines(yield* git("status", "--porcelain", "--untracked-files=all"));
+      const stray = after.filter(
+        (line) => !before.includes(line) && !unowned.includes(line.slice(3)),
+      );
+      if (stray.length > 0) {
+        // Abort does not remove files the agent created, so remove those first.
+        const created = stray.filter((line) => line.startsWith("?? ")).map((line) => line.slice(3));
+        if (created.length > 0) yield* git("clean", "-f", "--", ...created);
+        return yield* fail(
+          `the agent changed files it was not given: ${stray.map((line) => line.slice(3)).join(", ")}.`,
+        );
+      }
+      for (const file of unowned) {
+        const absolute = path.join(cwd ?? "", file);
+        if (!(yield* fileSystem.exists(absolute))) continue;
+        if (CONFLICT_MARKER.test(yield* fileSystem.readFileString(absolute))) {
+          return yield* fail(`${file} still has conflict markers after the agent.`);
+        }
+      }
+
+      yield* git("add", "--", ...unowned);
+      resolutions = unowned.map((file) => ({
+        file,
+        reason: reply.find((resolution) => resolution.file === file)?.reason ?? "no reason given",
+      }));
+    }
+
+    const body = resolutions.map((resolution) => `${resolution.file}: ${resolution.reason}`);
+    yield* git(
+      "commit",
+      "--no-verify",
+      "-m",
+      message,
+      ...(body.length > 0 ? ["-m", body.join("\n")] : []),
+    );
+    for (const resolution of resolutions) {
+      yield* Console.log(`agent resolved ${resolution.file} in ${tag}: ${resolution.reason}`);
+    }
+    return resolutions;
+  }).pipe(Effect.catchTags({ PivotCommandError: (error) => fail(error.message) }));
 });
 
 // Runs from the host's dedicated checkout, never a working one. It fast-forwards to
 // origin/main, then merges the newest upstream nightly, settling conflicts by file
-// owner. A conflict neither owner settles fails the run before any build, and a
-// build that fails leaves the host on its deployed build.
+// owner and then by the conflict agent. A conflict the agent cannot settle fails the
+// run before any build, and a build that fails leaves the host on its deployed build.
 const hostUpdate = Effect.gen(function* () {
   const env = yield* forkAccountEnv;
 
@@ -672,9 +804,10 @@ const hostUpdate = Effect.gen(function* () {
   yield* run("git", ["merge", "--ff-only", "--quiet", `${FORK_REMOTE}/main`]);
 
   let mergedTag: string | undefined;
+  let resolved: ReadonlyArray<AgentResolution> = [];
   const next = yield* nextUpstreamTag("HEAD");
   if (Option.isSome(next)) {
-    yield* mergeUpstreamTag(next.value);
+    resolved = yield* mergeUpstreamTag(next.value);
     mergedTag = next.value;
   }
 
@@ -688,7 +821,12 @@ const hostUpdate = Effect.gen(function* () {
   }
 
   if (!(yield* succeeds(buildServer))) {
-    if (mergedTag !== undefined) yield* openSyncPr(mergedTag, env);
+    if (resolved.length > 0) {
+      const files = resolved.map((resolution) => resolution.file).join(", ");
+      yield* Console.log(`build failed with agent-resolved files ${files}; reverting the merge.`);
+    } else if (mergedTag !== undefined) {
+      yield* openSyncPr(mergedTag, env);
+    }
     // The failed build replaced dist, which the running server still reads.
     if (Option.isSome(deployed)) {
       yield* run("git", ["reset", "--hard", "--quiet", deployed.value]);
