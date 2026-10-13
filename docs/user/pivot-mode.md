@@ -26,7 +26,8 @@ project itself, and nothing merges without your approval. In a project with a re
 teammate's work counts as done only once its pull request exists with its latest commit pushed.
 The Pivot gives you the full PR link. When you approve, it merges the PR on GitHub and GitLab,
 pinned to the commit it checked. Red checks block the merge unless you waive a specific check by
-name. On other forges you merge by hand. In a project with no remote, a ready branch lands on
+name. When several PRs are open, the approval shows the order they merge in, and the Pivot
+refuses to merge a PR before the work it builds on. On other forges you merge by hand. In a project with no remote, a ready branch lands on
 your default branch by fast-forward.
 
 Calls that need you appear above the Pivot's composer until you answer. A merge, a landing or
