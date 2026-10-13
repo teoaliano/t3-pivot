@@ -63,45 +63,24 @@ const writeAccess = Layer.effect(
     const store = yield* PivotStore.PivotStore;
     const projects = yield* ProjectStore.ProjectStoreV2;
     const path = yield* Path.Path;
-    return {
-      scopeFor: (thread) =>
-        store.getPivot(thread.id).pipe(
-          Effect.flatMap((pivot) => {
-            if (pivot !== null) {
-              const home = thread.worktreePath;
-              if (home === null)
-                return Effect.fail(new PivotHomeMissingError({ threadId: thread.id }));
-              return Effect.succeed({
-                writableRoots: [home],
-                writableFiles: [path.join(home, "preferences.md")],
-              });
-            }
-            const parentId = thread.lineage.parentThreadId;
-            if (thread.lineage.relationshipToParent !== "subagent" || parentId === null) {
-              return Effect.succeed(null);
-            }
-            return store.getPivot(parentId).pipe(
-              Effect.flatMap((parent) => {
-                if (parent === null) return Effect.succeed(null);
-                return projects.get(thread.projectId).pipe(
-                  Effect.flatMap(
-                    Option.match({
-                      onNone: () =>
-                        Effect.fail(new PivotSubagentProjectMissingError({ threadId: thread.id })),
-                      onSome: (project) =>
-                        Effect.succeed({
-                          writableRoots: [],
-                          writableFiles: [],
-                          cwd: project.workspaceRoot,
-                        }),
-                    }),
-                  ),
-                );
-              }),
-            );
-          }),
-        ),
-    };
+    const scopeFor = Effect.fn("PivotToolRestrictions.scopeFor")(function* (thread) {
+      const pivot = yield* store.getPivot(thread.id);
+      if (pivot !== null) {
+        const home = thread.worktreePath;
+        if (home === null) return yield* new PivotHomeMissingError({ threadId: thread.id });
+        return { writableRoots: [home], writableFiles: [path.join(home, "preferences.md")] };
+      }
+      const parentId = thread.lineage.parentThreadId;
+      if (thread.lineage.relationshipToParent !== "subagent" || parentId === null) return null;
+      const parent = yield* store.getPivot(parentId);
+      if (parent === null) return null;
+      const project = yield* projects.get(thread.projectId);
+      if (Option.isNone(project)) {
+        return yield* new PivotSubagentProjectMissingError({ threadId: thread.id });
+      }
+      return { writableRoots: [], writableFiles: [], cwd: project.value.workspaceRoot };
+    });
+    return { scopeFor };
   }),
 );
 
