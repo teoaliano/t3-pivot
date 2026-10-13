@@ -25,6 +25,11 @@ import * as Schema from "effect/Schema";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
+import {
+  StartFailureMemoryCheck,
+  describeCause,
+  formatStartFailureMemory,
+} from "../process/startFailureDiagnosis.ts";
 import * as EventSink from "./EventSink.ts";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
 import {
@@ -555,6 +560,22 @@ export const layer: Layer.Layer<
       }) =>
         Effect.gen(function* () {
           const nestedCause = "cause" in failed.error ? failed.error.cause : undefined;
+          const reason =
+            nestedCause instanceof Error
+              ? nestedCause.message
+              : typeof nestedCause === "string"
+                ? nestedCause
+                : failed.error.message;
+          // Linux only: a start that dies for lack of memory says so, in the
+          // log and in the error the user sees.
+          const memory = yield* yield* StartFailureMemoryCheck;
+          yield* Effect.logWarning("provider session failed to start", {
+            threadId: projection.thread.id,
+            runId,
+            signal: failed.signal,
+            failures: describeCause(Cause.fail(failed.error)),
+            ...(memory === undefined ? {} : { memory }),
+          });
           yield* settleRunBeforeStart({
             signal: failed.signal,
             status: "failed",
@@ -567,11 +588,7 @@ export const layer: Layer.Layer<
               failure: makeProviderFailure({
                 cause: failed.error,
                 message:
-                  nestedCause instanceof Error
-                    ? nestedCause.message
-                    : typeof nestedCause === "string"
-                      ? nestedCause
-                      : failed.error.message,
+                  memory === undefined ? reason : `${reason}\n${formatStartFailureMemory(memory)}`,
                 class: "provider_error",
               }),
             },
