@@ -15,6 +15,7 @@ import {
 
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
+import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import {
   deriveProviderEntriesByEnvironment,
   type ProviderInstanceEntry,
@@ -227,12 +228,13 @@ export function PivotView(props: { pivot: ScopedThreadRef }) {
             />
           </>
         ) : null}
-        {/* Pivot view hides the sidebar and its toggle whatever the sidebar's open state, so
-            the header always starts where the sidebar toggle would: past the macOS traffic
-            lights, or at the plain gutter in fullscreen and on the web. */}
+        {/* Starts past the macOS traffic lights, or at the plain gutter in fullscreen and on the
+            web. With the sidebar collapsed, the sidebar toggle sits in that same spot, so the
+            header clears it like Chat's does. */}
         <header
           className={cn(
             "relative flex h-[var(--workspace-topbar-height)] shrink-0 items-center gap-3 bg-background pr-3 pl-(--workspace-controls-left)",
+            COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
             isElectron && "drag-region wco:pr-(--workspace-native-controls-inset)",
           )}
         >

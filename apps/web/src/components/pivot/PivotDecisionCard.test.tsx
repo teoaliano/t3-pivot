@@ -66,15 +66,26 @@ describe("PivotDecisionCard", () => {
     expect(markup).not.toContain(">Recommended<");
   });
 
-  it("asks an approval with Decline and Approve and an optional note, without options", () => {
+  it("asks an approval with Accept and Comment and an optional note, without options", () => {
     const markup = render(decision({ escalation: { ...escalation, asksApproval: true } }));
 
     expect(markup).toContain('data-pivot-decision="approval"');
-    expect(markup).toContain("Decline");
-    expect(markup).toContain("Approve");
+    expect(markup).toContain("Accept");
+    expect(markup).toContain("Comment");
+    expect(markup).toContain("Write a comment for the teammate, or accept above");
     expect(markup).toContain('aria-label="Anything to add"');
     expect(markup).not.toContain("aria-pressed");
     expect(markup).not.toContain("Submit answer");
+  });
+
+  it("holds Comment until the note has text, while Accept stays available", () => {
+    const markup = render(decision({ escalation: { ...escalation, asksApproval: true } }));
+    const buttons = markup.match(/<button[^>]*>[^<]*<\/button>/g) ?? [];
+    const comment = buttons.find((button) => button.includes(">Comment<"));
+    const accept = buttons.find((button) => button.includes(">Accept<"));
+
+    expect(comment).toContain('disabled=""');
+    expect(accept).not.toContain('disabled=""');
   });
 
   it("shrinks an answered decision to one row with the user's words and no input", () => {
@@ -87,7 +98,7 @@ describe("PivotDecisionCard", () => {
     );
 
     expect(markup).toContain('data-pivot-decision="answered"');
-    expect(markup).toContain("You approved");
+    expect(markup).toContain("You accepted");
     expect(markup).toContain("“Yes, merge it”");
     expect(markup).toContain("The Pivot is relaying it");
     expect(markup).not.toContain("<textarea");
