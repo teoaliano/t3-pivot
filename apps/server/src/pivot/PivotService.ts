@@ -60,16 +60,12 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
-import { ServerConfig } from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
   BRIEF_TEXTS,
   definitionOfDoneText,
   opensWithSpeakerLabel,
-  renderBrief,
   renderPromotion,
-  teammateBranchBase,
-  uniqueBranch,
 } from "./pivotBrief.ts";
 import { mergeRefusals, PIVOT_MERGE_PROVIDERS } from "./pivotDelivery.ts";
 import type { PivotEvent, StoredPivotEvent } from "./PivotEvents.ts";
@@ -79,6 +75,8 @@ import * as PivotStore from "./PivotStore.ts";
 import { chooseTeammateModel, renderTeammateModels } from "./pivotTeammateModels.ts";
 import { loadPivotText, type PivotTextError } from "./pivotTexts.ts";
 import * as PivotThreads from "./PivotThreads.ts";
+import * as LocalTeammateHost from "./LocalTeammateHost.ts";
+import { TeammateHost } from "./TeammateHost.ts";
 
 /** The caller is not the active Pivot (for a Pivot tool) or a live teammate (for a teammate tool). */
 export class PivotCallerError extends Schema.TaggedError<PivotCallerError>()("PivotCallerError", {
@@ -320,7 +318,7 @@ export const make = Effect.gen(function* () {
   const threads = yield* PivotThreads.PivotThreads;
   const home = yield* PivotHome.PivotHome;
   const git = yield* PivotGit.PivotGit;
-  const config = yield* ServerConfig;
+  const localHost = yield* TeammateHost;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -542,6 +540,18 @@ export const make = Effect.gen(function* () {
       return yield* withRecordedWorktree(teammate);
     });
 
+  /** The host a teammate runs on, by its environment; null is the home. */
+  const hostFor = (
+    command: string,
+    environmentId: PivotStore.TeammateRow["environmentId"],
+  ): Effect.Effect<TeammateHost["Service"], PivotStore.PivotRefusedError> =>
+    environmentId === null
+      ? Effect.succeed(localHost)
+      : Effect.fail(refuse(command, `No host is connected for environment ${environmentId}.`));
+
+  const hostOf = (command: string, teammate: PivotStore.TeammateRow) =>
+    hostFor(command, teammate.environmentId);
+
   const nonEmpty = (command: string, text: string, what: string) =>
     text.trim().length === 0 ? Effect.fail(refuse(command, `${what} is empty.`)) : Effect.void;
 
@@ -576,38 +586,8 @@ export const make = Effect.gen(function* () {
       return yield* withProjectLock(
         pivot.projectId,
         Effect.gen(function* () {
-          const project = yield* gitProject(command, pivot.projectId);
-          const deliveryMode = (yield* git.hasRemote(project.workspaceRoot))
-            ? ("direct-pr" as const)
-            : ("local-only" as const);
-          const baseBranch = input.baseBranch ?? (yield* git.defaultBranch(project.workspaceRoot));
-          const taken = new Set<string>(yield* git.listBranches(project.workspaceRoot, "pivot/"));
-          for (const teammate of yield* store.listTeammates({ includeTornDown: true })) {
-            if (teammate.projectId === pivot.projectId) taken.add(teammate.branch);
-          }
-          const repoName = path.basename(project.workspaceRoot);
-          const worktreeFor = (branch: string) =>
-            path.join(config.worktreesDir, repoName, branch.replace(/\//g, "-"));
-          // A leftover directory would make `git worktree add` fail, so it counts as taken.
-          const base = teammateBranchBase(input.title);
-          let finalBranch = uniqueBranch(base, (candidate) => taken.has(candidate));
-          while (
-            yield* fs.exists(worktreeFor(finalBranch)).pipe(Effect.orElseSucceed(() => false))
-          ) {
-            taken.add(finalBranch);
-            finalBranch = uniqueBranch(base, (candidate) => taken.has(candidate));
-          }
-          const worktreePath = worktreeFor(finalBranch);
-          const brief = renderBrief(yield* text(BRIEF_TEXTS.brief), {
-            title: input.title,
-            kind: input.kind,
-            intent: input.intent,
-            spec: input.spec,
-            branch: finalBranch,
-            baseBranch,
-            worktreePath,
-            definitionOfDone: yield* text(definitionOfDoneText(input.kind, deliveryMode)),
-          });
+          const host = yield* hostFor(command, null);
+          const project = yield* host.project(command, pivot.projectId);
           const choice = chooseTeammateModel(
             yield* teammateModels(pivot.projectId),
             yield* teammateKindModels(pivot.projectId),
@@ -623,14 +603,15 @@ export const make = Effect.gen(function* () {
           if (modelSelection === null) {
             return yield* refuse(command, "No model to run the teammate on. Name one.");
           }
-          const launched = yield* threads.launchTeammate({
+          const launched = yield* host.launch({
             projectId: pivot.projectId,
             pivotThreadId: pivot.threadId,
             title: input.title,
-            branch: finalBranch,
-            baseBranch,
+            kind: input.kind,
+            intent: input.intent,
+            spec: input.spec,
+            baseBranch: input.baseBranch,
             modelSelection,
-            text: brief,
           });
           // Recorded before the first run gets going, so its first report finds it.
           yield* store
@@ -641,29 +622,29 @@ export const make = Effect.gen(function* () {
               projectId: pivot.projectId,
               kind: input.kind,
               title: input.title,
-              branch: finalBranch,
-              baseBranch,
-              worktreePath: launched.runId === null ? null : worktreePath,
-              deliveryMode,
+              branch: launched.branch,
+              baseBranch: launched.baseBranch,
+              worktreePath: launched.runId === null ? null : launched.worktreePath,
+              deliveryMode: launched.deliveryMode,
               intent: input.intent,
               spec: input.spec,
               modelEntry: choice.entry,
             })
-            .pipe(Effect.tapError(() => threads.archive(launched.threadId).pipe(Effect.ignore)));
+            .pipe(Effect.tapError(() => host.discard(launched.threadId).pipe(Effect.ignore)));
           const start =
             launched.runId === null
               ? ({ type: "failed", runId: null, detail: "The launch created no run." } as const)
-              : yield* threads.awaitStart(launched.threadId, launched.runId);
+              : yield* host.awaitStart(launched.threadId, launched.runId);
           // A failing setup script still starts the teammate; the result says so.
-          const setup = yield* threads.setupOutcome(launched.threadId);
+          const setup = yield* host.setupOutcome(launched.threadId);
           return {
             threadId: launched.threadId,
             title: input.title,
             kind: input.kind,
-            branch: finalBranch,
-            baseBranch,
-            worktreePath,
-            deliveryMode,
+            branch: launched.branch,
+            baseBranch: launched.baseBranch,
+            worktreePath: launched.worktreePath,
+            deliveryMode: launched.deliveryMode,
             modelEntry: choice.entry,
             firstRun: start.type,
             detail: start.type === "failed" ? start.detail : null,
@@ -692,11 +673,10 @@ export const make = Effect.gen(function* () {
         threadId: teammate.threadId,
         spec: input.spec,
       });
-      yield* threads.send({
+      yield* (yield* hostOf(command, teammate)).send({
         threadId: teammate.threadId,
         senderThreadId: pivot.threadId,
         text: message,
-        mode: "queue",
       });
       return { threadId: teammate.threadId, kind: "ship" as const, intent: teammate.intent };
     });
@@ -717,7 +697,7 @@ export const make = Effect.gen(function* () {
         text: input.intent,
       });
       const own = input.text?.trim() ?? "";
-      yield* threads.send({
+      yield* (yield* hostOf(command, teammate)).send({
         threadId: teammate.threadId,
         senderThreadId: pivot.threadId,
         text: [
@@ -726,7 +706,6 @@ export const make = Effect.gen(function* () {
           input.intent.trim(),
           ...(own.length > 0 ? ["", own] : []),
         ].join("\n"),
-        mode: "queue",
       });
       return {
         threadId: teammate.threadId,
@@ -789,11 +768,10 @@ export const make = Effect.gen(function* () {
       if (decision.teammateThreadId !== null) {
         const teammate = yield* store.getTeammate(decision.teammateThreadId);
         if (teammate !== null && teammate.tornDownAt === null) {
-          yield* threads.send({
+          yield* (yield* hostOf(command, teammate)).send({
             threadId: decision.teammateThreadId,
             senderThreadId: pivot.threadId,
             text: input.answer,
-            mode: "queue",
           });
         }
       }
@@ -906,7 +884,7 @@ export const make = Effect.gen(function* () {
         threadId: teammate.threadId,
         runId: shell?.latestRunId ?? null,
       });
-      yield* threads.stop(teammate.threadId);
+      yield* (yield* hostOf(command, teammate)).stop(teammate.threadId);
       return { threadId: teammate.threadId, outcome: "stopped" as const, detail: null };
     });
 
@@ -932,9 +910,10 @@ export const make = Effect.gen(function* () {
         shell !== null &&
         shell.status === "failed" &&
         (shell.latestRunStartedAt === null || shell.latestRunStartedAt === undefined);
+      const host = yield* hostOf(command, teammate);
       const start = launchFailed
-        ? yield* threads.retryLaunch(teammate.threadId)
-        : yield* threads.relaunch({
+        ? yield* host.retryLaunch(teammate.threadId)
+        : yield* host.relaunch({
             threadId: teammate.threadId,
             senderThreadId: pivot.threadId,
             text: "The Pivot restarted your session. Check your worktree and branch state, then carry on with the task from where it stands.",
@@ -1005,20 +984,25 @@ export const make = Effect.gen(function* () {
     });
 
   /** Whether the PR merged: its synced state, else its live state when the sync lags. */
-  const pullRequestMerged = (projectId: ProjectId, link: ThreadPullRequestLink) =>
+  const pullRequestMerged = (
+    command: string,
+    teammate: PivotStore.TeammateRow,
+    link: ThreadPullRequestLink,
+  ) =>
     link.snapshot?.state === "merged"
       ? Effect.succeed(true)
-      : threads
-          .pullRequestDetail({
-            projectId,
-            host: link.host,
-            repository: link.repository,
-            number: link.number,
-          })
-          .pipe(
-            Effect.map((detail) => detail.state === "merged"),
-            Effect.orElseSucceed(() => false),
-          );
+      : hostOf(command, teammate).pipe(
+          Effect.flatMap((host) =>
+            host.pullRequestDetail({
+              projectId: teammate.projectId,
+              host: link.host,
+              repository: link.repository,
+              number: link.number,
+            }),
+          ),
+          Effect.map((detail) => detail.state === "merged"),
+          Effect.orElseSucceed(() => false),
+        );
 
   /**
    * Why landing `teammate` now would break merge order, or nothing. It refuses a branch
@@ -1058,12 +1042,10 @@ export const make = Effect.gen(function* () {
       const landedLocally = Effect.fn("PivotService.landedLocally")(function* (
         other: PivotStore.TeammateRow,
       ) {
-        const project = yield* gitProject(command, pivot.projectId);
-        const verdict = yield* git.landed({
-          projectRoot: project.workspaceRoot,
+        const verdict = yield* (yield* hostOf(command, other)).landed(command, {
+          projectId: pivot.projectId,
           worktreePath: other.worktreePath,
           branch: other.branch,
-          defaultBranch: yield* git.defaultBranch(project.workspaceRoot),
           mergedPullRequestHead: null,
         });
         return verdict.landed;
@@ -1076,7 +1058,7 @@ export const make = Effect.gen(function* () {
         const links = pullRequests.filter((pr) => pr.branch === branch);
         if (owner === undefined && links.length === 0) return null;
         for (const { link } of links) {
-          if (yield* pullRequestMerged(teammate.projectId, link)) return true;
+          if (yield* pullRequestMerged(command, teammate, link)) return true;
         }
         return false;
       });
@@ -1108,8 +1090,7 @@ export const make = Effect.gen(function* () {
       }
       const unordered = yield* Effect.filter(
         pullRequests.filter((pr) => pr.branch !== teammate.branch && !order.includes(pr.branch)),
-        (pr) =>
-          pullRequestMerged(teammate.projectId, pr.link).pipe(Effect.map((merged) => !merged)),
+        (pr) => pullRequestMerged(command, teammate, pr.link).pipe(Effect.map((merged) => !merged)),
       );
       if (unordered.length > 0) {
         const listed = unordered.map((pr) => `${pr.link.url} (${pr.branch})`).join(", ");
@@ -1141,7 +1122,8 @@ export const make = Effect.gen(function* () {
         repository: link.repository,
         number: link.number,
       };
-      const detail = yield* threads.pullRequestDetail(ref);
+      const host = yield* hostOf(command, teammate);
+      const detail = yield* host.pullRequestDetail(ref);
       if (!PIVOT_MERGE_PROVIDERS.has(detail.provider)) {
         return yield* refuse(
           command,
@@ -1174,7 +1156,7 @@ export const make = Effect.gen(function* () {
           url,
         });
       yield* recordMerge(link.url);
-      yield* threads
+      yield* host
         .mergePullRequest({ ...ref, expectedHeadSha: head })
         .pipe(Effect.tapError(() => recordMerge(null).pipe(Effect.ignore)));
       return { threadId: teammate.threadId, url: link.url, mergedHead: head };
@@ -1197,20 +1179,12 @@ export const make = Effect.gen(function* () {
           `Not landing ${teammate.branch}:\n- ${outOfOrder.join("\n- ")}`,
         );
       }
-      const project = yield* gitProject(command, pivot.projectId);
-      if (!(yield* git.isClean(teammate.worktreePath))) {
-        return yield* refuse(
-          command,
-          "The teammate's worktree has uncommitted changes; it commits them first.",
-        );
-      }
-      const defaultBranch = yield* git.defaultBranch(project.workspaceRoot);
-      const result = yield* git.fastForward({
-        projectRoot: project.workspaceRoot,
+      const result = yield* (yield* hostOf(command, teammate)).land(command, {
+        projectId: pivot.projectId,
+        worktreePath: teammate.worktreePath,
         branch: teammate.branch,
-        defaultBranch,
       });
-      if (!result.landed) return yield* refuse(command, result.reason);
+      if (result.type === "refused") return yield* refuse(command, result.reason);
       yield* store.dispatch({
         type: "teammate.record-landing",
         pivotThreadId: pivot.threadId,
@@ -1220,7 +1194,7 @@ export const make = Effect.gen(function* () {
       return {
         threadId: teammate.threadId,
         branch: teammate.branch,
-        defaultBranch,
+        defaultBranch: result.defaultBranch,
         landedHead: result.head,
       };
     });
@@ -1230,16 +1204,15 @@ export const make = Effect.gen(function* () {
       const command = "teardown_teammate";
       const pivot = yield* activePivot(command, caller);
       const teammate = yield* ownTeammate(command, pivot, input.threadId);
-      const project = yield* gitProject(command, pivot.projectId);
-      const worktreeExists = yield* fs
-        .exists(teammate.worktreePath)
-        .pipe(Effect.orElseSucceed(() => false));
+      const host = yield* hostOf(command, teammate);
+      yield* host.project(command, pivot.projectId);
+      const worktreeExists = yield* host.worktreeExists(teammate.worktreePath);
 
       let reason: string;
       if (teammate.kind === "scout" && teammate.scoutReport !== null) {
         reason = "Its scout report is recorded.";
         // The report is the deliverable, but files it left uncommitted are still the user's.
-        if (worktreeExists && !(yield* git.isClean(teammate.worktreePath))) {
+        if (worktreeExists && !(yield* host.worktreeClean(teammate.worktreePath))) {
           if (input.discardDecisionId === undefined) {
             return yield* refuse(
               command,
@@ -1254,7 +1227,7 @@ export const make = Effect.gen(function* () {
         const link = yield* linkedPullRequest(teammate);
         let mergedHead: string | null = null;
         if (link?.snapshot?.state === "merged") {
-          const detail = yield* threads
+          const detail = yield* host
             .pullRequestDetail({
               projectId: teammate.projectId,
               host: link.host,
@@ -1264,11 +1237,10 @@ export const make = Effect.gen(function* () {
             .pipe(Effect.orElseSucceed(() => null));
           mergedHead = detail?.state === "merged" ? (detail.headSha ?? null) : null;
         }
-        const verdict = yield* git.landed({
-          projectRoot: project.workspaceRoot,
+        const verdict = yield* host.landed(command, {
+          projectId: pivot.projectId,
           worktreePath: teammate.worktreePath,
           branch: teammate.branch,
-          defaultBranch: yield* git.defaultBranch(project.workspaceRoot),
           mergedPullRequestHead: mergedHead,
         });
         if (verdict.landed) {
@@ -1285,17 +1257,14 @@ export const make = Effect.gen(function* () {
       }
       const discarding = reason.startsWith("Discarded");
 
-      // The session goes first; if it will not stop, nothing else is touched.
-      yield* threads.stop(teammate.threadId);
-      yield* threads.stopProcesses(teammate.worktreePath);
-      if (worktreeExists) {
-        yield* threads.removeWorktree({
-          projectRoot: project.workspaceRoot,
-          worktreePath: teammate.worktreePath,
-          force: discarding,
-        });
-      }
-      yield* threads.archive(teammate.threadId);
+      yield* host.teardown(command, {
+        projectId: pivot.projectId,
+        threadId: teammate.threadId,
+        worktreePath: teammate.worktreePath,
+        branch: teammate.branch,
+        worktreeExists,
+        force: discarding,
+      });
       yield* store.dispatch({
         type: "teammate.tear-down",
         pivotThreadId: pivot.threadId,
@@ -1412,4 +1381,6 @@ export const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(PivotService, make);
+export const layer = Layer.effect(PivotService, make).pipe(
+  Layer.provideMerge(LocalTeammateHost.layer),
+);

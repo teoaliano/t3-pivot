@@ -10,6 +10,7 @@
  * @module PivotStore
  */
 import {
+  type EnvironmentId,
   type IsoDateTime,
   type MessageId,
   PIVOT_USER_ANSWER_MAX_BYTES,
@@ -252,6 +253,8 @@ export interface TeammateRow extends TeammateRecord {
   readonly intent: ReadonlyArray<string>;
   readonly spec: string;
   readonly modelEntry: string | null;
+  /** The environment that hosts the teammate; null is the Pivot's own. */
+  readonly environmentId: EnvironmentId | null;
   readonly scoutReport: string | null;
   readonly observedStatus: TeammateStatus | null;
   readonly observedRunId: RunId | null;
@@ -335,6 +338,7 @@ interface TeammateSqlRow {
   readonly intent_json: string;
   readonly spec: string;
   readonly model_entry: string | null;
+  readonly environment_id: string | null;
   readonly report_json: string | null;
   readonly resume: string | null;
   readonly scout_report: string | null;
@@ -422,6 +426,7 @@ const toTeammate = (row: TeammateSqlRow): TeammateRow => ({
   intent: decodeIntent(row.intent_json),
   spec: row.spec,
   modelEntry: row.model_entry,
+  environmentId: row.environment_id as EnvironmentId | null,
   scoutReport: row.scout_report,
   observedStatus: row.observed_status as TeammateStatus | null,
   observedRunId: row.observed_run_id as RunId | null,
