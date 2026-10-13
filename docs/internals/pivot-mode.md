@@ -72,7 +72,8 @@ The Pivot reads the project and its worktrees and runs commands, but writes only
 run the shell in their own sandbox, which confines its writes to the home. Claude, OpenCode
 and ACP agents that ask T3 for permission (Grok among them) confine their edit tools to the
 scope but have no sandbox for the shell, so there the contract alone keeps commands off the
-project. Antigravity, Muse and Pi choose their mode from the runtime mode alone and run the
+project. The Pivot's shell may also merge an approved PR (`gh pr merge`); the contract's
+merge rule is the only guard there, so the merge conditions must stay in the contract. Antigravity, Muse and Pi choose their mode from the runtime mode alone and run the
 Pivot in full access. Teammates have no write scope and run in their thread's runtime mode.
 
 Merging is the Pivot's, not its teammates': only the Pivot sees every open PR and so the
