@@ -132,7 +132,10 @@ import {
 import type { ManagedServerProvider } from "@t3tools/provider-core/server/snapshot";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
-import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
+import {
+  buildRuntimeInstructions,
+  type RuntimeProject,
+} from "@t3tools/provider-core/server/runtimeInstructions";
 import {
   mcpToolPresentation,
   normalizeMcpText,
@@ -958,6 +961,8 @@ export function makeClaudeQueryOptions(input: {
    * state.sqlite stay ungranted.
    */
   readonly attachmentsDir?: string;
+  /** A Pivot's project, named in the system prompt so the Pivot can find its checkout. */
+  readonly project?: RuntimeProject | undefined;
   readonly settings?: ClaudeSettings;
   readonly sdkSettings?: string | ClaudeSdkSettings;
   readonly environment?: NodeJS.ProcessEnv;
@@ -1053,7 +1058,7 @@ export function makeClaudeQueryOptions(input: {
       type: "preset" as const,
       preset: "claude_code" as const,
       append:
-        buildRuntimeInstructions({ harness: "Claude Code" }) +
+        buildRuntimeInstructions({ harness: "Claude Code", project: input.project }) +
         (input.mcpServers === undefined ? "" : T3_CODE_ORCHESTRATION_INSTRUCTIONS),
     },
     ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
@@ -8298,6 +8303,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             resume: shouldResume,
             ...(resumeSessionAt === undefined ? {} : { resumeSessionAt }),
             cwd: turnInput.runtimePolicy.cwd,
+            project: turnInput.runtimePolicy.project,
             attachmentsDir,
             settings: adapterOptions.settings,
             environment: adapterOptions.environment,

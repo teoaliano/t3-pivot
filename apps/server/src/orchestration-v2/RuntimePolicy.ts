@@ -101,31 +101,30 @@ export const layerFromProjectStore: Layer.Layer<
           instance === undefined
             ? undefined
             : (yield* instance.snapshot.getSnapshot).supportedRuntimeModes;
-        const cwd =
-          input.thread.worktreePath ??
-          (yield* projects.get(input.thread.projectId).pipe(
-            Effect.mapError(
-              (cause) =>
-                new RuntimePolicyResolveError({
-                  projectId: input.thread.projectId,
-                  providerInstanceId: input.modelSelection.instanceId,
-                  cause,
-                }),
-            ),
-            Effect.flatMap(
-              Option.match({
-                onNone: () =>
-                  Effect.fail(
-                    new RuntimePolicyResolveError({
-                      projectId: input.thread.projectId,
-                      providerInstanceId: input.modelSelection.instanceId,
-                      cause: "Project not found.",
-                    }),
-                  ),
-                onSome: (project) => Effect.succeed(project.workspaceRoot),
+        const loadProject = projects.get(input.thread.projectId).pipe(
+          Effect.mapError(
+            (cause) =>
+              new RuntimePolicyResolveError({
+                projectId: input.thread.projectId,
+                providerInstanceId: input.modelSelection.instanceId,
+                cause,
               }),
-            ),
-          ));
+          ),
+          Effect.flatMap(
+            Option.match({
+              onNone: () =>
+                Effect.fail(
+                  new RuntimePolicyResolveError({
+                    projectId: input.thread.projectId,
+                    providerInstanceId: input.modelSelection.instanceId,
+                    cause: "Project not found.",
+                  }),
+                ),
+              onSome: (project) => Effect.succeed(project),
+            }),
+          ),
+        );
+        const cwd = input.thread.worktreePath ?? (yield* loadProject).workspaceRoot;
         const writeScope = yield* (yield* ThreadWriteAccess.ThreadWriteAccess)
           .scopeFor(input.thread)
           .pipe(
@@ -138,10 +137,20 @@ export const layerFromProjectStore: Layer.Layer<
                 }),
             ),
           );
+        // Only a scoped thread is a Pivot, and its cwd is its home: the project it works on
+        // is named separately so its instructions can point at the checkout.
+        const project =
+          writeScope === null
+            ? undefined
+            : {
+                projectId: input.thread.projectId,
+                workspaceRoot: (yield* loadProject).workspaceRoot,
+              };
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
           interactionMode: input.thread.interactionMode,
           cwd,
+          ...(project === undefined ? {} : { project }),
           // Reads stay open everywhere; the sandbox only confines writes to the scope.
           ...(writeScope === null
             ? {}

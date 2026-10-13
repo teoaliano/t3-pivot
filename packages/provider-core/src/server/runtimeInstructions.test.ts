@@ -17,6 +17,15 @@ describe("buildRuntimeInstructions", () => {
     expect(instructions).toContain("Use the port it returns");
   });
 
+  it("names a Pivot's project id and checkout, and omits them otherwise", () => {
+    const project = { projectId: "project-1", workspaceRoot: "/repos/checkout" };
+    const withProject = buildRuntimeInstructions({ harness: "Codex", project });
+    expect(withProject).toContain(
+      "Your project's id is project-1 and its checkout is /repos/checkout.",
+    );
+    expect(buildRuntimeInstructions({ harness: "Codex" })).not.toContain("<project_info>");
+  });
+
   it("keeps known model and effort metadata on one line", () => {
     expect(
       buildRuntimeInstructions({

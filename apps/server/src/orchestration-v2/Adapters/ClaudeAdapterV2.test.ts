@@ -786,6 +786,24 @@ describe("ClaudeAdapterV2 native protocol logging", () => {
     assert.notInclude(JSON.stringify(logged), "secret-claude-token");
   });
 
+  it("names a Pivot's project in the system prompt", () => {
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-sonnet-4-6",
+      },
+      nativeThreadId: "native-thread-claude-pivot-project",
+      resume: false,
+      cwd: "/pivot-home",
+      project: { projectId: "project-1", workspaceRoot: "/repos/checkout" },
+    });
+    const systemPrompt = options.systemPrompt as { readonly append?: string };
+    assert.include(
+      systemPrompt.append ?? "",
+      "Your project's id is project-1 and its checkout is /repos/checkout.",
+    );
+  });
+
   it.effect("writes Claude Agent SDK protocol frames to the native provider log", () =>
     Effect.gen(function* () {
       const writes: Array<{

@@ -308,10 +308,16 @@ function ApprovalDecision({
 }: PivotDecisionCardProps & { onMinimize: () => void }) {
   const escalation = decision.escalation;
   const [note, setNote] = useState("");
-  // A yes or no, recorded as such, with the user's own words when they add any.
-  const respond = (approved: boolean) => {
+  const commented = note.trim().length > 0;
+  // Accept works with or without a note; Comment needs one, since the note is what the
+  // teammate receives.
+  const accept = () => {
     if (sending) return;
-    onAnswer(note.trim() || (approved ? "Approved" : "Declined"), approved);
+    onAnswer(note.trim() || "Approved", true);
+  };
+  const comment = () => {
+    if (sending || !commented) return;
+    onAnswer(note.trim(), false);
   };
   return (
     <DecisionComposer
@@ -359,18 +365,23 @@ function ApprovalDecision({
             </ComposerBanner.Content>
             <ComposerBanner.Actions>
               <MinimizeButton onMinimize={onMinimize} />
-              <Button size="xs" variant="outline" disabled={sending} onClick={() => respond(false)}>
-                Decline
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={sending || !commented}
+                onClick={comment}
+              >
+                Comment
               </Button>
-              <Button size="xs" disabled={sending} onClick={() => respond(true)}>
-                Approve
+              <Button size="xs" disabled={sending} onClick={accept}>
+                Accept
               </Button>
             </ComposerBanner.Actions>
           </ComposerBanner.Row>
         </ComposerBanner.Root>
       }
       label="Anything to add"
-      placeholder="Add a note (optional), then approve or decline above"
+      placeholder="Write a comment for the teammate, or accept above"
       text={note}
       sending={sending}
       onTextChange={setNote}
