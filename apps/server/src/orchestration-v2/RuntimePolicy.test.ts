@@ -191,6 +191,7 @@ it.layer(layerPivotScope)("RuntimePolicyV2 write scope", (it) => {
         excludeTmpdirEnvVar: true,
       });
       assert.deepEqual(resolved.writableFiles, ["/pivot-home/preferences.md"]);
+      assert.deepEqual(resolved.project, { projectId, workspaceRoot: "/project-root" });
     }),
   );
 
@@ -204,6 +205,7 @@ it.layer(layerPivotScope)("RuntimePolicyV2 write scope", (it) => {
       });
       assert.equal(resolved.sandboxPolicy, undefined);
       assert.equal(resolved.writableFiles, undefined);
+      assert.equal(resolved.project, undefined);
     }),
   );
 });

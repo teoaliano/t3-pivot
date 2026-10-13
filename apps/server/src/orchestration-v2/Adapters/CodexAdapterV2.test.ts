@@ -554,6 +554,31 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
+  it.effect("names a Pivot's project in the turn's runtime context", () =>
+    Effect.gen(function* () {
+      const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+        nativeThreadId: "native-pivot-project",
+        codexInput: [{ type: "text", text: "where is the project?" }],
+        runtimePolicy: {
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: "/pivot-home",
+          project: { projectId: "project-1", workspaceRoot: "/repos/checkout" },
+        },
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5.4",
+        },
+        hasT3Mcp: true,
+      });
+
+      assert.include(
+        params.additionalContext?.t3_code_runtime?.value ?? "",
+        "its checkout is /repos/checkout.",
+      );
+    }),
+  );
+
   it.effect("omits default-mode collaboration settings without the T3 MCP server", () =>
     Effect.gen(function* () {
       const params = yield* CodexAdapterV2.buildCodexTurnStartParams({

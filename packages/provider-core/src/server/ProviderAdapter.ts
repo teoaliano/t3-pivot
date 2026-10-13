@@ -55,6 +55,10 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
    * Set with a workspace-write sandbox; everything else stays read-only.
    */
   writableFiles: Schema.optional(Schema.Array(Schema.String)),
+  /** The project a Pivot works on, set only for a Pivot run; its home is `cwd`. */
+  project: Schema.optional(
+    Schema.Struct({ projectId: Schema.String, workspaceRoot: Schema.String }),
+  ),
   reasoningEffort: Schema.optional(Schema.String),
 });
 export type ProviderAdapterV2RuntimePolicy = typeof ProviderAdapterV2RuntimePolicy.Type;
