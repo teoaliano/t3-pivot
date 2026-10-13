@@ -102,10 +102,16 @@ The host runs a dedicated clone at `~/.t3-pivot/app`, never a working checkout, 
 `node scripts/pivot.ts host-update` in the clone every night.
 
 `host-update` fast-forwards to `origin/main` and merges the newest upstream nightly into it. A
-conflict is settled by owner: in a Pivot-owned file main's side wins, and in vendored `.repos/`
+conflict is settled by owner first: in a Pivot-owned file main's side wins, and in vendored `.repos/`
 upstream's side wins (see `PIVOT_OWNED_PATHS` and `UPSTREAM_OWNED_PATHS` in `scripts/pivot.ts`).
-Any other conflict aborts the merge, and the run fails before anything is built or restarted,
-with the conflicting files in the journal. A merge that builds is pushed to `main`, so it
+Any other conflicted file goes to Claude Haiku 5.5 at medium effort, run headless as `claude -p`
+in the clone with file tools only (no shell, so it cannot commit or push). It runs under the
+host user's Claude Code login, so `t3-pivot-update.service` needs that login (or
+`ANTHROPIC_API_KEY`) in its environment. The agent gets at most 10 files and 10 minutes. A
+resolution is committed only if no markers remain, the agent touched no other file, and the
+build passes; each agent-resolved file and its reason is logged to the journal. Any other failure
+aborts the merge, and the run fails before anything is built or restarted, with the files and the
+reason in the journal. A merge that builds is pushed to `main`, so it
 replaces running `pivot:sync` by hand. A merge that doesn't build becomes the usual `sync/<tag>`
 PR and the host keeps its deployed build. Otherwise it rebuilds and restarts the service when
 `main` moved, which ends any running turn in T3 Pivot. Run it on demand with
@@ -115,8 +121,8 @@ Mac and iPhone the next morning.
 
 ## Things that stay manual
 
-- A conflict the host can't settle stops its update until you resolve it. Run `pivot:sync` to
-  open a `sync/<tag>` PR for it, and merge that PR's resolution. Nothing updates until it is
+- A conflict the agent can't settle stops the host's update until you resolve it. Run `pivot:sync`
+  to open a `sync/<tag>` PR for it, and merge that PR's resolution. Nothing updates until it is
   merged.
 - The desktop app downloads a release and restarts into it when you click the update button.
 - Every machine keeps the two apps separate, so both can run at the same time. T3 Code
