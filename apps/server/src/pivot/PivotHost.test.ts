@@ -711,7 +711,8 @@ describe("PivotHost log", () => {
       yield* untilSeen(1);
 
       yield* host.setGrantAllowlist(home.grantId, [projectId]);
-      yield* report(docs.threadId, "docs after");
+      // Its teammate is stopped and no longer live, so its report is refused outright.
+      yield* Effect.flip(report(docs.threadId, "docs after"));
       yield* report(app.threadId, "app after");
       yield* untilSeen(2);
       yield* host.revokeGrant(home.grantId);
@@ -1246,6 +1247,36 @@ describe("a launch that waits its turn", () => {
     },
   );
 
+  it.effect("stops a teammate whose link was revoked while its relaunch ran", () => {
+    // The link is revoked after the relaunch passed its checks and started a run.
+    const hook = { revoke: (): Effect.Effect<void, PivotHostServiceError> => Effect.void };
+    const wrap = Layer.effect(
+      TeammateHost,
+      Effect.gen(function* () {
+        const real = yield* TeammateHost;
+        return TeammateHost.of({
+          ...real,
+          relaunch: (input) =>
+            real.relaunch(input).pipe(Effect.tap(() => Effect.orDie(hook.revoke()))),
+        });
+      }),
+    );
+    const { fake, layer } = hostSetupWrapped(wrap);
+    return Effect.gen(function* () {
+      const host = yield* PivotHost.PivotHost;
+      const home = yield* newHome();
+      const ship = yield* launch(home);
+      const thread = fake.threads.get(ship.threadId)!;
+      hook.revoke = () => host.revokeGrant(home.grantId);
+      const refusal = yield* flipped(
+        host.relaunch(home.caller, { ...home.call, threadId: ship.threadId, text: "Again." }),
+      );
+      assert.strictEqual(refusal.code, "revoked");
+      // Revoke stopped it once; the relaunch's own re-check stopped the run it started.
+      assert.strictEqual(thread.stops, 2);
+    }).pipe(Effect.provide(layer));
+  });
+
   it.effect("launches once when one dispatchId is sent for two projects at the same time", () => {
     const { fake, layer } = hostSetup();
     addDocsProject(fake);
@@ -1329,6 +1360,29 @@ describe("what a launch is limited to", () => {
       }).pipe(Effect.provide(layer));
     },
   );
+});
+
+describe("a teammate whose project leaves the allowlist", () => {
+  it.effect("is stopped and no longer live, and its siblings in kept projects run on", () => {
+    const { fake, layer } = hostSetup();
+    addDocsProject(fake);
+    return Effect.gen(function* () {
+      const host = yield* PivotHost.PivotHost;
+      const store = yield* PivotHostStore.PivotHostStore;
+      const home = yield* newHome([projectId, docsProjectId]);
+      const app = yield* launch(home, { dispatchId: "app" });
+      const docs = yield* launch(home, { dispatchId: "docs", projectId: docsProjectId });
+
+      yield* host.setGrantAllowlist(home.grantId, [projectId]);
+      assert.strictEqual(fake.threads.get(docs.threadId)!.stops, 1);
+      assert.strictEqual(fake.threads.get(app.threadId)!.stops, 0);
+      assert.isFalse(yield* store.isLive(docs.threadId));
+      assert.isTrue(yield* store.isLive(app.threadId));
+
+      yield* host.setGrantAllowlist(home.grantId, [projectId, docsProjectId]);
+      assert.isTrue(yield* store.isLive(docs.threadId));
+    }).pipe(Effect.provide(layer));
+  });
 });
 
 describe("a revoked link's teammates", () => {

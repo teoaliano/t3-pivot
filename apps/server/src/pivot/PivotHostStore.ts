@@ -92,10 +92,18 @@ export class PivotHostStore extends Context.Service<
     /** Every link, revoked ones included. The rows hold no credential. */
     readonly listGrants: Effect.Effect<ReadonlyArray<HostGrant>, PivotStoreError>;
     /** Null when the link does not exist or was revoked. */
+    /**
+     * Replaces the allowlist; null when the link does not exist or was revoked. Teammates in
+     * a project that left it are no longer live, and are returned so they can be stopped:
+     * their home can no longer reach them. Teammates in a project back on it are live again.
+     */
     readonly setAllowlist: (
       grantId: string,
       projectIds: ReadonlyArray<ProjectId>,
-    ) => Effect.Effect<HostGrant | null, PivotStoreError>;
+    ) => Effect.Effect<
+      { readonly grant: HostGrant; readonly dropped: ReadonlyArray<ThreadId> } | null,
+      PivotStoreError
+    >;
     /** Empties the allowlist and the bound home. False when it does not exist or already was. */
     readonly revokeGrant: (grantId: string) => Effect.Effect<boolean, PivotStoreError>;
     /**
@@ -248,12 +256,23 @@ export const make = Effect.gen(function* () {
   const signals = yield* PubSub.sliding<string>(SIGNAL_BUFFER);
   // Teammates of a revoked link are not live: their sessions are stopped, and a restart
   // does not resume them.
+  // Nor are teammates whose project left their link's allowlist.
   const live = new Set<string>(
-    (yield* sql<{ readonly thread_id: string }>`
-      SELECT t.thread_id FROM pivot_hosted_teammates t
+    (yield* sql<{
+      readonly thread_id: string;
+      readonly project_id: string;
+      readonly allowed_project_ids: string;
+    }>`
+      SELECT t.thread_id, t.project_id, g.allowed_project_ids FROM pivot_hosted_teammates t
       JOIN pivot_host_grants g ON g.grant_id = t.grant_id
       WHERE t.torn_down_at IS NULL AND g.revoked_at IS NULL
-    `.pipe(Effect.orDie)).map((row) => row.thread_id),
+    `.pipe(Effect.orDie))
+      .filter((row) =>
+        (decodeAllowlist(row.allowed_project_ids) as ReadonlyArray<string>).includes(
+          row.project_id,
+        ),
+      )
+      .map((row) => row.thread_id),
   );
 
   const storeError = (operation: string) => (cause: unknown) =>
@@ -288,11 +307,15 @@ export const make = Effect.gen(function* () {
     operation: string,
     grantIdOf: (result: A) => string | null,
     effect: Effect.Effect<A, E>,
+    // Runs once the write committed, still under the lock, so the in-memory live set
+    // changes in the same order as the rows.
+    onCommit?: (result: A) => void,
   ) =>
     writeLock.withPermits(1)(
       effect.pipe(
         sql.withTransaction,
         Effect.mapError(storeError(operation)),
+        Effect.tap((result) => Effect.sync(() => onCommit?.(result))),
         Effect.tap((result) => {
           const grantId = grantIdOf(result);
           return grantId === null ? Effect.void : PubSub.publish(signals, grantId);
@@ -320,7 +343,7 @@ export const make = Effect.gen(function* () {
   const setAllowlist: PivotHostStore["Service"]["setAllowlist"] = (grantId, projectIds) =>
     write(
       "setAllowlist",
-      (grant) => (grant === null ? null : grant.grantId),
+      (result) => (result === null ? null : result.grant.grantId),
       Effect.gen(function* () {
         yield* sql`
           UPDATE pivot_host_grants
@@ -328,38 +351,49 @@ export const make = Effect.gen(function* () {
           WHERE grant_id = ${grantId} AND revoked_at IS NULL
         `;
         const grant = yield* readGrant(grantId);
-        return grant === null || grant.revokedAt !== null ? null : grant;
+        if (grant === null || grant.revokedAt !== null) return null;
+        const running = yield* sql<{ readonly thread_id: string; readonly project_id: string }>`
+          SELECT thread_id, project_id FROM pivot_hosted_teammates
+          WHERE grant_id = ${grantId} AND torn_down_at IS NULL
+        `;
+        const allowed = new Set<string>(grant.allowedProjectIds);
+        return {
+          grant,
+          kept: running.filter((row) => allowed.has(row.project_id)).map((row) => row.thread_id),
+          dropped: running
+            .filter((row) => !allowed.has(row.project_id))
+            .map((row) => row.thread_id as ThreadId),
+        };
       }),
+      (result) => {
+        result?.kept.forEach((id) => live.add(id));
+        result?.dropped.forEach((id) => live.delete(id));
+      },
+    ).pipe(
+      Effect.map((result) =>
+        result === null ? null : { grant: result.grant, dropped: result.dropped },
+      ),
     );
 
   const revokeGrant: PivotHostStore["Service"]["revokeGrant"] = (grantId) =>
     Effect.gen(function* () {
       const revokedAt = yield* now;
-      return yield* write(
+      const revoked = yield* write(
         "revokeGrant",
-        (revoked) => (revoked ? grantId : null),
+        (result) => (result === null ? null : grantId),
         Effect.gen(function* () {
           const before = yield* readGrant(grantId);
-          if (before === null || before.revokedAt !== null) return false;
+          if (before === null || before.revokedAt !== null) return null;
           yield* sql`
             UPDATE pivot_host_grants
             SET allowed_project_ids = '[]', bound_home_environment_id = NULL, revoked_at = ${revokedAt}
             WHERE grant_id = ${grantId} AND revoked_at IS NULL
           `;
-          return true;
+          return yield* liveThreadIdsOf(grantId);
         }),
-      ).pipe(
-        Effect.tap((revoked) =>
-          revoked
-            ? read(
-                "revokeGrant",
-                liveThreadIdsOf(grantId).pipe(
-                  Effect.tap((ids) => Effect.sync(() => ids.forEach((id) => live.delete(id)))),
-                ),
-              )
-            : Effect.void,
-        ),
+        (ids) => ids?.forEach((id) => live.delete(id)),
       );
+      return revoked !== null;
     });
 
   const bindHome: PivotHostStore["Service"]["bindHome"] = (grantId, homeEnvironmentId) =>
@@ -413,12 +447,9 @@ export const make = Effect.gen(function* () {
             ? null
             : { teammate, created: teammate.threadId === input.threadId };
         }),
-      ).pipe(
-        Effect.tap((recorded) =>
-          Effect.sync(() => {
-            if (recorded?.created) live.add(recorded.teammate.threadId);
-          }),
-        ),
+        (recorded) => {
+          if (recorded?.created) live.add(recorded.teammate.threadId);
+        },
       );
     });
 
@@ -432,8 +463,8 @@ export const make = Effect.gen(function* () {
           UPDATE pivot_hosted_teammates SET torn_down_at = ${tornDownAt}
           WHERE thread_id = ${threadId} AND torn_down_at IS NULL
         `,
+        () => live.delete(threadId),
       );
-      live.delete(threadId);
     });
 
   const appendEvent: PivotHostStore["Service"]["appendEvent"] = ({ threadId, event }) =>

@@ -85,7 +85,9 @@ export const authorize = Effect.fn("PivotHostAuthorization.authorize")(function*
   if (current === null || current.revokedAt !== null) return yield* revoked;
 
   // (iv) The first call binds the link to its home; every later call must be that home.
-  // Binding is one compare-and-set, so of two racing first calls the loser reads the
+  // The ID is whatever the caller sends and is not secret, so this keeps one link to one home
+  // by mistake, not by proof: the session credential is what authenticates. Binding is one
+  // compare-and-set, so of two racing first calls the loser reads the
   // winner back here and is refused.
   const grant =
     current.boundHomeEnvironmentId === null

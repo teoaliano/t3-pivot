@@ -124,7 +124,7 @@ import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts"
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as PivotHost from "./pivot/PivotHost.ts";
-import { callerOfSession } from "./pivot/PivotHostAuthorization.ts";
+import * as PivotHostRpc from "./pivot/PivotHostRpc.ts";
 import * as PivotService from "./pivot/PivotService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import {
@@ -1248,18 +1248,7 @@ const layerWsRpc = (
       const pivots = yield* PivotService.PivotService;
       const toPivotError = (cause: PivotService.PivotServiceError) =>
         new PivotError({ message: cause.message, cause });
-      const pivotHost = yield* PivotHost.PivotHost;
-      // What a host link's session may do is decided in PivotHost, from this session's
-      // subject and scopes alone.
-      const hostCaller = callerOfSession(currentSession);
-      // A host link's session is not the owner: it gets the reason and a fixed message, and the
-      // cause stays in this server's log.
-      const logHostFailure = (cause: PivotHost.PivotHostServiceError) =>
-        cause._tag === "PivotHostRefusedError" || cause._tag === "PivotRefusedError"
-          ? Effect.void
-          : Effect.logWarning("A Pivot host request failed", { cause });
-      const hostCall = <A>(effect: Effect.Effect<A, PivotHost.PivotHostServiceError>) =>
-        effect.pipe(Effect.tapError(logHostFailure), Effect.mapError(PivotHost.pivotHostWireError));
+      const pivotHostHandlers = PivotHostRpc.handlers(yield* PivotHost.PivotHost, currentSession);
       const secretRequests = yield* SecretRequests.SecretRequests;
       const pullRequests = yield* PullRequestService.PullRequestService;
       const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
@@ -2104,29 +2093,7 @@ const layerWsRpc = (
             Effect.map((decisions) => ({ decisions })),
             Effect.mapError(toPivotError),
           ),
-        [WS_METHODS.pivotHostDescribe]: (input) => hostCall(pivotHost.describe(hostCaller, input)),
-        [WS_METHODS.pivotHostLaunchTeammate]: (input) =>
-          hostCall(pivotHost.launchTeammate(hostCaller, input)),
-        [WS_METHODS.pivotHostSend]: (input) =>
-          hostCall(pivotHost.send(hostCaller, input).pipe(Effect.as({}))),
-        [WS_METHODS.pivotHostStop]: (input) =>
-          hostCall(pivotHost.stop(hostCaller, input).pipe(Effect.as({}))),
-        [WS_METHODS.pivotHostRelaunch]: (input) => hostCall(pivotHost.relaunch(hostCaller, input)),
-        [WS_METHODS.pivotHostRetryLaunch]: (input) =>
-          hostCall(pivotHost.retryLaunch(hostCaller, input)),
-        [WS_METHODS.pivotHostSettle]: (input) =>
-          hostCall(pivotHost.settle(hostCaller, input).pipe(Effect.as({}))),
-        [WS_METHODS.pivotHostTeardown]: (input) =>
-          hostCall(pivotHost.teardown(hostCaller, input).pipe(Effect.as({}))),
-        [WS_METHODS.pivotHostPullRequestDetail]: (input) =>
-          hostCall(pivotHost.pullRequestDetail(hostCaller, input)),
-        [WS_METHODS.pivotHostMergePullRequest]: (input) =>
-          hostCall(pivotHost.mergePullRequest(hostCaller, input).pipe(Effect.as({}))),
-        [WS_METHODS.pivotHostLand]: (input) => hostCall(pivotHost.land(hostCaller, input)),
-        [WS_METHODS.pivotHostEvents]: (input) =>
-          pivotHost
-            .events(hostCaller, input)
-            .pipe(Stream.tapError(logHostFailure), Stream.mapError(PivotHost.pivotHostWireError)),
+        ...pivotHostHandlers,
         [WS_METHODS.scheduledTasksSubscribe]: (_input) =>
           scheduledTasks.subscribeList().pipe(Stream.map(withVisibleWebhookUrls)),
         [WS_METHODS.scheduledTasksUpsert]: (input) => scheduledTasks.upsert(input),

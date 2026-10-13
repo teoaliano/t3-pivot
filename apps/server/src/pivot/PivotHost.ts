@@ -411,6 +411,20 @@ export const make = Effect.gen(function* () {
       );
     });
 
+  // A revoke or an allowlist edit can land while a send or a relaunch runs, and revoke
+  // stops the link's threads only once. So the link is checked again afterwards, and a
+  // teammate it no longer covers is stopped rather than left running.
+  const recheck = (
+    command: string,
+    caller: PivotHostCaller,
+    input: TeammateInput,
+    threadId: ThreadId,
+  ) =>
+    liveTeammate(command, caller, input).pipe(
+      Effect.tapError(() => host.stop(threadId).pipe(Effect.ignore)),
+      Effect.asVoid,
+    );
+
   const send: PivotHost["Service"]["send"] = (caller, input) =>
     Effect.gen(function* () {
       const teammate = yield* liveTeammate("pivotHost.send", caller, input);
@@ -419,6 +433,7 @@ export const make = Effect.gen(function* () {
         senderThreadId: hostedSenderOf(teammate.pivotThreadId),
         text: input.text,
       });
+      yield* recheck("pivotHost.send", caller, input, teammate.threadId);
     });
 
   const stop: PivotHost["Service"]["stop"] = (caller, input) =>
@@ -429,19 +444,21 @@ export const make = Effect.gen(function* () {
   const relaunch: PivotHost["Service"]["relaunch"] = (caller, input) =>
     Effect.gen(function* () {
       const teammate = yield* liveTeammate("pivotHost.relaunch", caller, input);
-      return runStart(
-        yield* host.relaunch({
-          threadId: teammate.threadId,
-          senderThreadId: hostedSenderOf(teammate.pivotThreadId),
-          text: input.text,
-        }),
-      );
+      const started = yield* host.relaunch({
+        threadId: teammate.threadId,
+        senderThreadId: hostedSenderOf(teammate.pivotThreadId),
+        text: input.text,
+      });
+      yield* recheck("pivotHost.relaunch", caller, input, teammate.threadId);
+      return runStart(started);
     });
 
   const retryLaunch: PivotHost["Service"]["retryLaunch"] = (caller, input) =>
     Effect.gen(function* () {
       const teammate = yield* liveTeammate("pivotHost.retryLaunch", caller, input);
-      return runStart(yield* host.retryLaunch(teammate.threadId));
+      const started = yield* host.retryLaunch(teammate.threadId);
+      yield* recheck("pivotHost.retryLaunch", caller, input, teammate.threadId);
+      return runStart(started);
     });
 
   const settle: PivotHost["Service"]["settle"] = (caller, input) =>
@@ -624,6 +641,19 @@ export const make = Effect.gen(function* () {
         ),
     );
 
+  const stopUnreachable = (threadIds: ReadonlyArray<ThreadId>, warning: string) =>
+    Effect.forEach(
+      threadIds,
+      (threadId) =>
+        Effect.gen(function* () {
+          yield* host.stop(threadId);
+          // Its dev servers too; they are not the session's to stop.
+          const teammate = yield* store.getTeammate(threadId);
+          if (teammate !== null) yield* threads.stopProcesses(yield* worktreeOf(teammate));
+        }).pipe(Effect.catchCause((cause) => Effect.logWarning(warning, { threadId, cause }))),
+      { discard: true },
+    );
+
   const createGrant: PivotHost["Service"]["createGrant"] = (input) =>
     Effect.gen(function* () {
       yield* checkProjects("pivotHost.createGrant", input.allowedProjectIds);
@@ -634,11 +664,17 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const command = "pivotHost.setGrantAllowlist";
       yield* checkProjects(command, projectIds);
-      const grant = yield* store.setAllowlist(grantId, projectIds);
-      if (grant === null) {
+      const result = yield* store.setAllowlist(grantId, projectIds);
+      if (result === null) {
         return yield* refuse(command, `Host link ${grantId} does not exist or was revoked.`);
       }
-      return grant;
+      // A project that left the list takes its teammates out of the home's reach, so they
+      // stop the way a revoked link's do, keeping their worktrees.
+      yield* stopUnreachable(
+        result.dropped,
+        "Could not stop a hosted teammate of a removed project",
+      );
+      return result.grant;
     });
 
   const revokeGrant: PivotHost["Service"]["revokeGrant"] = (grantId) =>
@@ -652,24 +688,9 @@ export const make = Effect.gen(function* () {
       // may leave them running full-access. Read after the revoke committed, so one recorded
       // before it is included and none can be recorded after; and read again by a repeat call,
       // so a stop that failed is tried again. Stopping a stopped thread is harmless.
-      const running = yield* store.liveThreadIdsOf(grantId);
-      yield* Effect.forEach(
-        running,
-        (threadId) =>
-          Effect.gen(function* () {
-            yield* host.stop(threadId);
-            // Its dev servers too; they are not the session's to stop.
-            const teammate = yield* store.getTeammate(threadId);
-            if (teammate !== null) yield* threads.stopProcesses(yield* worktreeOf(teammate));
-          }).pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("Could not stop a hosted teammate of a revoked host link", {
-                threadId,
-                cause,
-              }),
-            ),
-          ),
-        { discard: true },
+      yield* stopUnreachable(
+        yield* store.liveThreadIdsOf(grantId),
+        "Could not stop a hosted teammate of a revoked host link",
       );
     });
 
