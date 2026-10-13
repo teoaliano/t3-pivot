@@ -46,6 +46,8 @@ function causeMessage(cause: unknown): string | undefined {
       switch ((cause as Record<string, unknown>)._tag) {
         case "ContextHandoffBudgetError":
           return new ContextHandoffBudgetError().message;
+        case "AgentMemoryWaitError":
+          return stringField(cause, "message");
         case "ClaudeBackgroundWorkBlocksQueryReplacementError":
           return stringField(cause, "message");
         case "ContextHandoffDeliveryUncertainError":

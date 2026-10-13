@@ -10,7 +10,17 @@ import * as Effect from "effect/Effect";
 import { ChildProcessSpawner } from "effect/process";
 
 import * as ProcessRunner from "../processRunner.ts";
-import { agentSliceMemoryLimits, classifyScope, make, type ScopeState } from "./agentScope.ts";
+import {
+  agentScopeMemoryLimits,
+  agentSliceMemoryLimits,
+  classifyMemory,
+  classifyScope,
+  make,
+  parseMemoryBytes,
+  parseMemoryShare,
+  parsePressureSomeAvg10,
+  type ScopeState,
+} from "./agentScope.ts";
 
 const GiB = 1024 ** 3;
 
@@ -51,6 +61,76 @@ describe("agentSliceMemoryLimits", () => {
 
   it("still gives agents most of a small machine", () => {
     expect(agentSliceMemoryLimits(8 * GiB)).toEqual({ high: 4 * GiB, max: 6 * GiB });
+  });
+});
+
+describe("agentScopeMemoryLimits", () => {
+  it("gives each scope half of the slice's high mark and three quarters of its max", () => {
+    const slice = agentSliceMemoryLimits(14 * GiB);
+    expect(agentScopeMemoryLimits(slice)).toEqual({
+      high: Math.floor(slice.high / 2),
+      max: Math.floor((slice.max * 3) / 4),
+    });
+    expect(agentScopeMemoryLimits(slice).max).toBeLessThan(slice.max);
+  });
+
+  it("takes configured shares, and ignores one outside (0, 1]", () => {
+    expect(parseMemoryShare("0.25", 0.5)).toBe(0.25);
+    expect(parseMemoryShare("1", 0.5)).toBe(1);
+    expect(parseMemoryShare("0", 0.5)).toBe(0.5);
+    expect(parseMemoryShare("1.5", 0.5)).toBe(0.5);
+    expect(parseMemoryShare("lots", 0.5)).toBe(0.5);
+    expect(parseMemoryShare(undefined, 0.5)).toBe(0.5);
+  });
+});
+
+describe("memory probe readers", () => {
+  it("reads a cgroup byte count, and treats max or junk as no limit", () => {
+    expect(parseMemoryBytes("9663676416\n")).toBe(9663676416);
+    expect(parseMemoryBytes("max\n")).toBeUndefined();
+    expect(parseMemoryBytes("")).toBeUndefined();
+  });
+
+  it("reads the some avg10 line of /proc/pressure/memory", () => {
+    const fixture = [
+      "some avg10=12.34 avg60=8.00 avg300=2.10 total=1234567",
+      "full avg10=4.56 avg60=1.00 avg300=0.40 total=765432",
+      "",
+    ].join("\n");
+    expect(parsePressureSomeAvg10(fixture)).toBe(12.34);
+    expect(parsePressureSomeAvg10("")).toBe(0);
+  });
+});
+
+describe("classifyMemory", () => {
+  const GB = 1e9;
+
+  it("is ok while nothing stalls, even with the page cache filling memory.high", () => {
+    expect(classifyMemory({ currentBytes: 6 * GB, highBytes: 9.35 * GB, psiSomeAvg10: 0 })).toBe(
+      "ok",
+    );
+    // Cache at the high mark is not a shortage until something stalls.
+    expect(classifyMemory({ currentBytes: 9.35 * GB, highBytes: 9.35 * GB, psiSomeAvg10: 0 })).toBe(
+      "ok",
+    );
+  });
+
+  it("is tight once agents start stalling on memory", () => {
+    expect(classifyMemory({ currentBytes: 6 * GB, highBytes: 9.35 * GB, psiSomeAvg10: 2 })).toBe(
+      "tight",
+    );
+  });
+
+  it("is starved when the slice sits at memory.high and stalls, as in three typechecks", () => {
+    expect(classifyMemory({ currentBytes: 9.7 * GB, highBytes: 9.35 * GB, psiSomeAvg10: 3 })).toBe(
+      "starved",
+    );
+  });
+
+  it("is starved on heavy stalls alone, and without a high mark", () => {
+    expect(classifyMemory({ currentBytes: 2 * GB, highBytes: undefined, psiSomeAvg10: 15 })).toBe(
+      "starved",
+    );
   });
 });
 
@@ -127,6 +207,24 @@ describe("AgentScope service", () => {
         expect(yield* scope.oomKilled("a")).toBe(false);
       }),
     ),
+  );
+
+  it.effect(
+    "limits each agent scope inside the slice, so one runaway child stays in its scope",
+    () =>
+      withFakeSystemd(({ scope }) =>
+        Effect.gen(function* () {
+          const launch = yield* scope.wrap({
+            command: "agent",
+            args: [],
+            name: "t",
+            threadId: "a",
+          });
+          const limits = agentScopeMemoryLimits(agentSliceMemoryLimits(NodeOS.totalmem()));
+          expect(launch.args).toContain(`--property=MemoryHigh=${limits.high}`);
+          expect(launch.args).toContain(`--property=MemoryMax=${limits.max}`);
+        }),
+      ),
   );
 
   it.effect("keeps a running scope while hundreds of other threads launch", () =>

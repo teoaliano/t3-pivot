@@ -1,5 +1,6 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
 /**
  * Isolates long-lived agent and terminal processes from the server on Linux.
@@ -43,6 +44,45 @@ export interface AgentScopeShape {
    * SIGTERM first, then SIGKILL for what survives the grace period.
    */
   readonly stop: (threadId: string) => Effect.Effect<void>;
+   * Waits until the machine has memory for one more agent, then returns. Agents
+   * start in the order they asked, one at a time. Fails with
+   * AgentMemoryWaitError when the wait runs out. Nothing waits on a session that
+   * already runs. Call it before opening a provider session.
+   */
+  readonly admit: (input: {
+    readonly threadId: string;
+    readonly name: string;
+  }) => Effect.Effect<void, AgentMemoryWaitError>;
+  /** The machine's memory for agents now, or undefined where it is not measured. */
+  readonly memory: () => Effect.Effect<MemoryProbe | undefined>;
+  /** Threads whose agent is waiting in the admission queue. */
+  readonly queuedThreadIds: () => Effect.Effect<ReadonlySet<string>>;
+}
+
+/**
+ * ok: a new agent starts now. tight: the slice is near its limit and the kernel
+ * is starting to stall. starved: agents are throttled or stalling hard, so
+ * another agent would make it worse.
+ */
+export type MemoryState = "ok" | "tight" | "starved";
+
+export interface MemoryProbe {
+  readonly state: MemoryState;
+  /** `memory.current` of the agents slice, in bytes. */
+  readonly currentBytes: number;
+  /** `memory.high` of the agents slice, in bytes; undefined when unlimited. */
+  readonly highBytes: number | undefined;
+  /** The `some avg10` share of time stalled on memory, from /proc/pressure/memory. */
+  readonly psiSomeAvg10: number;
+}
+
+export class AgentMemoryWaitError extends Schema.TaggedError<AgentMemoryWaitError>()(
+  "AgentMemoryWaitError",
+  { summary: Schema.String },
+) {
+  override get message() {
+    return this.summary;
+  }
 }
 
 export interface AgentScopeCommand {
@@ -56,6 +96,9 @@ export const AgentScope = Context.Reference<AgentScopeShape>("@t3tools/shared/Ag
     oomKilled: () => Effect.succeed(false),
     clear: () => Effect.void,
     stop: () => Effect.void,
+    admit: () => Effect.void,
+    memory: () => Effect.succeed(undefined),
+    queuedThreadIds: () => Effect.succeed(new Set<string>()),
   }),
 });
 

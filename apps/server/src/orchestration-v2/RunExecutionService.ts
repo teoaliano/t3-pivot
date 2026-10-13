@@ -24,6 +24,7 @@ import {
   type ThreadId,
   type TurnItemId,
 } from "@t3tools/contracts";
+import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as Context from "effect/Context";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
@@ -576,6 +577,7 @@ export const layer: Layer.Layer<
     const eventSink = yield* EventSink.EventSinkV2;
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
     const providerEventIngestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
+    const agentScope = yield* AgentScope;
     const serverSettings = yield* ServerSettings.ServerSettingsService;
     const mcpAppModelContext = yield* McpAppModelContext.McpAppModelContext;
     const finalizationObserver = yield* RunFinalizationService.RunFinalizationObserver;
@@ -1453,10 +1455,14 @@ export const layer: Layer.Layer<
             : input.session.startTurn(turnInput);
           yield* Effect.andThen(shouldStart, startTurn).pipe(
             Effect.catchCause((cause) =>
-              Effect.logError("orchestration V2 provider turn start failed", {
-                runId: input.run.id,
-                cause,
-              }).pipe(
+              agentScope.memory().pipe(
+                Effect.flatMap((memory) =>
+                  Effect.logError("orchestration V2 provider turn start failed", {
+                    runId: input.run.id,
+                    cause: Cause.pretty(cause),
+                    memory,
+                  }),
+                ),
                 Effect.andThen(Fiber.interrupt(providerEventFiber)),
                 Effect.andThen(Ref.get(latestProviderThread)),
                 Effect.flatMap((providerThread) =>

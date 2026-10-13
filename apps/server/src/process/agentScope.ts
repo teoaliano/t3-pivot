@@ -7,10 +7,13 @@ import {
   agentScopeCommand,
   type AgentScopeShape,
   type AgentSystemdScope,
+  type MemoryProbe,
+  type MemoryState,
 } from "@t3tools/shared/AgentScope";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveCommandPath } from "@t3tools/shared/shell";
 import * as Context from "effect/Context";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -19,6 +22,12 @@ import * as Path from "effect/Path";
 import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { procHost, stopScope } from "./scopeReaper.ts";
+import {
+  ADMISSION_FILE,
+  admitAgent,
+  queuedThreads,
+  type AdmissionTiming,
+} from "./agentAdmission.ts";
 
 /**
  * Agents and terminals share this slice. It sits in app.slice next to the
@@ -41,6 +50,79 @@ export function agentSliceMemoryLimits(totalBytes: number) {
     max: Math.max(totalBytes - 4 * GiB, Math.floor(totalBytes * 0.75)),
   };
 }
+
+/**
+ * Each agent scope gets a share of the slice limits, so one runaway child is
+ * throttled, then OOM-killed, inside its own scope before it drags the slice
+ * over its limit. Terminals get the same scope, so they share the limits.
+ */
+export const AGENT_SCOPE_HIGH_SHARE = 0.5;
+export const AGENT_SCOPE_MAX_SHARE = 0.75;
+
+export function agentScopeMemoryLimits(
+  slice: { readonly high: number; readonly max: number },
+  shares: { readonly high: number; readonly max: number } = {
+    high: AGENT_SCOPE_HIGH_SHARE,
+    max: AGENT_SCOPE_MAX_SHARE,
+  },
+) {
+  return {
+    high: Math.floor(slice.high * shares.high),
+    max: Math.floor(slice.max * shares.max),
+  };
+}
+
+/** A share from the environment, kept only when it is in (0, 1]. */
+export function parseMemoryShare(value: string | undefined, fallback: number) {
+  if (value === undefined) return fallback;
+  const share = Number(value);
+  return Number.isFinite(share) && share > 0 && share <= 1 ? share : fallback;
+}
+
+/** Share of time stalled on memory, in percent over ten seconds, that makes the machine tight. */
+export const TIGHT_PRESSURE = 1;
+/** Share of time stalled on memory, in percent over ten seconds, that makes it starved. */
+export const STARVED_PRESSURE = 10;
+
+/**
+ * Reads `memory.current` or `memory.high`: a byte count, or undefined for `max`
+ * and for anything unreadable.
+ */
+export function parseMemoryBytes(text: string): number | undefined {
+  const value = text.trim();
+  if (value === "" || value === "max") return undefined;
+  const bytes = Number(value);
+  return Number.isFinite(bytes) ? bytes : undefined;
+}
+
+/** The `some avg10` figure from /proc/pressure/memory, or 0 when there is none. */
+export function parsePressureSomeAvg10(text: string): number {
+  const some = text.split("\n").find((line) => line.startsWith("some "));
+  const match = /avg10=(\d+(?:\.\d+)?)/.exec(some ?? "");
+  return match === null ? 0 : Number(match[1]);
+}
+
+/**
+ * Whether the slice can take one more agent. Page cache fills memory.high and
+ * stays there, so headroom from memory.current alone would stall the queue for
+ * good. Stalling on memory is the signal that matters: it means agents are
+ * already short of memory. Being at memory.high counts only with a stall.
+ */
+export function classifyMemory(input: {
+  readonly currentBytes: number;
+  readonly highBytes: number | undefined;
+  readonly psiSomeAvg10: number;
+}): MemoryState {
+  const atHigh = input.highBytes !== undefined && input.currentBytes >= input.highBytes;
+  if (input.psiSomeAvg10 >= STARVED_PRESSURE) return "starved";
+  if (atHigh && input.psiSomeAvg10 >= TIGHT_PRESSURE) return "starved";
+  if (input.psiSomeAvg10 >= TIGHT_PRESSURE) return "tight";
+  return "ok";
+}
+
+export const ADMISSION_TIMING: AdmissionTiming = { spacingMs: 30_000, staleMs: 11 * 60_000 };
+const ADMISSION_TIMEOUT_MS = 10 * 60_000;
+const ADMISSION_POLL_MS = 2_000;
 
 export interface ScopeState {
   readonly loadState: string;
@@ -162,6 +244,16 @@ export const make = Effect.gen(function* () {
         return undefined;
       }
       const limits = agentSliceMemoryLimits(NodeOS.totalmem());
+      const scopeLimits = agentScopeMemoryLimits(limits, {
+        high: parseMemoryShare(
+          hostEnvironment.T3CODE_AGENT_SCOPE_MEMORY_HIGH_SHARE,
+          AGENT_SCOPE_HIGH_SHARE,
+        ),
+        max: parseMemoryShare(
+          hostEnvironment.T3CODE_AGENT_SCOPE_MEMORY_MAX_SHARE,
+          AGENT_SCOPE_MAX_SHARE,
+        ),
+      });
       const limited = yield* run(systemctl, [
         "--user",
         "set-property",
@@ -175,16 +267,32 @@ export const make = Effect.gen(function* () {
           stderr: limited._tag === "Some" ? limited.value.stderr.trim() : undefined,
         });
       }
+      const shown = yield* run(systemctl, [
+        "--user",
+        "show",
+        AGENT_SLICE,
+        "--property=ControlGroup",
+      ]);
+      const sliceCgroup =
+        shown._tag === "Some" && shown.value.code === 0
+          ? (parseKeyValues(shown.value.stdout).get("ControlGroup") ?? "")
+          : "";
       yield* Effect.logInfo("Agent scopes are on", {
         slice: AGENT_SLICE,
         ...limits,
+        scope: scopeLimits,
         oomPolicy: scopeOptions.length > 0,
       });
       return {
         systemdRun,
         systemctl,
         runtimeDir,
-        scopeOptions,
+        scopeOptions: [
+          ...scopeOptions,
+          `--property=MemoryHigh=${scopeLimits.high}`,
+          `--property=MemoryMax=${scopeLimits.max}`,
+        ],
+        sliceCgroup,
       };
     }),
   );
@@ -197,6 +305,25 @@ export const make = Effect.gen(function* () {
     fileSystem
       .readFileString(path.join("/sys/fs/cgroup", controlGroup, file))
       .pipe(Effect.orElseSucceed(() => ""));
+
+  // Reads the agents slice's memory; undefined when the slice has no cgroup to read.
+  const readMemory = (sliceCgroup: string) =>
+    Effect.gen(function* () {
+      if (sliceCgroup === "") return undefined;
+      const currentBytes = parseMemoryBytes(yield* readCgroupFile(sliceCgroup, "memory.current"));
+      if (currentBytes === undefined) return undefined;
+      const highBytes = parseMemoryBytes(yield* readCgroupFile(sliceCgroup, "memory.high"));
+      const pressure = yield* fileSystem
+        .readFileString("/proc/pressure/memory")
+        .pipe(Effect.orElseSucceed(() => ""));
+      const psiSomeAvg10 = parsePressureSomeAvg10(pressure);
+      return {
+        state: classifyMemory({ currentBytes, highBytes, psiSomeAvg10 }),
+        currentBytes,
+        highBytes,
+        psiSomeAvg10,
+      } satisfies MemoryProbe;
+    });
 
   const readScope = (systemctl: string, unit: string) =>
     Effect.gen(function* () {
@@ -299,6 +426,40 @@ export const make = Effect.gen(function* () {
       return false;
     });
 
+  const memory: AgentScopeShape["memory"] = () =>
+    Effect.gen(function* () {
+      const scope = yield* systemd;
+      return scope === undefined ? undefined : yield* readMemory(scope.sliceCgroup);
+    });
+
+  const admit: AgentScopeShape["admit"] = (input) =>
+    Effect.gen(function* () {
+      const scope = yield* systemd;
+      if (scope === undefined) return;
+      yield* admitAgent({
+        fs: fileSystem,
+        queuePath: path.join(scope.runtimeDir, ADMISSION_FILE),
+        ticketId: NodeCrypto.randomUUID(),
+        threadId: input.threadId,
+        probe: readMemory(scope.sliceCgroup),
+        timing: ADMISSION_TIMING,
+        timeoutMs: ADMISSION_TIMEOUT_MS,
+        pollMs: ADMISSION_POLL_MS,
+      });
+    });
+
+  const queuedThreadIds: AgentScopeShape["queuedThreadIds"] = () =>
+    Effect.gen(function* () {
+      const scope = yield* systemd;
+      if (scope === undefined) return new Set<string>();
+      return yield* queuedThreads(
+        fileSystem,
+        path.join(scope.runtimeDir, ADMISSION_FILE),
+        yield* Clock.currentTimeMillis,
+        ADMISSION_TIMING,
+      );
+    });
+
   const clear: AgentScopeShape["clear"] = (threadId) =>
     Effect.gen(function* () {
       if (!scopeByThread.has(threadId)) return;
@@ -338,6 +499,9 @@ export const make = Effect.gen(function* () {
     oomKilled,
     clear,
     stop,
+    admit,
+    memory,
+    queuedThreadIds,
   } satisfies AgentScopeShape;
 });
 

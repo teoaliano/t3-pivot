@@ -7,6 +7,7 @@ import {
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
+import { AgentMemoryWaitError } from "@t3tools/shared/AgentScope";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -98,6 +99,23 @@ it("preserves actionable handoff errors wrapped by turn startup", () => {
   assert.equal(
     makeProviderFailure({ cause: Cause.fail(cause) }).message,
     new ContextHandoffBudgetError().message,
+  );
+});
+
+it("tells the user when a turn could not start for lack of memory", () => {
+  const cause = new ProviderAdapter.ProviderAdapterTurnStartError({
+    driver: ProviderDriverKind.make("claudeAgent"),
+    threadId: ThreadId.make("thread:memory-wait"),
+    providerThreadId: ProviderThreadId.make("provider-thread:memory-wait"),
+    runId: RunId.make("run:memory-wait"),
+    cause: new AgentMemoryWaitError({
+      summary:
+        "Not started: the machine does not have memory for another agent (agents use 9.7 of 9.4 GB). Retry once a running agent finishes.",
+    }),
+  });
+  assert.equal(
+    makeProviderFailure({ cause: Cause.fail(cause) }).message,
+    "Not started: the machine does not have memory for another agent (agents use 9.7 of 9.4 GB). Retry once a running agent finishes.",
   );
 });
 
