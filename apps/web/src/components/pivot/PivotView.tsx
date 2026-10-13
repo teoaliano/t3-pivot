@@ -53,6 +53,7 @@ import {
 import { toastManager } from "../ui/toast";
 import { startNewPivot } from "./NewPivot";
 import { PivotViewSwitch } from "./PivotChatChrome";
+import { PivotViewPanelControls } from "./PivotViewPanelControls";
 import {
   hidePane,
   type LayoutNode,
@@ -228,12 +229,12 @@ export function PivotView(props: { pivot: ScopedThreadRef }) {
             />
           </>
         ) : null}
-        {/* Starts past the macOS traffic lights, or at the plain gutter in fullscreen and on the
-            web. With the sidebar collapsed, the sidebar toggle sits in that same spot, so the
-            header clears it like Chat's does. */}
+        {/* Starts at the plain gutter, since the sidebar beside it carries the traffic lights.
+            With the sidebar collapsed, its toggle sits there, so the header clears it like
+            Chat's does. */}
         <header
           className={cn(
-            "relative flex h-[var(--workspace-topbar-height)] shrink-0 items-center gap-3 bg-background pr-3 pl-(--workspace-controls-left)",
+            "relative flex h-[var(--workspace-topbar-height)] shrink-0 items-center gap-3 bg-background pr-3 pl-(--workspace-gutter-start)",
             COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
             isElectron && "drag-region wco:pr-(--workspace-native-controls-inset)",
           )}
@@ -262,6 +263,7 @@ export function PivotView(props: { pivot: ScopedThreadRef }) {
           </WorkspaceBreadcrumb>
           <div className="ml-auto flex items-center gap-2">
             <PivotViewSwitch environmentId={pivot.environmentId} threadId={pivot.threadId} force />
+            <PivotViewPanelControls />
             <Menu>
               <MenuTrigger
                 render={<Button size="icon-sm" variant="ghost" aria-label="Pivot view menu" />}
