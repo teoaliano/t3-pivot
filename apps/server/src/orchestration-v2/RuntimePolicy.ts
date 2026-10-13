@@ -125,7 +125,6 @@ export const layerFromProjectStore: Layer.Layer<
             }),
           ),
         );
-        const cwd = input.thread.worktreePath ?? (yield* loadProject).workspaceRoot;
         const writeScope = yield* (yield* ThreadWriteAccess.ThreadWriteAccess)
           .scopeFor(input.thread)
           .pipe(
@@ -138,12 +137,14 @@ export const layerFromProjectStore: Layer.Layer<
                 }),
             ),
           );
+        const cwd =
+          writeScope?.cwd ?? input.thread.worktreePath ?? (yield* loadProject).workspaceRoot;
         const withoutForgeMerge =
           yield* (yield* ThreadToolRestrictions.ThreadToolRestrictions).withoutForgeMerge(
             input.thread,
           );
-        // Only a scoped thread is a Pivot, and its cwd is its home: the project it works on
-        // is named separately so its instructions can point at the checkout.
+        // A scoped thread names the project it works on separately, so its instructions can
+        // point at the checkout even when it runs elsewhere.
         const project =
           writeScope === null
             ? undefined

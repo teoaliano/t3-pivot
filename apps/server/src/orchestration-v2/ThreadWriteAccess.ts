@@ -16,6 +16,8 @@ export interface ThreadWriteScope {
   readonly writableRoots: ReadonlyArray<string>;
   /** The only files the agent may edit, for providers that scope edits by file. */
   readonly writableFiles: ReadonlyArray<string>;
+  /** Where the agent runs, when that is not the thread's own worktree path. */
+  readonly cwd?: string;
 }
 
 export class ThreadWriteAccess extends Context.Reference<{

@@ -58,6 +58,33 @@ const thread = (id: ThreadId, worktreePath: string): OrchestrationV2AppThread =>
   };
 };
 
+// A delegate_task child copies its parent's thread, worktree path included.
+const subagentOf = (parent: OrchestrationV2AppThread, id: ThreadId): OrchestrationV2AppThread => ({
+  ...parent,
+  id,
+  lineage: { parentThreadId: parent.id, relationshipToParent: "subagent", rootThreadId: parent.id },
+});
+
+const projectStore = Layer.mock(ProjectStore.ProjectStoreV2)({
+  get: () =>
+    Effect.succeed(
+      Option.some({
+        projectId,
+        title: "Project",
+        workspaceRoot: "/project-root",
+        defaultModelSelection: null,
+        defaultThreadEnvMode: null,
+        autoPull: false,
+        faviconPath: null,
+        projectIcon: null,
+        scripts: [],
+        createdAt: "2026-10-13T00:00:00.000Z",
+        updatedAt: "2026-10-13T00:00:00.000Z",
+        deletedAt: null,
+      }),
+    ),
+});
+
 const runtimePolicyLayer = RuntimePolicy.layerFromProjectStore.pipe(
   Layer.provide(
     Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
@@ -68,27 +95,7 @@ const runtimePolicyLayer = RuntimePolicy.layerFromProjectStore.pipe(
       subscribeChanges: Effect.never,
     }),
   ),
-  Layer.provide(
-    Layer.mock(ProjectStore.ProjectStoreV2)({
-      get: () =>
-        Effect.succeed(
-          Option.some({
-            projectId,
-            title: "Project",
-            workspaceRoot: "/project-root",
-            defaultModelSelection: null,
-            defaultThreadEnvMode: null,
-            autoPull: false,
-            faviconPath: null,
-            projectIcon: null,
-            scripts: [],
-            createdAt: "2026-10-13T00:00:00.000Z",
-            updatedAt: "2026-10-13T00:00:00.000Z",
-            deletedAt: null,
-          }),
-        ),
-    }),
-  ),
+  Layer.provide(projectStore),
 );
 
 // A Pivot with one teammate.
@@ -123,6 +130,7 @@ const layer = Layer.mergeAll(
   PivotToolRestrictions.layer.pipe(
     Layer.provideMerge(Layer.effectDiscard(seed)),
     Layer.provideMerge(Layer.merge(PivotStore.layer, PivotHostStore.layer)),
+    Layer.provideMerge(projectStore),
   ),
 ).pipe(Layer.provide(PivotDatabase.layerMemory), Layer.provideMerge(NodeServices.layer));
 
@@ -163,6 +171,26 @@ it.layer(layer)("Pivot and teammate permissions", (it) => {
         ],
         installPermissionCallback: false,
       });
+    }),
+  );
+
+  it.effect("confines a Pivot's subagent to its own write scope, not the Pivot's home", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const child = subagentOf(thread(pivotThreadId, home), ThreadId.make("subagent-1"));
+      const resolved = yield* policy.resolve({ thread: child, modelSelection });
+
+      // A child of the Pivot is not a Pivot, so before the fix it ran with full access in
+      // the home. It reads the project's checkout and writes nothing.
+      assert.equal(resolved.cwd, "/project-root");
+      assert.deepEqual(resolved.sandboxPolicy, {
+        type: "workspaceWrite",
+        writableRoots: [],
+        networkAccess: true,
+        excludeSlashTmp: true,
+        excludeTmpdirEnvVar: true,
+      });
+      assert.deepEqual(resolved.writableFiles, []);
     }),
   );
 
