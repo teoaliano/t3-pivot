@@ -365,6 +365,20 @@ import {
   PivotDecisionLog,
   PivotDecisionLogInput,
   PivotError,
+  PivotHostDescribeInput,
+  PivotHostDescription,
+  PivotHostError,
+  PivotHostEvent,
+  PivotHostEventsInput,
+  PivotHostLandResult,
+  PivotHostLaunchInput,
+  PivotHostLaunchResult,
+  PivotHostMergeInput,
+  PivotHostPullRequestInput,
+  PivotHostRunStart,
+  PivotHostSendInput,
+  PivotHostTeammateInput,
+  PivotHostTeardownInput,
   PivotStreamEvent,
   PivotSubscribeInput,
   PivotTeammateDetail,
@@ -540,6 +554,18 @@ export const WS_METHODS = {
   pivotAnswerDecision: "pivot.answerDecision",
   pivotTeammateDetail: "pivot.teammateDetail",
   pivotDecisionLog: "pivot.decisionLog",
+  pivotHostDescribe: "pivotHost.describe",
+  pivotHostLaunchTeammate: "pivotHost.launchTeammate",
+  pivotHostSend: "pivotHost.send",
+  pivotHostStop: "pivotHost.stop",
+  pivotHostRelaunch: "pivotHost.relaunch",
+  pivotHostRetryLaunch: "pivotHost.retryLaunch",
+  pivotHostSettle: "pivotHost.settle",
+  pivotHostTeardown: "pivotHost.teardown",
+  pivotHostPullRequestDetail: "pivotHost.pullRequestDetail",
+  pivotHostMergePullRequest: "pivotHost.mergePullRequest",
+  pivotHostLand: "pivotHost.land",
+  pivotHostEvents: "pivotHost.events",
   scheduledTasksList: "scheduledTasks.list",
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
   scheduledTasksUpsert: "scheduledTasks.upsert",
@@ -1869,6 +1895,82 @@ const WsPivotDecisionLogRpc = Rpc.make(WS_METHODS.pivotDecisionLog, {
   error: Schema.Union([PivotError, EnvironmentAuthorizationError]),
 });
 
+const PivotHostRpcError = Schema.Union([PivotHostError, EnvironmentAuthorizationError]);
+
+const WsPivotHostDescribeRpc = Rpc.make(WS_METHODS.pivotHostDescribe, {
+  payload: PivotHostDescribeInput,
+  success: PivotHostDescription,
+  error: PivotHostRpcError,
+});
+
+const WsPivotHostLaunchTeammateRpc = Rpc.make(WS_METHODS.pivotHostLaunchTeammate, {
+  payload: PivotHostLaunchInput,
+  success: PivotHostLaunchResult,
+  error: PivotHostRpcError,
+});
+
+const WsPivotHostSendRpc = Rpc.make(WS_METHODS.pivotHostSend, {
+  payload: PivotHostSendInput,
+  success: Schema.Struct({}),
+  error: PivotHostRpcError,
+});
+
+const WsPivotHostStopRpc = Rpc.make(WS_METHODS.pivotHostStop, {
+  payload: PivotHostTeammateInput,
+  success: Schema.Struct({}),
+  error: PivotHostRpcError,
+});
+
+const WsPivotHostRelaunchRpc = Rpc.make(WS_METHODS.pivotHostRelaunch, {
+  payload: PivotHostSendInput,
+  success: PivotHostRunStart,
+  error: PivotHostRpcError,
+});
+
+const WsPivotHostRetryLaunchRpc = Rpc.make(WS_METHODS.pivotHostRetryLaunch, {
+  payload: PivotHostTeammateInput,
+  success: PivotHostRunStart,
+  error: PivotHostRpcError,
+});
+
+const WsPivotHostSettleRpc = Rpc.make(WS_METHODS.pivotHostSettle, {
+  payload: PivotHostTeammateInput,
+  success: Schema.Struct({}),
+  error: PivotHostRpcError,
+});
+
+const WsPivotHostTeardownRpc = Rpc.make(WS_METHODS.pivotHostTeardown, {
+  payload: PivotHostTeardownInput,
+  success: Schema.Struct({}),
+  error: PivotHostRpcError,
+});
+
+const WsPivotHostPullRequestDetailRpc = Rpc.make(WS_METHODS.pivotHostPullRequestDetail, {
+  payload: PivotHostPullRequestInput,
+  success: PullRequestDetail,
+  error: PivotHostRpcError,
+});
+
+const WsPivotHostMergePullRequestRpc = Rpc.make(WS_METHODS.pivotHostMergePullRequest, {
+  payload: PivotHostMergeInput,
+  success: Schema.Struct({}),
+  error: PivotHostRpcError,
+});
+
+const WsPivotHostLandRpc = Rpc.make(WS_METHODS.pivotHostLand, {
+  payload: PivotHostTeammateInput,
+  success: PivotHostLandResult,
+  error: PivotHostRpcError,
+});
+
+/** The hosted-teammate log after a cursor, then each new entry. Ends when the link is revoked. */
+const WsPivotHostEventsRpc = Rpc.make(WS_METHODS.pivotHostEvents, {
+  payload: PivotHostEventsInput,
+  success: PivotHostEvent,
+  error: PivotHostRpcError,
+  stream: true,
+});
+
 const WsScheduledTasksListRpc = Rpc.make(WS_METHODS.scheduledTasksList, {
   payload: ScheduledTaskListInput,
   success: ScheduledTaskListResult,
@@ -2028,6 +2130,18 @@ export const WsRpcGroup = RpcGroup.make(
   WsPivotAnswerDecisionRpc,
   WsPivotTeammateDetailRpc,
   WsPivotDecisionLogRpc,
+  WsPivotHostDescribeRpc,
+  WsPivotHostLaunchTeammateRpc,
+  WsPivotHostSendRpc,
+  WsPivotHostStopRpc,
+  WsPivotHostRelaunchRpc,
+  WsPivotHostRetryLaunchRpc,
+  WsPivotHostSettleRpc,
+  WsPivotHostTeardownRpc,
+  WsPivotHostPullRequestDetailRpc,
+  WsPivotHostMergePullRequestRpc,
+  WsPivotHostLandRpc,
+  WsPivotHostEventsRpc,
   WsScheduledTasksUpsertRpc,
   WsScheduledTasksSetEnabledRpc,
   WsScheduledTasksDeleteRpc,

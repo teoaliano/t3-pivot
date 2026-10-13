@@ -312,3 +312,29 @@ describe("PivotService.teardownTeammate", () => {
     }).pipe(Effect.provide(layer));
   });
 });
+
+describe("PivotService teammate tools after teardown", () => {
+  it.effect("refuses a torn-down teammate's report_status and record_scout_report", () => {
+    const { fake, workspaceRoot, layer } = setup();
+    return Effect.gen(function* () {
+      const pivots = yield* PivotService.PivotService;
+      const store = yield* PivotStore.PivotStore;
+      const ship = yield* dispatchShip(fake, workspaceRoot);
+      const record = yield* store.getTeammate(ship.teammate);
+      yield* store.dispatch({
+        type: "teammate.tear-down",
+        pivotThreadId: record!.pivotThreadId,
+        threadId: ship.teammate,
+      });
+
+      assert.strictEqual(
+        yield* refusal(pivots.reportStatus(ship.teammate, { status: "working", summary: "Hi" })),
+        "This teammate was torn down.",
+      );
+      assert.strictEqual(
+        yield* refusal(pivots.recordScoutReport(ship.teammate, { report: "Hi" })),
+        "This teammate was torn down.",
+      );
+    }).pipe(Effect.provide(layer));
+  });
+});

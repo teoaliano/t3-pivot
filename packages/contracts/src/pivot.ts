@@ -1,14 +1,17 @@
 import * as Schema from "effect/Schema";
 
 import {
+  EnvironmentId,
   IsoDateTime,
   NonNegativeInt,
+  PositiveInt,
   ProjectId,
   RunId,
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
 import { ModelSelection } from "./modelSelection.ts";
+import { TeammateModelEntry } from "./settings.ts";
 
 /** A ship delivers a change; a scout investigates and leaves a report. */
 export const TeammateKind = Schema.Literals(["ship", "scout"]);
@@ -242,3 +245,192 @@ export class PivotError extends Schema.TaggedError<PivotError>()("PivotError", {
   message: Schema.String,
   cause: Schema.optional(Schema.Defect()),
 }) {}
+
+// --- Pivot host ------------------------------------------------------------------------
+//
+// What this environment exposes so another environment's Pivot (its home) can run
+// teammates here. Every method needs the `pivot:host` scope, and every request names the
+// home's environment ID, which the host binds to the host link on its first call.
+
+/** Limits on what a host link's session may send, so one request cannot be made unbounded. */
+export const PIVOT_HOST_TITLE_MAX_LENGTH = 200;
+export const PIVOT_HOST_LABEL_MAX_LENGTH = 200;
+export const PIVOT_HOST_DISPATCH_ID_MAX_LENGTH = 128;
+export const PIVOT_HOST_TEXT_MAX_LENGTH = 100_000;
+export const PIVOT_HOST_REF_MAX_LENGTH = 255;
+
+// A branch the host launches from. It reaches `git`, so it must look like a ref name: never
+// an option (a leading "-"), and none of the sequences git refuses in one.
+const PLAUSIBLE_REF_PATTERN =
+  /^(?![-/])(?!.*\.\.)(?!.*\/\/)(?!.*(?:^|\/)\.)(?!.*\.lock(?:\/|$))(?!.*[/.]$)[A-Za-z0-9._/-]+$/;
+export const PivotHostBranchName = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(PIVOT_HOST_REF_MAX_LENGTH),
+  Schema.isPattern(PLAUSIBLE_REF_PATTERN),
+);
+
+/** Fields every `pivotHost.*` request carries. */
+const PivotHostCall = { homeEnvironmentId: EnvironmentId };
+
+/** Why a host refused, so the home can tell a revoked link from a request it got wrong. */
+export const PivotHostErrorReason = Schema.Literals([
+  "not-authorized",
+  "revoked",
+  "home-mismatch",
+  "project-not-allowed",
+  "worktree-not-clean",
+  "teammate-not-found",
+  "refused",
+  "failed",
+]);
+export type PivotHostErrorReason = typeof PivotHostErrorReason.Type;
+
+export class PivotHostError extends Schema.TaggedError<PivotHostError>()("PivotHostError", {
+  reason: PivotHostErrorReason,
+  message: Schema.String,
+  cause: Schema.optional(Schema.Defect()),
+}) {}
+
+export const PivotHostDescribeInput = Schema.Struct({ ...PivotHostCall });
+export type PivotHostDescribeInput = typeof PivotHostDescribeInput.Type;
+
+/** A project on the host link's allowlist, as the home matches it to its own. */
+export const PivotHostProject = Schema.Struct({
+  projectId: ProjectId,
+  title: Schema.String,
+  /** `repositoryGroupingKeyOf` the project's repository identity; null when it has none. */
+  repositoryKey: Schema.NullOr(TrimmedNonEmptyString),
+  hasRemote: Schema.Boolean,
+  /** The project's teammate models from the host's own Settings. */
+  teammateModels: Schema.Array(TeammateModelEntry),
+});
+export type PivotHostProject = typeof PivotHostProject.Type;
+
+export const PivotHostDescription = Schema.Struct({
+  projects: Schema.Array(PivotHostProject),
+  /** The host's own teammate models, before any project overrides them. */
+  teammateModels: Schema.Array(TeammateModelEntry),
+});
+export type PivotHostDescription = typeof PivotHostDescription.Type;
+
+export const PivotHostLaunchInput = Schema.Struct({
+  ...PivotHostCall,
+  /** The home's idempotency key: a retried launch returns the same teammate. */
+  dispatchId: TrimmedNonEmptyString.check(Schema.isMaxLength(PIVOT_HOST_DISPATCH_ID_MAX_LENGTH)),
+  projectId: ProjectId,
+  /** The Pivot's thread on the home; it sends the teammate its messages. */
+  pivotThreadId: ThreadId,
+  /** What people on the host read as the sender, such as "Pivot on Mac". */
+  pivotLabel: TrimmedNonEmptyString.check(Schema.isMaxLength(PIVOT_HOST_LABEL_MAX_LENGTH)),
+  title: TrimmedNonEmptyString.check(Schema.isMaxLength(PIVOT_HOST_TITLE_MAX_LENGTH)),
+  kind: TeammateKind,
+  intent: TrimmedNonEmptyString.check(Schema.isMaxLength(PIVOT_HOST_TEXT_MAX_LENGTH)),
+  spec: TrimmedNonEmptyString.check(Schema.isMaxLength(PIVOT_HOST_TEXT_MAX_LENGTH)),
+  baseBranch: Schema.optional(PivotHostBranchName),
+  modelSelection: ModelSelection,
+});
+export type PivotHostLaunchInput = typeof PivotHostLaunchInput.Type;
+
+export const PivotHostLaunchResult = Schema.Struct({
+  threadId: ThreadId,
+  branch: Schema.String,
+  baseBranch: Schema.String,
+  worktreePath: Schema.String,
+  deliveryMode: PivotDeliveryMode,
+  runId: Schema.NullOr(RunId),
+  firstRun: Schema.Literals(["started", "failed"]),
+  detail: Schema.NullOr(Schema.String),
+  setupScript: Schema.Literals(["none", "running", "succeeded", "failed"]),
+  setupDetail: Schema.NullOr(Schema.String),
+});
+export type PivotHostLaunchResult = typeof PivotHostLaunchResult.Type;
+
+/** A request about one hosted teammate. */
+export const PivotHostTeammateInput = Schema.Struct({ ...PivotHostCall, threadId: ThreadId });
+export type PivotHostTeammateInput = typeof PivotHostTeammateInput.Type;
+
+export const PivotHostSendInput = Schema.Struct({
+  ...PivotHostCall,
+  threadId: ThreadId,
+  text: TrimmedNonEmptyString.check(Schema.isMaxLength(PIVOT_HOST_TEXT_MAX_LENGTH)),
+});
+export type PivotHostSendInput = typeof PivotHostSendInput.Type;
+
+export const PivotHostRunStart = Schema.Struct({
+  outcome: Schema.Literals(["started", "failed"]),
+  runId: Schema.NullOr(RunId),
+  detail: Schema.NullOr(Schema.String),
+});
+export type PivotHostRunStart = typeof PivotHostRunStart.Type;
+
+export const PivotHostTeardownInput = Schema.Struct({
+  ...PivotHostCall,
+  threadId: ThreadId,
+  /** Remove the worktree even with uncommitted changes. The home decides, on the user's word. */
+  force: Schema.Boolean,
+});
+export type PivotHostTeardownInput = typeof PivotHostTeardownInput.Type;
+
+/** A pull request of the teammate's own: the host resolves the project from the teammate. */
+export const PivotHostPullRequestInput = Schema.Struct({
+  ...PivotHostCall,
+  threadId: ThreadId,
+  host: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(PIVOT_HOST_REF_MAX_LENGTH))),
+  repository: TrimmedNonEmptyString.check(Schema.isMaxLength(PIVOT_HOST_REF_MAX_LENGTH)),
+  number: PositiveInt,
+});
+export type PivotHostPullRequestInput = typeof PivotHostPullRequestInput.Type;
+
+export const PivotHostMergeInput = Schema.Struct({
+  ...PivotHostPullRequestInput.fields,
+  /** The merge is pinned to this head. */
+  expectedHeadSha: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
+});
+export type PivotHostMergeInput = typeof PivotHostMergeInput.Type;
+
+export const PivotHostLandResult = Schema.Union([
+  Schema.TaggedStruct("landed", { head: Schema.String, defaultBranch: Schema.String }),
+  Schema.TaggedStruct("refused", { reason: Schema.String }),
+]);
+export type PivotHostLandResult = typeof PivotHostLandResult.Type;
+
+export const PivotHostEventsInput = Schema.Struct({
+  ...PivotHostCall,
+  /** Entries with a greater sequence; 0 replays the whole log. */
+  afterSequence: NonNegativeInt,
+});
+export type PivotHostEventsInput = typeof PivotHostEventsInput.Type;
+
+/** What the host's log records about a hosted teammate, for the home to apply. */
+export const PivotHostEventBody = Schema.Union([
+  /** An accepted `report_status`. */
+  Schema.TaggedStruct("reported", {
+    status: TeammateReportedStatus,
+    summary: TrimmedNonEmptyString,
+    until: Schema.NullOr(IsoDateTime),
+    runId: Schema.NullOr(RunId),
+    decisionKey: Schema.NullOr(TrimmedNonEmptyString),
+    clearedDecision: Schema.NullOr(
+      Schema.Struct({
+        key: Schema.NullOr(TrimmedNonEmptyString),
+        resolution: TrimmedNonEmptyString,
+      }),
+    ),
+  }),
+  Schema.TaggedStruct("scout-report-recorded", { report: TrimmedNonEmptyString }),
+  /** The thread did something; the home's stuck bound reads the time. */
+  Schema.TaggedStruct("activity", {}),
+  /** The user typed into the thread directly on the host. */
+  Schema.TaggedStruct("user-message", { text: Schema.String }),
+  /** The user answered an approval or question the thread's run was held on. */
+  Schema.TaggedStruct("request-answered", { answer: Schema.String }),
+]);
+export type PivotHostEventBody = typeof PivotHostEventBody.Type;
+
+export const PivotHostEvent = Schema.Struct({
+  /** Increases with every entry the host appends, across all its teammates. */
+  sequence: PositiveInt,
+  threadId: ThreadId,
+  at: IsoDateTime,
+  event: PivotHostEventBody,
+});
+export type PivotHostEvent = typeof PivotHostEvent.Type;

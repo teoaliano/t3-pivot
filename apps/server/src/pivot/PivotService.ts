@@ -57,7 +57,6 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import * as ServerSettings from "../serverSettings.ts";
@@ -71,6 +70,7 @@ import { mergeRefusals, PIVOT_MERGE_PROVIDERS } from "./pivotDelivery.ts";
 import type { PivotEvent, StoredPivotEvent } from "./PivotEvents.ts";
 import * as PivotGit from "./PivotGit.ts";
 import * as PivotHome from "./PivotHome.ts";
+import * as PivotHostStore from "./PivotHostStore.ts";
 import * as PivotStore from "./PivotStore.ts";
 import { chooseTeammateModel, renderTeammateModels } from "./pivotTeammateModels.ts";
 import { loadPivotText, type PivotTextError } from "./pivotTexts.ts";
@@ -315,6 +315,7 @@ export const historyLine = (event: PivotEvent): string => {
 
 export const make = Effect.gen(function* () {
   const store = yield* PivotStore.PivotStore;
+  const hostStore = yield* PivotHostStore.PivotHostStore;
   const threads = yield* PivotThreads.PivotThreads;
   const home = yield* PivotHome.PivotHome;
   const git = yield* PivotGit.PivotGit;
@@ -323,17 +324,9 @@ export const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
-  // Creating a Pivot or a teammate spans two databases; one at a time per project.
-  const projectLocks = new Map<string, Semaphore.Semaphore>();
-  const withProjectLock = <A, E, R>(projectId: ProjectId, effect: Effect.Effect<A, E, R>) =>
-    Effect.suspend(() => {
-      let lock = projectLocks.get(projectId);
-      if (lock === undefined) {
-        lock = Semaphore.makeUnsafe(1);
-        projectLocks.set(projectId, lock);
-      }
-      return lock.withPermits(1)(effect);
-    });
+  // Creating a Pivot or a teammate spans two databases; one at a time per project, under the
+  // same lock a launch for another environment's Pivot takes.
+  const withProjectLock = localHost.withProjectLock;
 
   /** The project's teammate models: its own list when it overrides one, else the environment's. */
   const teammateModels = (projectId: ProjectId) =>
@@ -499,7 +492,11 @@ export const make = Effect.gen(function* () {
    * The teammate with the worktree its thread recorded. Dispatch derived the path the
    * way V2 does; once V2 recorded one, that is the truth.
    */
-  const withRecordedWorktree = (teammate: PivotStore.TeammateRow) =>
+  const withRecordedWorktree = <
+    T extends { readonly threadId: ThreadId; readonly worktreePath: string },
+  >(
+    teammate: T,
+  ) =>
     threads.shell(teammate.threadId).pipe(
       Effect.map((shell) =>
         shell?.worktreePath == null || shell.worktreePath === teammate.worktreePath
@@ -522,22 +519,36 @@ export const make = Effect.gen(function* () {
       return yield* withRecordedWorktree(teammate);
     });
 
+  /**
+   * The calling teammate: one of this environment's own, or one it hosts for another
+   * environment's Pivot. A hosted teammate has no Pivot here, so its reports go to the
+   * hosted log instead of the Pivot store.
+   */
   const liveTeammate = (command: string, caller: ThreadId) =>
     Effect.gen(function* () {
       const teammate = yield* store.getTeammate(caller);
-      if (teammate === null) {
+      const hosted = teammate === null ? yield* hostStore.getTeammate(caller) : null;
+      if (teammate === null && hosted === null) {
         return yield* new PivotCallerError({
           tool: command,
           reason: "Only a teammate can use this tool.",
         });
       }
-      if (teammate.tornDownAt !== null) {
+      if ((teammate ?? hosted)!.tornDownAt !== null) {
         return yield* new PivotCallerError({
           tool: command,
           reason: "This teammate was torn down.",
         });
       }
-      return yield* withRecordedWorktree(teammate);
+      if (hosted !== null && !(yield* hostStore.isLive(hosted.threadId))) {
+        return yield* new PivotCallerError({
+          tool: command,
+          reason: "This teammate's host link was revoked.",
+        });
+      }
+      return teammate !== null
+        ? ({ type: "local", teammate: yield* withRecordedWorktree(teammate) } as const)
+        : ({ type: "hosted", teammate: yield* withRecordedWorktree(hosted!) } as const);
     });
 
   /** The host a teammate runs on, by its environment; null is the home. */
@@ -1311,7 +1322,8 @@ export const make = Effect.gen(function* () {
   const reportStatus: PivotService["Service"]["reportStatus"] = (caller, input) =>
     Effect.gen(function* () {
       const command = "report_status";
-      const teammate = yield* liveTeammate(command, caller);
+      const calling = yield* liveTeammate(command, caller);
+      const teammate = calling.teammate;
       const shell = yield* threads.shell(teammate.threadId);
       if (input.status === "done" && teammate.kind === "ship") {
         const unsaved = yield* git.uncommitted(teammate.worktreePath);
@@ -1354,6 +1366,32 @@ export const make = Effect.gen(function* () {
           );
         }
       }
+      if (calling.type === "hosted") {
+        // The home holds the Pivot, its decisions and its wakes; this host only logs the
+        // report, for the home to apply when it next reads the log.
+        if (input.until !== undefined && input.status !== "paused") {
+          return yield* refuse(command, "Only a `paused` report takes `until`.");
+        }
+        yield* hostStore.appendEvent({
+          threadId: teammate.threadId,
+          event: {
+            _tag: "reported",
+            status: input.status,
+            summary: input.summary,
+            until: input.until ?? null,
+            runId: shell?.latestRunId ?? null,
+            decisionKey: input.decisionKey ?? null,
+            clearedDecision:
+              input.clearDecision === undefined
+                ? null
+                : {
+                    key: input.clearDecision.key ?? null,
+                    resolution: input.clearDecision.resolution,
+                  },
+          },
+        });
+        return { status: input.status, openDecisions: 0 };
+      }
       yield* store.dispatch({
         type: "teammate.report",
         threadId: teammate.threadId,
@@ -1368,7 +1406,7 @@ export const make = Effect.gen(function* () {
             : { key: input.clearDecision.key ?? null, resolution: input.clearDecision.resolution },
       });
       const decisions = yield* store.listDecisions({
-        pivotThreadId: teammate.pivotThreadId,
+        pivotThreadId: calling.teammate.pivotThreadId,
         openOnly: true,
       });
       return {
@@ -1379,10 +1417,21 @@ export const make = Effect.gen(function* () {
 
   const recordScoutReport: PivotService["Service"]["recordScoutReport"] = (caller, input) =>
     Effect.gen(function* () {
-      const teammate = yield* liveTeammate("record_scout_report", caller);
+      const command = "record_scout_report";
+      const calling = yield* liveTeammate(command, caller);
+      if (calling.type === "hosted") {
+        if (calling.teammate.kind !== "scout") {
+          return yield* refuse(command, "Only a scout records a report.");
+        }
+        yield* hostStore.appendEvent({
+          threadId: calling.teammate.threadId,
+          event: { _tag: "scout-report-recorded", report: input.report },
+        });
+        return { recorded: true };
+      }
       yield* store.dispatch({
         type: "teammate.record-scout-report",
-        threadId: teammate.threadId,
+        threadId: calling.teammate.threadId,
         report: input.report,
       });
       return { recorded: true };

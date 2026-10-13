@@ -18,6 +18,7 @@ import {
   type OrchestrationV2StoredEvent,
   type PullRequestDetail,
   type PullRequestRef,
+  type RepositoryIdentity,
   type RunId,
   ThreadId,
   type WorktreeSetupSnapshot,
@@ -59,6 +60,8 @@ export class PivotThreadsError extends Schema.TaggedError<PivotThreadsError>()(
 
 export interface PivotProject {
   readonly projectId: ProjectId;
+  readonly title: string;
+  readonly repositoryIdentity: RepositoryIdentity | null;
   readonly workspaceRoot: string;
   readonly defaultModelSelection: ModelSelection | null;
 }
@@ -293,6 +296,8 @@ export const make = Effect.gen(function* () {
             onNone: () => null,
             onSome: (project) => ({
               projectId: project.id,
+              title: project.title,
+              repositoryIdentity: project.repositoryIdentity ?? null,
               workspaceRoot: project.workspaceRoot,
               defaultModelSelection: project.defaultModelSelection,
             }),

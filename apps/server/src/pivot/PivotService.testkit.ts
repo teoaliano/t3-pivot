@@ -23,6 +23,7 @@ import * as ServerSettingsService from "../serverSettings.ts";
 import * as PivotDatabase from "./PivotDatabase.ts";
 import * as PivotGit from "./PivotGit.ts";
 import * as PivotHome from "./PivotHome.ts";
+import * as PivotHostStore from "./PivotHostStore.ts";
 import * as PivotService from "./PivotService.ts";
 import * as PivotStore from "./PivotStore.ts";
 import * as FakeThreads from "./PivotThreads.testkit.ts";
@@ -82,7 +83,11 @@ export const attachWorktree = (
 export const harness = (fake: FakeThreads.FakeV2, settings: DeepPartial<ServerSettings> = {}) =>
   PivotService.layer.pipe(
     Layer.provideMerge(ServerSettingsService.layerTest(settings)),
-    Layer.provideMerge(PivotStore.layer.pipe(Layer.provide(PivotDatabase.layerMemory))),
+    Layer.provideMerge(
+      Layer.mergeAll(PivotStore.layer, PivotHostStore.layer).pipe(
+        Layer.provide(PivotDatabase.layerMemory),
+      ),
+    ),
     Layer.provideMerge(FakeThreads.layer(fake)),
     Layer.provideMerge(PivotHome.layer),
     Layer.provideMerge(PivotGit.layer),
@@ -99,6 +104,12 @@ export const setup = (
     options.git === false
       ? NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pivot-plain-"))
       : makeRepo({ remote: options.remote ?? false });
-  fake.projects.set(projectId, { projectId, workspaceRoot, defaultModelSelection: null });
+  fake.projects.set(projectId, {
+    projectId,
+    title: "Project",
+    repositoryIdentity: null,
+    workspaceRoot,
+    defaultModelSelection: null,
+  });
   return { fake, workspaceRoot, layer: harness(fake, options.settings) };
 };

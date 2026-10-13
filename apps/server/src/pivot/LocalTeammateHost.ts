@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as KeyedLock from "@t3tools/shared/KeyedLock";
 
 import { ServerConfig } from "../config.ts";
 import {
@@ -31,6 +32,8 @@ export const make = Effect.gen(function* () {
   const config = yield* ServerConfig;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  // Creating a Pivot or a teammate spans two databases; one at a time per project.
+  const projectLocks = yield* KeyedLock.make<string>();
 
   const refuse = (command: string, reason: string) =>
     new PivotStore.PivotRefusedError({ command, reason });
@@ -56,6 +59,7 @@ export const make = Effect.gen(function* () {
     });
 
   return TeammateHost.of({
+    withProjectLock: projectLocks.withLock,
     project: gitProject,
 
     launch: (input) =>
@@ -112,7 +116,16 @@ export const make = Effect.gen(function* () {
 
     awaitStart: threads.awaitStart,
     setupOutcome: threads.setupOutcome,
-    discard: threads.archive,
+    // Archiving does not interrupt a run still preparing its worktree, which would go on to run
+    // the setup script and start an agent. A stop does, so it comes first; if it fails the thread
+    // is archived anyway.
+    discard: (threadId) =>
+      threads.stop(threadId).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Could not stop a discarded teammate thread", { threadId, cause }),
+        ),
+        Effect.andThen(threads.archive(threadId)),
+      ),
     send: ({ threadId, senderThreadId, text }) =>
       threads.send({ threadId, senderThreadId, text, mode: "queue" }),
     stop: threads.stop,

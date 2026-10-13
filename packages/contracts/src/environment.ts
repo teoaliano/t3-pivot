@@ -121,6 +121,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** T3 Pivot: the server runs Pivot mode and serves the `pivot.*` methods. Absent on
       T3 Code servers, so clients never subscribe to a stream they do not serve. */
   pivotMode: Schema.optionalKey(Schema.Boolean),
+  /** T3 Pivot: the server can host teammates for another environment's Pivot and serves the
+      `pivotHost.*` methods. Absent means false, as on T3 Code servers and older T3 Pivot, so a
+      Pivot never offers one of them as a peer. */
+  pivotHost: Schema.optionalKey(Schema.Boolean),
   /** Server understands thread.settle / thread.unsettle commands. Absent on
       pre-settlement servers, so clients treat missing as unsupported and
       never send the commands under version skew. */

@@ -32,6 +32,7 @@ import * as Stream from "effect/Stream";
 import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
 import * as ServerActivation from "../serverActivation.ts";
 import { loadPivotText } from "./pivotTexts.ts";
+import * as PivotHostStore from "./PivotHostStore.ts";
 import * as PivotStore from "./PivotStore.ts";
 import * as PivotThreads from "./PivotThreads.ts";
 import type { SeenPullRequest } from "./PivotEvents.ts";
@@ -41,6 +42,8 @@ import { composeWake, type WakeDigest, type WakeTeammate } from "./pivotWake.ts"
 export const RESUME_GRACE_MS = 5 * 60 * 1000;
 /** A running teammate with no activity this long wakes its Pivot, once per run. */
 export const STUCK_AFTER_MS = 30 * 60 * 1000;
+/** A hosted teammate's activity is logged at most this often, since a turn emits many events. */
+export const HOSTED_ACTIVITY_LOG_SPACING_MS = 30 * 1000;
 /** How often the timers are checked when nothing else happens. */
 const SWEEP_INTERVAL = "30 seconds";
 const MIN_TICK_SPACING = "1 second";
@@ -95,6 +98,7 @@ const toMillis = (value: unknown): number | null => {
 
 export const make = Effect.gen(function* () {
   const store = yield* PivotStore.PivotStore;
+  const hostStore = yield* PivotHostStore.PivotHostStore;
   const threads = yield* PivotThreads.PivotThreads;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -114,6 +118,7 @@ export const make = Effect.gen(function* () {
   const liveTeammates = new Map<string, ThreadId>();
   const dirty = new Set<string>();
   const lastActivity = new Map<string, number>();
+  const hostedActivityLoggedAt = new Map<string, number>();
   const seenUserMessages = new Set<string>();
   // A new report can change a teammate's status with no V2 event, so reports mark it too.
   const seenReports = new Map<string, string | null>();
@@ -149,9 +154,47 @@ export const make = Effect.gen(function* () {
     return teammates;
   });
 
+  /**
+   * What a teammate this environment hosts for another environment's Pivot does goes
+   * to the hosted log, narrowed as for a local one. This environment holds no Pivot to
+   * wake, and the home reads the log when it can.
+   */
+  const handleHostedEvent = (event: PivotThreads.PivotThreadEvent) =>
+    Effect.gen(function* () {
+      switch (event.type) {
+        case "activity": {
+          const now = yield* Clock.currentTimeMillis;
+          const loggedAt = hostedActivityLoggedAt.get(event.threadId);
+          if (loggedAt !== undefined && now - loggedAt < HOSTED_ACTIVITY_LOG_SPACING_MS) return;
+          hostedActivityLoggedAt.set(event.threadId, now);
+          yield* hostStore.appendEvent({ threadId: event.threadId, event: { _tag: "activity" } });
+          return;
+        }
+        case "user-message": {
+          if (seenUserMessages.has(event.messageId)) return;
+          if (seenUserMessages.size > 10_000) seenUserMessages.clear();
+          seenUserMessages.add(event.messageId);
+          yield* hostStore.appendEvent({
+            threadId: event.threadId,
+            event: { _tag: "user-message", text: event.text },
+          });
+          return;
+        }
+        case "request-answered":
+          yield* hostStore.appendEvent({
+            threadId: event.threadId,
+            event: { _tag: "request-answered", answer: event.answer },
+          });
+          return;
+      }
+    }).pipe(Effect.catchCause(logFailure("hosted event")));
+
   const handleEvent: PivotSupervisor["Service"]["handleEvent"] = (event) =>
     Effect.gen(function* () {
-      if (!liveTeammates.has(event.threadId)) return;
+      if (!liveTeammates.has(event.threadId)) {
+        if (yield* hostStore.isLive(event.threadId)) yield* handleHostedEvent(event);
+        return;
+      }
       dirty.add(event.threadId);
       lastActivity.set(event.threadId, yield* Clock.currentTimeMillis);
       switch (event.type) {
@@ -360,6 +403,7 @@ export const make = Effect.gen(function* () {
       for (const threadId of [
         ...pivots.map((pivot) => pivot.threadId),
         ...teammates.map((teammate) => teammate.threadId),
+        ...(yield* hostStore.liveThreadIds),
       ]) {
         yield* threads
           .releaseHeldQueue(threadId)
