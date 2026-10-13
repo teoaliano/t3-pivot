@@ -611,8 +611,8 @@ const OPENCODE_RESTRICTED_PERMISSIONS = [
  * OpenCode does not provide an OS sandbox, so permission rules are also the
  * enforcement boundary for non-interactive policies. Read/planning tools are
  * safe by default; edits are auto-approved only for workspace-write modes,
- * while shell/network/external access remains gated unless policy explicitly
- * allows it.
+ * the shell only for a non-interactive workspace-write sandbox, and
+ * network/external access remains gated unless policy explicitly allows it.
  */
 export function openCodePermissionRules(
   runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
@@ -689,6 +689,8 @@ export function openCodePermissionRules(
   }
 
   if (!requiresApproval && sandboxType === "workspaceWrite") {
+    // With no OS sandbox the shell runs unconfined; only edits stay in the roots.
+    rules.push({ permission: "bash", pattern: "*", action: "allow" });
     const writableRoots = recordValue(sandboxPolicy, "writableRoots");
     if (Array.isArray(writableRoots)) {
       for (const root of writableRoots) {

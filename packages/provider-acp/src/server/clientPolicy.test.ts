@@ -84,9 +84,11 @@ describe("acpPermissionDisposition", () => {
     );
   });
 
-  it("keeps non-mutating workspace permissions and denials unchanged", () => {
+  it("allows reads and commands, and denies other non-mutating permissions", () => {
     assert.equal(acpPermissionDisposition(policy, permissionRequest("read")), "allow");
-    assert.equal(acpPermissionDisposition(policy, permissionRequest("execute")), "deny");
+    assert.equal(acpPermissionDisposition(policy, permissionRequest("execute")), "allow");
+    assert.equal(acpPermissionDisposition(policy, permissionRequest("fetch")), "deny");
+    assert.equal(acpPermissionDisposition(policy, permissionRequest("other")), "deny");
   });
 
   it("auto-accept-edits approves file changes without locations and asks for the rest", () => {
@@ -301,21 +303,19 @@ describe("client terminal disposition", () => {
     assert.equal(acpClientExecuteDisposition({ runtimeMode: "full-access", cwd }), "allow");
   });
 
-  it("denies terminals under explicit read-only and workspace-write sandboxes", () => {
-    for (const sandboxPolicy of [
-      { type: "readOnly" },
-      { type: "workspaceWrite", writableRoots: [], networkAccess: false },
-    ]) {
-      assert.equal(
-        acpClientExecuteDisposition({
-          runtimeMode: "full-access",
-          cwd,
-          approvalPolicy: "never",
-          sandboxPolicy,
-        }),
-        "deny",
-      );
-    }
+  it("denies terminals under an explicit read-only sandbox and allows them under workspace-write", () => {
+    const disposition = (sandboxPolicy: unknown) =>
+      acpClientExecuteDisposition({
+        runtimeMode: "full-access",
+        cwd,
+        approvalPolicy: "never",
+        sandboxPolicy,
+      });
+    assert.equal(disposition({ type: "readOnly" }), "deny");
+    assert.equal(
+      disposition({ type: "workspaceWrite", writableRoots: [], networkAccess: false }),
+      "allow",
+    );
   });
 });
 
