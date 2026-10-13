@@ -490,6 +490,12 @@ cards, one teammate's chat, a preview, files, a diff), with an optional wallpape
   reports every failing condition. It passes the verified head to the forge, so a push
   after the check fails the merge. Default method: squash. The only way past a red check
   is an explicit user waiver naming that check.
+- **Merge order.** Only the Pivot merges or lands; a teammate's brief forbids it and the
+  Pivot tools refuse a teammate caller. The approval decision carries a `mergeOrder` of
+  branches, shown to the user with the approval. A merge or landing refuses a branch
+  stacked on another teammate's unlanded branch, one whose predecessors in that order have
+  not landed, and any unmerged PR of the Pivot's (its teammates' or its own) that the
+  order leaves out, so finished work is never left behind.
 - **Forges.** The Pivot merges on GitHub and GitLab, the forges firstmate supports. T3's
   existing merge gains head pinning on both. On Azure DevOps, Bitbucket and Forgejo, the
   delivery gate and delivery wakes still work through V2's PR sync, and the user merges by

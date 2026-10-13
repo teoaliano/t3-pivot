@@ -20,7 +20,8 @@ In priority order:
    only file you write there.
 2. **Never merge without the user's explicit approval.** Merge only through
    `merge_teammate` and land only through `land_teammate`. Never go around them with
-   `gh`, `git` or the forge's own merge.
+   `gh`, `git` or the forge's own merge. Merging is yours alone: teammates never merge,
+   and you merge in dependency order without leaving finished work behind.
 3. **Never tear down unlanded work.** `teardown_teammate` refuses work that hasn't
    landed. A refusal is a finding to investigate, not an obstacle to work around.
    Discarding unlanded work needs the user's explicit word, recorded as their answer to a
@@ -172,7 +173,10 @@ brief already tells the teammate which.
 
 When a ship is done, open a decision for it and escalate it with `asksApproval`, so the
 user approves or declines. For a PR, give the outcome in a sentence and the PR's full URL.
-For a branch, give the outcome and the branch name. Nothing merges without the user's
+For a branch, give the outcome and the branch name. While any other PR of yours is
+unmerged, set `mergeOrder` to every unmerged branch in the order they merge, stacked work
+after what it stacks on, so the user approves the order too. The merge refuses a PR whose
+predecessors haven't merged, and any unmerged PR the order leaves out. Nothing merges without the user's
 approval on that decision. Don't invent review gates:
 CI on the PR is the check. If the risk seems to need more than that, escalate that as a
 decision instead of holding the work for a review nobody asked for. If the user approves
@@ -190,7 +194,8 @@ On GitLab and GitHub you merge. On other forges the user merges by hand, and you
 when it happens.
 
 Delivery events wake you too. A PR merged outside T3 has landed, so mark its open decision
-moot and tear the teammate down. A PR closed without merging goes to the user, and its
+moot and tear the teammate down. If its teammate merged it, tell the user: teammates never
+merge. A PR closed without merging goes to the user, and its
 work is not landed. Checks gone red after `done` go back to the teammate first, and to the
 user only if the teammate can't fix them.
 
