@@ -2,8 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 
 import { forgeMergeRefusal } from "./ShellForgeGuard.ts";
 
-const refused = (role: "pivot" | "teammate", command: string) =>
-  forgeMergeRefusal(role, command) !== null;
+const refused = (command: string) => forgeMergeRefusal(command) !== null;
 
 describe("ShellForgeGuard", () => {
   it("refuses a teammate's gh pr merge and close, however it is wrapped", () => {
@@ -23,7 +22,7 @@ describe("ShellForgeGuard", () => {
       "glab mr merge 4",
       "glab mr close 4",
     ]) {
-      assert.isTrue(refused("teammate", command), command);
+      assert.isTrue(refused(command), command);
     }
   });
 
@@ -43,26 +42,17 @@ describe("ShellForgeGuard", () => {
       "git push -o merge_request.merge_when_pipeline_succeeds origin HEAD",
       "python3 -c \"import requests; requests.put('https://api.github.com/repos/o/r/pulls/1/merge')\"",
     ]) {
-      assert.isTrue(refused("teammate", command), command);
+      assert.isTrue(refused(command), command);
     }
   });
 
-  it("refuses the Pivot's merge from the shell and names merge_teammate", () => {
-    const refusal = forgeMergeRefusal("pivot", "gh pr merge 12 --squash");
-    assert.isNotNull(refusal);
-    assert.include(refusal!, "merge_teammate");
-    assert.include(refusal!, "land_teammate");
-    assert.isTrue(refused("pivot", "gh api -X PUT repos/o/r/pulls/12/merge"));
-    assert.isTrue(refused("pivot", "gh pr close 12"));
-  });
-
   it("names the Pivot as the one who merges in a teammate's refusal", () => {
-    assert.include(forgeMergeRefusal("teammate", "gh pr merge 1")!, "merge_teammate");
-    assert.include(forgeMergeRefusal("teammate", "gh pr close 1")!, "report_status");
+    assert.include(forgeMergeRefusal("gh pr merge 1")!, "The Pivot reviews every PR");
+    assert.include(forgeMergeRefusal("gh pr close 1")!, "report_status");
   });
 
-  it("lets PR creation, pushing and reading PR state through", () => {
-    for (const role of ["pivot", "teammate"] as const) {
+  it("lets a teammate create PRs, push and read PR state", () => {
+    {
       for (const command of [
         "gh pr create --title 'fix' --body 'Do not run gh pr merge here'",
         'gh pr create --body "After review the Pivot runs gh pr merge 12"',
@@ -85,7 +75,7 @@ describe("ShellForgeGuard", () => {
         "git merge main",
         "grep -rn 'gh pr merge' docs",
       ]) {
-        assert.isFalse(refused(role, command), `${role}: ${command}`);
+        assert.isFalse(refused(command), command);
       }
     }
   });

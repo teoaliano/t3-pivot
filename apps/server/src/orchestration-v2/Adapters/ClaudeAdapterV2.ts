@@ -108,7 +108,7 @@ import { planClaudeSkillDispatch } from "../../provider/Drivers/ClaudeSkillDispa
 import { discoverClaudeSkills } from "../../provider/Drivers/ClaudeSkills.ts";
 import { compileClaudeModelSelection } from "../../claudeModelOptions.ts";
 import * as ServerConfig from "../../config.ts";
-import { type ForgeMergeRole, forgeMergeRefusal } from "../ShellForgeGuard.ts";
+import { forgeMergeRefusal } from "../ShellForgeGuard.ts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import {
   claudeSignedOutMessage,
@@ -977,8 +977,8 @@ export function makeClaudeQueryOptions(input: {
   readonly onUserDialog?: ClaudeQueryOptions["onUserDialog"];
   readonly supportedDialogKinds?: ClaudeQueryOptions["supportedDialogKinds"];
   readonly allowDangerouslySkipPermissions?: boolean;
-  /** Set for a Pivot and its teammates, whose shell may not merge or close PRs. */
-  readonly forgeMergeRole?: ForgeMergeRole | undefined;
+  /** Set for a teammate, whose shell may not merge or close PRs. */
+  readonly withoutForgeMerge?: boolean | undefined;
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection);
   const {
@@ -1058,9 +1058,9 @@ export function makeClaudeQueryOptions(input: {
       : {}),
     ...(input.environment === undefined ? {} : { env: input.environment }),
     ...(input.mcpServers === undefined ? {} : { mcpServers: input.mcpServers }),
-    ...(input.forgeMergeRole === undefined
-      ? {}
-      : { hooks: { PreToolUse: [claudeForgeMergeHook(input.forgeMergeRole)] } }),
+    ...(input.withoutForgeMerge === true
+      ? { hooks: { PreToolUse: [claudeForgeMergeHook()] } }
+      : {}),
     systemPrompt: {
       type: "preset" as const,
       preset: "claude_code" as const,
@@ -1081,7 +1081,7 @@ export function makeClaudeQueryOptions(input: {
 
 // A PreToolUse hook runs in every permission mode, bypassPermissions included, where a
 // permission rule or canUseTool callback would never be asked.
-function claudeForgeMergeHook(role: ForgeMergeRole): HookCallbackMatcher {
+function claudeForgeMergeHook(): HookCallbackMatcher {
   return {
     matcher: "Bash",
     hooks: [
@@ -1090,7 +1090,7 @@ function claudeForgeMergeHook(role: ForgeMergeRole): HookCallbackMatcher {
           hookInput.hook_event_name === "PreToolUse"
             ? (hookInput.tool_input as { command?: unknown } | null)?.command
             : undefined;
-        const refusal = typeof command === "string" ? forgeMergeRefusal(role, command) : null;
+        const refusal = typeof command === "string" ? forgeMergeRefusal(command) : null;
         return refusal === null
           ? {}
           : {
@@ -8438,7 +8438,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             canUseTool,
             onUserDialog,
             supportedDialogKinds: ["resume_return"],
-            forgeMergeRole: turnInput.runtimePolicy.forgeMergeRole,
+            withoutForgeMerge: turnInput.runtimePolicy.withoutForgeMerge,
           });
           const querySession = yield* queryRunner
             .open({

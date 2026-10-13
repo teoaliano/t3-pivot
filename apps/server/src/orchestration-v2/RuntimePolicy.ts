@@ -138,8 +138,8 @@ export const layerFromProjectStore: Layer.Layer<
                 }),
             ),
           );
-        const forgeMergeRole =
-          yield* (yield* ThreadToolRestrictions.ThreadToolRestrictions).forgeMergeRole(
+        const withoutForgeMerge =
+          yield* (yield* ThreadToolRestrictions.ThreadToolRestrictions).withoutForgeMerge(
             input.thread.id,
           );
         // Only a scoped thread is a Pivot, and its cwd is its home: the project it works on
@@ -156,7 +156,7 @@ export const layerFromProjectStore: Layer.Layer<
           interactionMode: input.thread.interactionMode,
           cwd,
           ...(project === undefined ? {} : { project }),
-          ...(forgeMergeRole === null ? {} : { forgeMergeRole }),
+          ...(withoutForgeMerge ? { withoutForgeMerge } : {}),
           // Reads stay open everywhere; the sandbox only confines writes to the scope.
           ...(writeScope === null
             ? {}

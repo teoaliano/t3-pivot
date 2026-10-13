@@ -1,17 +1,16 @@
 /**
  * ShellForgeGuard - recognises shell commands that merge or close a pull request
- * (merge request on GitLab) so a Pivot's supervised threads cannot run them.
+ * (merge request on GitLab) so a teammate's shell cannot run them.
  *
- * Merging belongs to the Pivot alone, through merge_teammate and land_teammate: only it sees
- * every open PR and so the order they should land in. The check reads one command line
+ * Merging belongs to the Pivot, which sees every open PR and so the order they should land in;
+ * a teammate stops at the open PR. The Pivot's shell is not guarded: its approval, green-check
+ * and pinned-head rules are its contract and merge_teammate's checks. The check reads one command line
  * statically. It catches the forge CLIs and the forge's merge and close endpoints however the
  * command is wrapped (env, sudo, `bash -c`, `$(...)`); it cannot see inside a script file or a
  * variable, so it is a guard against an agent reaching for the obvious command, not a sandbox.
  *
  * @module ShellForgeGuard
  */
-
-export type ForgeMergeRole = "pivot" | "teammate";
 
 const SEPARATORS = new Set([";", "&", "|", "\n", "(", ")", "`"]);
 
@@ -212,18 +211,13 @@ function violationIn(command: string, depth: number): Violation | null {
 }
 
 /**
- * The refusal to show the agent when `command` merges or closes a PR, or null when the command
- * is fine. Each message names the tool the agent should use instead.
+ * The refusal to show a teammate when `command` merges or closes a PR, or null when the command
+ * is fine.
  */
-export function forgeMergeRefusal(role: ForgeMergeRole, command: string): string | null {
+export function forgeMergeRefusal(command: string): string | null {
   const violation = violationIn(command, 0);
   if (violation === null) return null;
-  if (role === "teammate") {
-    return violation === "merge"
-      ? "Refused: teammates never merge PRs. Stop at the open PR and report `done` with its URL through report_status. The Pivot reviews every PR and merges them in order with merge_teammate."
-      : "Refused: teammates never close PRs. If this PR should not land, say so in report_status (needs-decision) and the Pivot decides.";
-  }
   return violation === "merge"
-    ? "Refused: the Pivot merges only through the merge_teammate tool (land_teammate for a branch with no remote). Call it once the user approved the merge decision."
-    : "Refused: the Pivot does not close PRs from the shell. Hand a PR that should not land back to its teammate with add_intent, or hold a decision for the user with open_decision.";
+    ? "Refused: teammates never merge PRs. Stop at the open PR and report `done` with its URL through report_status. The Pivot reviews every PR and merges them in order."
+    : "Refused: teammates never close PRs. If this PR should not land, say so in report_status (needs-decision) and the Pivot decides.";
 }

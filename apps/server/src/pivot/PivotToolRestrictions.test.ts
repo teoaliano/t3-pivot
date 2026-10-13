@@ -176,16 +176,13 @@ it.layer(layer)("Pivot and teammate permissions", (it) => {
   );
 
   // Runs Claude's PreToolUse hook the way the CLI does for a Bash call.
-  const bashDecision = (
-    role: "pivot" | "teammate",
-    command: string,
-  ): Promise<{ decision?: string; reason?: string }> => {
+  const bashDecision = (command: string): Promise<{ decision?: string; reason?: string }> => {
     const options = makeClaudeQueryOptions({
       modelSelection,
       nativeThreadId: "native-1",
       resume: false,
       cwd: "/wt/ship-1",
-      forgeMergeRole: role,
+      withoutForgeMerge: true,
     });
     const matcher = options.hooks?.PreToolUse?.[0];
     assert.equal(matcher?.matcher, "Bash");
@@ -207,45 +204,48 @@ it.layer(layer)("Pivot and teammate permissions", (it) => {
     });
   };
 
-  it.effect("marks the Pivot and its teammates, and nobody else, as barred from merging", () =>
+  it.effect("bars a teammate's shell from merging, and leaves the Pivot's shell alone", () =>
     Effect.gen(function* () {
-      assert.equal((yield* resolve(pivotThreadId, home)).forgeMergeRole, "pivot");
-      assert.equal((yield* resolve(teammateThreadId, "/wt/ship-1")).forgeMergeRole, "teammate");
+      assert.equal((yield* resolve(teammateThreadId, "/wt/ship-1")).withoutForgeMerge, true);
+      assert.equal((yield* resolve(pivotThreadId, home)).withoutForgeMerge, undefined);
       assert.equal(
-        (yield* resolve(ThreadId.make("someone-else"), "/elsewhere")).forgeMergeRole,
+        (yield* resolve(ThreadId.make("someone-else"), "/elsewhere")).withoutForgeMerge,
         undefined,
       );
     }),
   );
 
-  it.effect("refuses a teammate's gh pr merge and forge merge call, naming the Pivot's tool", () =>
+  it.effect("refuses a teammate's gh pr merge and forge merge call", () =>
     Effect.promise(async () => {
-      const viaCli = await bashDecision("teammate", "gh pr merge 12 --squash");
+      const viaCli = await bashDecision("gh pr merge 12 --squash");
       assert.equal(viaCli.decision, "deny");
-      assert.include(viaCli.reason, "merge_teammate");
+      assert.include(viaCli.reason, "The Pivot reviews every PR");
       const viaApi = await bashDecision(
-        "teammate",
         "curl -X PUT https://api.github.com/repos/o/r/pulls/12/merge",
       );
       assert.equal(viaApi.decision, "deny");
     }),
   );
 
-  it.effect("refuses the Pivot's gh pr merge, naming merge_teammate", () =>
+  it.effect("keeps gh pr create and reading PR state working for a teammate", () =>
     Effect.promise(async () => {
-      const refused = await bashDecision("pivot", "gh pr merge 12");
-      assert.equal(refused.decision, "deny");
-      assert.include(refused.reason, "merge_teammate");
+      for (const command of ["gh pr create --fill", "gh pr view 12 --json state", "git push"]) {
+        assert.equal((await bashDecision(command)).decision, undefined);
+      }
     }),
   );
 
-  it.effect("keeps gh pr create and reading PR state working", () =>
-    Effect.promise(async () => {
-      for (const role of ["pivot", "teammate"] as const) {
-        for (const command of ["gh pr create --fill", "gh pr view 12 --json state", "git push"]) {
-          assert.equal((await bashDecision(role, command)).decision, undefined);
-        }
-      }
+  it.effect("gives the Pivot's Claude shell no merge hook", () =>
+    Effect.gen(function* () {
+      const resolved = yield* resolve(pivotThreadId, home);
+      const options = makeClaudeQueryOptions({
+        modelSelection,
+        nativeThreadId: "native-1",
+        resume: false,
+        cwd: home,
+        withoutForgeMerge: resolved.withoutForgeMerge,
+      });
+      assert.equal(options.hooks, undefined);
     }),
   );
 });
