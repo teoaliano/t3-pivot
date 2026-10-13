@@ -101,19 +101,23 @@ The host runs a dedicated clone at `~/.t3-pivot/app`, never a working checkout, 
 --tailscale-serve --tailscale-serve-port 8444 --no-browser`, and `t3-pivot-update.timer` runs
 `node scripts/pivot.ts host-update` in the clone every night.
 
-`host-update` fast-forwards to `origin/main` and tries a local merge of the newest upstream
-nightly. A merge that is clean and builds is pushed to `main`, so it replaces running
-`pivot:sync` by hand. A conflict, or a merge that doesn't build, becomes the usual `sync/<tag>`
-PR and the host keeps its deployed build. Then it rebuilds and restarts the service when `main`
-moved, which ends any running turn in T3 Pivot. Run it on demand with
+`host-update` fast-forwards to `origin/main` and merges the newest upstream nightly into it. A
+conflict is settled by owner: in a Pivot-owned file main's side wins, and in vendored `.repos/`
+upstream's side wins (see `PIVOT_OWNED_PATHS` and `UPSTREAM_OWNED_PATHS` in `scripts/pivot.ts`).
+Any other conflict aborts the merge, and the run fails before anything is built or restarted,
+with the conflicting files in the journal. A merge that builds is pushed to `main`, so it
+replaces running `pivot:sync` by hand. A merge that doesn't build becomes the usual `sync/<tag>`
+PR and the host keeps its deployed build. Otherwise it rebuilds and restarts the service when
+`main` moved, which ends any running turn in T3 Pivot. Run it on demand with
 `systemctl --user start t3-pivot-update.service` and read the result with
 `journalctl --user -u t3-pivot-update`. Merged PRs reach the host on the next run, and the
 Mac and iPhone the next morning.
 
 ## Things that stay manual
 
-- A conflicting upstream merge waits for you on its `sync/<tag>` PR. Nothing updates until
-  it is merged.
+- A conflict the host can't settle stops its update until you resolve it. Run `pivot:sync` to
+  open a `sync/<tag>` PR for it, and merge that PR's resolution. Nothing updates until it is
+  merged.
 - The desktop app downloads a release and restarts into it when you click the update button.
 - Every machine keeps the two apps separate, so both can run at the same time. T3 Code
   keeps `~/.t3` and Tailscale HTTPS 443. T3 Pivot has its own data in `~/.t3-pivot` and
