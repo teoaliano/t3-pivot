@@ -143,15 +143,15 @@ function AnsweredDecision({ decision, asker }: PivotDecisionCardProps) {
           <ComposerBanner.Icon>
             <CheckIcon className="text-success" />
           </ComposerBanner.Icon>
-          <ComposerBanner.Content>
+          <ComposerBanner.Content className="pe-0.5">
             <span className="shrink-0 font-medium text-muted-foreground">
               {userAnswerLabel(decision.userApproved)}
             </span>
-            <span className="min-w-0 truncate text-foreground">“{decision.userAnswer}”</span>
+            <span className="min-w-0 flex-1 truncate text-foreground">“{decision.userAnswer}”</span>
             <ComposerBanner.Separator />
             <span className="shrink-0 text-secondary-label">The Pivot is relaying it</span>
           </ComposerBanner.Content>
-          <ComposerBanner.Actions>
+          <ComposerBanner.Actions className="gap-px">
             <ComposerBanner.ToggleIcon expanded={open} />
             {/* Sits inside the trigger button, so stop the click from toggling the row. */}
             <ComposerBanner.Dismiss
