@@ -75,6 +75,20 @@ scope but have no sandbox for the shell, so there the contract alone keeps comma
 project. Antigravity, Muse and Pi choose their mode from the runtime mode alone and run the
 Pivot in full access. Teammates have no write scope and run in their thread's runtime mode.
 
+Merging is the Pivot's, not its teammates': only the Pivot sees every open PR and so the
+order they should land in. `PivotToolRestrictions` marks a teammate's thread
+(`withoutForgeMerge`) and `ShellForgeGuard` refuses `gh pr merge|close`, `glab mr
+merge|close` and the forge merge and close endpoints in its shell, pointing it at the Pivot.
+The guard also covers any subagent or fork whose lineage root is a teammate or a Pivot, so
+delegating the merge doesn't get around it. Only the Claude adapter enforces it, with a
+`PreToolUse` hook that runs in every permission mode. Codex, Cursor, Grok, OpenCode and
+Antigravity keep the contract in the teammate's instructions: teammates run in full access,
+where those providers never ask T3 before a command. The guard reads one command line, so a
+script file or a variable it cannot see goes unchecked, and a direct `git push` to the
+default branch is left to branch protection. The Pivot's shell
+is not guarded: it may merge, but its instructions allow that only after the user approved
+that PR, with checks green and the reviewed head, as `merge_teammate` enforces.
+
 A teammate's brief names its worktree path, which V2 only creates during launch
 preparation. Dispatch derives the path the way V2 does and records the teammate as soon as
 V2 accepts the launch, before the first run starts, so the teammate's first

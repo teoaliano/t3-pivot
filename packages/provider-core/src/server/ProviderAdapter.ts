@@ -59,6 +59,8 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
   project: Schema.optional(
     Schema.Struct({ projectId: Schema.String, workspaceRoot: Schema.String }),
   ),
+  /** Set for a teammate, whose shell may not merge or close PRs. */
+  withoutForgeMerge: Schema.optional(Schema.Boolean),
   reasoningEffort: Schema.optional(Schema.String),
 });
 export type ProviderAdapterV2RuntimePolicy = typeof ProviderAdapterV2RuntimePolicy.Type;
