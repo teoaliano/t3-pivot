@@ -79,6 +79,26 @@ export function recommendedOption(
   return best;
 }
 
+/** The shortest a decision's body can be, and the floor of its default cap. */
+export const DECISION_BODY_MIN_HEIGHT = 120;
+/** Room kept under the box for the composer and part of the thread. */
+const DECISION_BODY_RESERVED_HEIGHT = 240;
+
+/** The body's default cap, which a short canvas takes a share of. Undefined when the canvas is unknown. */
+export function decisionBodyDefaultMaxHeight(canvasHeight: number): string | undefined {
+  if (canvasHeight <= 0) return undefined;
+  return `min(14rem, ${Math.round(Math.max(DECISION_BODY_MIN_HEIGHT, canvasHeight * 0.3))}px)`;
+}
+
+/** Keeps a dragged body height between its minimum and what the canvas leaves room for. */
+export function clampDecisionBodyHeight(height: number, canvasHeight: number): number {
+  const ceiling =
+    canvasHeight > 0
+      ? Math.max(DECISION_BODY_MIN_HEIGHT, canvasHeight - DECISION_BODY_RESERVED_HEIGHT)
+      : Number.POSITIVE_INFINITY;
+  return Math.min(ceiling, Math.max(DECISION_BODY_MIN_HEIGHT, Math.round(height)));
+}
+
 /** How the user's answer to a decision reads once given. */
 export function userAnswerLabel(userApproved: boolean | null): string {
   return userApproved === true
