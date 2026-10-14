@@ -126,11 +126,15 @@ export class PivotThreads extends Context.Service<
     readonly project: (
       projectId: ProjectId,
     ) => Effect.Effect<PivotProject | null, PivotThreadsError>;
-    /** Creates the Pivot's thread in its home, full-access, never auto-settling. */
+    /**
+     * Creates the Pivot's thread in its home, full-access, never auto-settling. Uses
+     * `threadId` when given, so a draft that reserved it keeps its id.
+     */
     readonly createPivotThread: (input: {
       readonly projectId: ProjectId;
       readonly homePath: string;
       readonly modelSelection: ModelSelection;
+      readonly threadId?: ThreadId;
     }) => Effect.Effect<ThreadId, PivotThreadsError>;
     /**
      * Launches a teammate into a fresh worktree on `branch`, with `text` as its first
@@ -330,9 +334,9 @@ export const make = Effect.gen(function* () {
         Effect.mapError(fail("read project")),
       ),
 
-    createPivotThread: ({ projectId, homePath, modelSelection }) =>
+    createPivotThread: ({ projectId, homePath, modelSelection, threadId: requestedThreadId }) =>
       Effect.gen(function* () {
-        const threadId = ThreadId.make(`thread-pivot-${yield* randomUuidV4}`);
+        const threadId = requestedThreadId ?? ThreadId.make(`thread-pivot-${yield* randomUuidV4}`);
         // Created directly rather than launched: a launch runs the project's
         // setup script in its workspace, and the home is not the project.
         yield* threads.dispatch({

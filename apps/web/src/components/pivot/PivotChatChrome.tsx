@@ -154,11 +154,7 @@ export function PivotDecisionsStrip(props: {
           decision={current}
           asker={askerOf(current)}
           position={waiting.length > 1 ? { index: 0, total: waiting.length } : null}
-          bodyMaxHeight={
-            canvasHeight > 0
-              ? `min(14rem, ${Math.round(Math.max(120, canvasHeight * 0.3))}px)`
-              : undefined
-          }
+          canvasHeight={canvasHeight}
         />
       ) : null}
     </div>
@@ -170,7 +166,7 @@ function OpenPivotDecision(props: {
   decision: PivotDecision;
   asker: string;
   position: { index: number; total: number } | null;
-  bodyMaxHeight: string | undefined;
+  canvasHeight: number;
 }) {
   const [sending, setSending] = useState(false);
   const answerDecision = useAtomCommand(serverEnvironment.answerPivotDecision, {
@@ -216,7 +212,7 @@ function OpenPivotDecision(props: {
       asker={props.asker}
       position={props.position}
       sending={sending}
-      bodyMaxHeight={props.bodyMaxHeight}
+      canvasHeight={props.canvasHeight}
       attachments={supportsImages ? attachments : undefined}
       onAnswer={(text, approved) => void submit(text, approved)}
     />

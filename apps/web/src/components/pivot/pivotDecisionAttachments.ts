@@ -30,8 +30,9 @@ export function pivotDecisionAttachmentDraftId(
   environmentId: EnvironmentId,
   decisionId: string,
 ): DraftId {
+  // No `:` in the key: it would parse as an environment-scoped thread key on hydrate.
   return DraftId.make(
-    `${encodeURIComponent(JSON.stringify(environmentId))}:pivot-decision-${encodeURIComponent(decisionId)}`,
+    `pivot-decision-images/${encodeURIComponent(environmentId)}/${encodeURIComponent(decisionId)}`,
   );
 }
 

@@ -206,6 +206,8 @@ export const PivotCreateInput = Schema.Struct({
   modelSelection: ModelSelection,
   /** Required when the project has an active Pivot: the new one takes over its work. */
   takeover: Schema.Boolean,
+  /** The thread id a New Pivot draft reserved, so its first send lands on the Pivot. */
+  threadId: Schema.optional(ThreadId),
 });
 export type PivotCreateInput = typeof PivotCreateInput.Type;
 

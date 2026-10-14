@@ -1,7 +1,13 @@
 import { type PivotDecision, PivotDecisionId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { decisionLogEntry, recommendedOption, userAnswerLabel } from "./pivotDecisions.logic";
+import {
+  clampDecisionBodyHeight,
+  decisionBodyDefaultMaxHeight,
+  decisionLogEntry,
+  recommendedOption,
+  userAnswerLabel,
+} from "./pivotDecisions.logic";
 
 const decision = (overrides: Partial<PivotDecision> = {}): PivotDecision => ({
   decisionId: PivotDecisionId.make("d1"),
@@ -113,5 +119,33 @@ describe("userAnswerLabel", () => {
     expect(userAnswerLabel(true)).toBe("You accepted");
     expect(userAnswerLabel(false)).toBe("You commented");
     expect(userAnswerLabel(null)).toBe("You answered");
+  });
+});
+
+describe("clampDecisionBodyHeight", () => {
+  it("keeps a dragged body between its minimum and what the canvas leaves room for", () => {
+    expect(clampDecisionBodyHeight(40, 800)).toBe(120);
+    expect(clampDecisionBodyHeight(400, 800)).toBe(400);
+    expect(clampDecisionBodyHeight(900, 800)).toBe(560);
+  });
+
+  it("holds the minimum when the canvas is too short to leave room", () => {
+    expect(clampDecisionBodyHeight(300, 300)).toBe(120);
+  });
+
+  it("only bounds the bottom when the canvas height is unknown", () => {
+    expect(clampDecisionBodyHeight(5000, 0)).toBe(5000);
+    expect(clampDecisionBodyHeight(10, 0)).toBe(120);
+  });
+});
+
+describe("decisionBodyDefaultMaxHeight", () => {
+  it("takes 30% of a short canvas, floored at the minimum", () => {
+    expect(decisionBodyDefaultMaxHeight(200)).toBe("min(14rem, 120px)");
+    expect(decisionBodyDefaultMaxHeight(600)).toBe("min(14rem, 180px)");
+  });
+
+  it("is unset when the canvas height is unknown", () => {
+    expect(decisionBodyDefaultMaxHeight(0)).toBeUndefined();
   });
 });
