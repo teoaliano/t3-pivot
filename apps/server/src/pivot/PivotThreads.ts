@@ -134,7 +134,7 @@ export class PivotThreads extends Context.Service<
       readonly projectId: ProjectId;
       readonly homePath: string;
       readonly modelSelection: ModelSelection;
-      readonly threadId?: ThreadId;
+      readonly threadId?: ThreadId | undefined;
     }) => Effect.Effect<ThreadId, PivotThreadsError>;
     /**
      * Launches a teammate into a fresh worktree on `branch`, with `text` as its first
