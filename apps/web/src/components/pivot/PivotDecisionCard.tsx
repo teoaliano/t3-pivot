@@ -10,6 +10,7 @@ import { ComposerSurface } from "../chat/ComposerSurface";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
+import { useDiscardClosedDecisionDraft, usePivotDecisionDraft } from "./pivotDecisionDraft";
 import { recommendedOption, userAnswerLabel } from "./pivotDecisions.logic";
 
 export interface PivotDecisionCardProps {
@@ -30,6 +31,7 @@ export interface PivotDecisionCardProps {
  * so the chat composer below stays free. Once answered it shrinks to one quiet row.
  */
 export function PivotDecisionCard(props: PivotDecisionCardProps) {
+  useDiscardClosedDecisionDraft(props.decision);
   if (props.decision.userAnswer !== null) return <AnsweredDecision {...props} />;
   return <OpenDecision {...props} />;
 }
@@ -174,7 +176,7 @@ function QuestionDecision({
   const recommended =
     escalation === null ? null : recommendedOption(options, escalation.recommendation);
   const [selected, setSelected] = useState<string | null>(null);
-  const [text, setText] = useState("");
+  const [text, setText] = usePivotDecisionDraft(decision);
   // Typing an answer of their own replaces the picked option, as in the composer.
   const typed = text.trim().length > 0;
   const answer = typed ? text : selected;
@@ -205,7 +207,7 @@ function QuestionDecision({
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [active, sending, options]);
+  }, [active, sending, options, setText]);
 
   return (
     <DecisionComposer
@@ -307,7 +309,7 @@ function ApprovalDecision({
   onMinimize,
 }: PivotDecisionCardProps & { onMinimize: () => void }) {
   const escalation = decision.escalation;
-  const [note, setNote] = useState("");
+  const [note, setNote] = usePivotDecisionDraft(decision);
   const commented = note.trim().length > 0;
   // Accept works with or without a note; Comment needs one, since the note is what the
   // teammate receives.
