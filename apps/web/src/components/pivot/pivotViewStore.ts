@@ -15,6 +15,9 @@ import { type LayoutNode, parsePivotLayout, serializePivotLayout } from "./pivot
 
 export type PivotViewMode = "chat" | "pivot";
 
+export const otherPivotViewMode = (mode: PivotViewMode): PivotViewMode =>
+  mode === "chat" ? "pivot" : "chat";
+
 interface PivotViewStoreState {
   readonly modeByPivotKey: Record<string, PivotViewMode>;
   /** Serialized layout trees, read through `parsePivotLayout`. */
