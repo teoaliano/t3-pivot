@@ -42,6 +42,28 @@ describe("PivotService.create", () => {
     }).pipe(Effect.provide(layer));
   });
 
+  it.effect("creates the Pivot on the thread id the caller reserved", () => {
+    const { fake, layer } = setup();
+    return Effect.gen(function* () {
+      const pivots = yield* PivotService.PivotService;
+      const store = yield* PivotStore.PivotStore;
+      // A New Pivot draft reserves its thread id, so its first send lands on the Pivot.
+      const reserved = ThreadId.make("draft-reserved-thread");
+
+      const created = yield* pivots.create({
+        projectId,
+        modelSelection,
+        takeover: false,
+        threadId: reserved,
+      });
+
+      assert.strictEqual(created.threadId, reserved);
+      assert.strictEqual(fake.threads.get(reserved)?.kind, "pivot");
+      const pivot = yield* store.getActivePivot(projectId);
+      assert.strictEqual(pivot?.threadId, reserved);
+    }).pipe(Effect.provide(layer));
+  });
+
   it.effect("archives the new thread when recording it fails", () => {
     const { fake, layer } = setup();
     return Effect.gen(function* () {
