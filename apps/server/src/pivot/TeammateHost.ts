@@ -68,6 +68,14 @@ export interface TeammateCheckout {
 export class TeammateHost extends Context.Service<
   TeammateHost,
   {
+    /**
+     * Runs `effect` once no other holder of the project's lock is running. Anything that
+     * launches into the project takes it, so two launches never pick the same branch.
+     */
+    readonly withProjectLock: <A, E, R>(
+      projectId: ProjectId,
+      effect: Effect.Effect<A, E, R>,
+    ) => Effect.Effect<A, E, R>;
     /** The project, refusing one that is gone or not a git repository. */
     readonly project: (command: string, projectId: ProjectId) => Result<PivotThreads.PivotProject>;
     /**
@@ -77,7 +85,7 @@ export class TeammateHost extends Context.Service<
     readonly launch: (input: LaunchTeammateInput) => Result<LaunchedTeammate>;
     readonly awaitStart: (threadId: ThreadId, runId: RunId) => Result<PivotThreads.RunStart>;
     readonly setupOutcome: (threadId: ThreadId) => Effect.Effect<PivotThreads.SetupScriptOutcome>;
-    /** Archives a launched thread whose record could not be written. */
+    /** Stops, then archives, a launched thread whose record could not be written. */
     readonly discard: (threadId: ThreadId) => Result<void>;
     /** A message from the Pivot, queued behind the active turn. */
     readonly send: (input: {

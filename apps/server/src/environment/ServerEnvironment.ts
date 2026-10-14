@@ -227,6 +227,7 @@ export const make = Effect.gen(function* () {
       requiredWorktreeBootstrap: true,
       threadSettlement: true,
       pivotMode: true,
+      pivotHost: true,
       threadAutoSettlement: true,
       storageCleanup: true,
       storageCleanupRun: true,

@@ -41,6 +41,8 @@ export interface FakeThread {
   title: string;
   modelSelection: ModelSelection;
   archived: boolean;
+  /** How many stops the thread had when it was archived; 0 means it was archived while still running. */
+  stopsWhenArchived?: number;
   settled: boolean;
   stops: number;
   relaunches: number;
@@ -221,6 +223,7 @@ export const layer = (fake: FakeV2) =>
       archive: (threadId) =>
         Effect.map(thread(fake, threadId, "archive"), (found) => {
           found.archived = true;
+          found.stopsWhenArchived = found.stops;
         }),
       settle: (threadId) =>
         Effect.map(thread(fake, threadId, "settle"), (found) => {

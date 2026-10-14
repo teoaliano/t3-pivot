@@ -115,6 +115,8 @@ import * as SourceControlRepositoryService from "./sourceControl/SourceControlRe
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as PivotHome from "./pivot/PivotHome.ts";
 import * as PivotCarryOn from "./pivot/PivotCarryOn.ts";
+import * as PivotHost from "./pivot/PivotHost.ts";
+import * as PivotHostStore from "./pivot/PivotHostStore.ts";
 import * as PivotDatabase from "./pivot/PivotDatabase.ts";
 import * as PivotRelayAwareness from "./pivot/PivotRelayAwareness.ts";
 import * as PivotGit from "./pivot/PivotGit.ts";
@@ -635,7 +637,9 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   // checkouts through. Teardown stops a worktree's managed processes, so it
   // sits inside them.
   Layer.provideMerge(
-    PivotService.layer.pipe(
+    PivotHost.layer.pipe(
+      // PivotService brings the local TeammateHost both services run through.
+      Layer.provideMerge(PivotService.layer),
       Layer.provideMerge(PivotThreads.layer.pipe(Layer.provide(layerPullRequestService))),
       Layer.provideMerge(PivotGit.layer.pipe(Layer.provide(ProcessRunner.layer))),
     ),
@@ -724,7 +728,10 @@ const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
   Layer.provideMerge(ProjectEnrichmentService.layer),
   Layer.provideMerge(Layer.mergeAll(NativeAppIconResolver.layer, layerProjectFaviconResolver)),
   Layer.provideMerge(PivotHome.layer.pipe(Layer.provide(ProcessRunner.layer))),
-  Layer.provideMerge(PivotStore.layer.pipe(Layer.provide(PivotDatabase.layer))),
+  // The Pivot's records and the host links' share one database connection.
+  Layer.provideMerge(
+    Layer.mergeAll(PivotStore.layer, PivotHostStore.layer).pipe(Layer.provide(PivotDatabase.layer)),
+  ),
   Layer.provideMerge(layerRepositoryIdentityResolver),
   Layer.provideMerge(layerServerEnvironment),
   Layer.provideMerge(layerAuth),

@@ -24,6 +24,7 @@ import Migration0002 from "./migrations/002_DecisionApproval.ts";
 import Migration0003 from "./migrations/003_PullRequestStates.ts";
 import Migration0004 from "./migrations/004_TeammateModelEntry.ts";
 import Migration0005 from "./migrations/005_TeammateEnvironment.ts";
+import Migration0006 from "./migrations/006_PivotHost.ts";
 
 export class PivotSql extends Context.Service<PivotSql, SqlClient.SqlClient>()(
   "t3/pivot/PivotDatabase/PivotSql",
@@ -35,6 +36,7 @@ const loader = Migrator.fromRecord({
   "3_PullRequestStates": Migration0003,
   "4_TeammateModelEntry": Migration0004,
   "5_TeammateEnvironment": Migration0005,
+  "6_PivotHost": Migration0006,
 });
 
 const setup = Layer.effectDiscard(

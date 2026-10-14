@@ -67,3 +67,16 @@ starting more than three teammates."
 A Pivot and its teammates carry on by themselves after T3 restarts, whatever the project's
 continue-after-update setting says. The Pivot's first update tells you which teammates resumed
 and which did not.
+
+## Teammates on another machine
+
+A Pivot can start teammates on another machine you have paired, such as a home server, once that
+machine has a **Pivot host link** for it. Pairing and choosing where a teammate runs are not in
+the app yet; this note comes first so the trust decision is clear before they are.
+
+A host link is a trust decision. **This gives that Pivot's agents full control of this machine.**
+Its teammates run without permission prompts, so they can run commands and read or change any
+file the machine's T3 server can, and read its other threads. The link lists the projects the
+Pivot may use, but that list only limits what the Pivot can ask for. It does not confine what an
+agent does once it is running. Create a host link only for a Pivot you trust, on a machine you are
+happy for it to control.

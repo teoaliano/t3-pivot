@@ -179,7 +179,7 @@ describe("TeammateHost (local)", () => {
     },
   );
 
-  it.effect("send queues, stop stops and discard archives, as PivotThreads does", () => {
+  it.effect("send queues, stop stops and discard stops then archives, as PivotThreads does", () => {
     const { fake, layer } = setup();
     return Effect.gen(function* () {
       const host = yield* TeammateHost;
@@ -197,6 +197,7 @@ describe("TeammateHost (local)", () => {
       yield* host.stop(a.threadId);
       yield* threads.stop(b.threadId);
       yield* host.discard(a.threadId);
+      yield* threads.stop(b.threadId);
       yield* threads.archive(b.threadId);
 
       const [first, second] = [fake.threads.get(a.threadId)!, fake.threads.get(b.threadId)!];
