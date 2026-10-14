@@ -494,6 +494,9 @@ export const make = Effect.gen(function* () {
         branch: teammate.branch,
         worktreeExists,
         force: input.force,
+        // The host cannot tell whether the home merged the work, so git decides: an unmerged
+        // branch stays, and discarded work keeps its branch.
+        branchDisposal: input.force ? "keep" : "safe",
       });
       yield* store.markTornDown(teammate.threadId);
     });
