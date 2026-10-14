@@ -7,10 +7,11 @@ const mode = process.argv[3];
 const withHandoff = mode.startsWith("handoff");
 const require = NodeModule.createRequire(root + "/apps/server/package.json");
 const load = (name) => import(NodeURL.pathToFileURL(require.resolve("effect/" + name)));
-const [Effect, Layer, FileSystem] = await Promise.all([
+const [Effect, Layer, FileSystem, Option] = await Promise.all([
   load("Effect"),
   load("Layer"),
   load("FileSystem"),
+  load("Option"),
 ]);
 const app = (file) => import(NodeURL.pathToFileURL(root + "/apps/server/src/" + file + ".ts"));
 const providerCore = (file) =>
@@ -66,7 +67,10 @@ const dependencies = Layer.mergeAll(
     getTurnStartHistory: () => Effect.sync(() => current.turnItems),
     getRuntimeRecoveryProjection: () => Effect.sync(() => current),
   }),
-  Layer.mock(Sessions.ProviderSessionManagerV2)({ open: () => Effect.succeed(session) }),
+  Layer.mock(Sessions.ProviderSessionManagerV2)({
+    open: () => Effect.succeed(session),
+    get: () => Effect.succeed(Option.none()),
+  }),
   Layer.mock(Policy.RuntimePolicyV2)({
     resolve: () =>
       Effect.succeed({ cwd: "/synthetic", interactionMode: "default", runtimeMode: "full-access" }),
