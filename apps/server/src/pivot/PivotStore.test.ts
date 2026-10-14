@@ -267,6 +267,32 @@ describe("PivotStore", () => {
     ),
   );
 
+  it.effect("records a wait for memory on the teammate's card, without waking its Pivot", () =>
+    withStore(
+      Effect.gen(function* () {
+        const store = yield* PivotStore.PivotStore;
+        yield* createPivot(pivotA);
+        yield* dispatchTeammate(shipA);
+        const wake = (yield* store.pendingWake(pivotA)).length;
+        const status = "Waiting for memory: agents use 9.7 of 9.4 GB";
+        yield* store.dispatch({ type: "teammate.observe-memory-wait", threadId: shipA, status });
+        assert.strictEqual((yield* store.getTeammate(shipA))?.memoryWait, status);
+        // The same reading again records nothing.
+        assert.deepStrictEqual(
+          yield* store.dispatch({ type: "teammate.observe-memory-wait", threadId: shipA, status }),
+          [],
+        );
+        yield* store.dispatch({
+          type: "teammate.observe-memory-wait",
+          threadId: shipA,
+          status: null,
+        });
+        assert.isNull((yield* store.getTeammate(shipA))?.memoryWait);
+        assert.strictEqual((yield* store.pendingWake(pivotA)).length, wake);
+      }),
+    ),
+  );
+
   it.effect("records reports scoped to their run", () =>
     withStore(
       Effect.gen(function* () {

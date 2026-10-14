@@ -110,3 +110,16 @@ not ship until hosted teammates are contained: an MCP scope for hosted threads l
 teammate tools (`report_status`, `record_scout_report`, `link_pull_request`), no `t3_*`
 environment or thread tools, and a write scope confined to the worktree as the Pivot's is
 (`PivotToolRestrictions`).
+
+## Admission waits outside the effect worker
+
+A start held for memory (`AgentScope.admit`, `process/agentAdmission.ts`) never waits inside the
+`provider-turn.start` effect: the effect worker runs only a few effects at once, so a wait there
+stalls every other thread on the server. `ProviderTurnStartService` asks once before opening a new
+session; a `waiting` answer fails with `AgentMemoryDeferral`, which the worker turns into
+`EffectOutbox.defer` (back in line in 5 seconds, attempt not spent). The queue is a file shared by
+every T3 server of the user, so its tickets carry a heartbeat instead of a lock held for the wait:
+a ticket whose start stopped asking (a stopped run, a dead server) drops out after a few polls.
+Teammates are marked as background agents (`ThreadAdmission`), which start only with memory to
+spare and spaced out; the supervisor copies the waiting state onto the teammate's record for its
+card and `list_teammates`.

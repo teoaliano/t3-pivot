@@ -16,6 +16,7 @@ import {
   type OrchestrationV2ThreadProjection,
   OrchestrationV2DomainEvent,
 } from "@t3tools/contracts";
+import { AgentMemoryDeferral, type AgentAdmission, AgentScope } from "@t3tools/shared/AgentScope";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -172,6 +173,8 @@ function makeLocalCommandHarness(input: {
   readonly writeFailure?: unknown;
   /** Loads the thread and starts the run, then fails every later state read. */
   readonly failReadsAfterRunning?: boolean;
+  /** What the memory admission answers for the new session. */
+  readonly admission?: AgentAdmission;
 }) {
   const now = DateTime.makeUnsafe("2026-09-04T12:00:00Z");
   const threadId = ThreadId.make("thread-native-account-command");
@@ -522,7 +525,10 @@ function makeLocalCommandHarness(input: {
               }),
             ),
         }),
-        Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({ open }),
+        Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
+          open,
+          get: () => Effect.succeed(Option.none()),
+        }),
         Layer.mock(ProviderAuthService.ProviderAuthService)({ tryHandlePromptCommand }),
         Layer.mock(RunExecutionService.RunExecutionServiceV2)({ startRootRun }),
         Layer.mock(RuntimePolicy.RuntimePolicyV2)({
@@ -531,6 +537,16 @@ function makeLocalCommandHarness(input: {
       ),
     ),
   );
+  const admission = input.admission;
+  const withAdmission = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    admission === undefined
+      ? effect
+      : effect.pipe(
+          Effect.provideService(AgentScope, {
+            ...AgentScope.defaultValue(),
+            admit: () => Effect.succeed(admission),
+          }),
+        );
   return {
     open,
     writeIfRunCurrent,
@@ -555,6 +571,7 @@ function makeLocalCommandHarness(input: {
           pressure: undefined,
         }),
       ),
+      withAdmission,
     ),
     startWithRetry: Effect.gen(function* () {
       yield* (yield* ProviderTurnStart.ProviderTurnStartServiceV2).start({
@@ -562,7 +579,7 @@ function makeLocalCommandHarness(input: {
         runId,
         willRetry: true,
       });
-    }).pipe(Effect.provide(layer)),
+    }).pipe(Effect.provide(layer), withAdmission),
   };
 }
 
@@ -597,6 +614,41 @@ effectIt.effect("terminalizes a starting run when its provider session cannot op
             "DESCRIPTION is not valid ACP JSON\nCouldn't start: the agent slice is over its memory limit (9.8 GB of 9.4 GB). Stop idle dev servers or teammates and retry.",
         },
       },
+    ]);
+  }),
+);
+
+effectIt.effect("puts a new session back in line while memory is short, without opening it", () =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "Continue",
+      admission: { _tag: "waiting", status: "Waiting for memory: agents use 9.7 of 9.4 GB" },
+    });
+
+    const error = yield* harness.start.pipe(Effect.flip);
+
+    expect(error.cause).toBeInstanceOf(AgentMemoryDeferral);
+    expect(harness.open).not.toHaveBeenCalled();
+    expect(harness.projection().runs.at(-1)?.status).toBe("starting");
+  }),
+);
+
+effectIt.effect("fails the run in plain words once the wait for memory runs out", () =>
+  Effect.gen(function* () {
+    const message =
+      "Not started: the machine does not have memory for another agent (agents use 9.7 of 9.4 GB). Retry once a running agent finishes.";
+    const harness = makeLocalCommandHarness({
+      text: "Continue",
+      admission: { _tag: "expired", message },
+    });
+
+    // Even with retries left: waiting longer is what just ran out.
+    yield* harness.startWithRetry;
+
+    expect(harness.open).not.toHaveBeenCalled();
+    expect(harness.projection().runs.at(-1)).toMatchObject({ status: "failed" });
+    expect(harness.projection().turnItems).toMatchObject([
+      { type: "error", failure: { class: "provider_error", message } },
     ]);
   }),
 );

@@ -63,6 +63,21 @@ describe("teammate cards", () => {
     });
   });
 
+  it("says a teammate is waiting for memory while its agent has not started", () => {
+    const status = "Waiting for memory: agents use 9.7 of 9.4 GB";
+    const card = teammateCard(
+      teammate({ memoryWait: status }),
+      shell({ status: "starting", latestRunStartedAt: null }),
+    );
+    expect(card).toMatchObject({ status: "working", label: "Waiting for memory", detail: status });
+    // Once it reports done, the stale wait no longer shows.
+    const finished = teammateCard(
+      teammate({ memoryWait: status, report: report("done", "2026-10-06T10:05:00.000Z") }),
+      shell({ status: "idle" }),
+    );
+    expect(finished.label).toBe("Done");
+  });
+
   it("gives attention statuses and escalated decisions an accent, and reads the latter as needs you", () => {
     const blocked = teammateCard(
       teammate({ report: report("blocked", "2026-10-06T10:30:00.000Z") }),

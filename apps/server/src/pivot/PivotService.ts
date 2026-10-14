@@ -260,6 +260,8 @@ export const historyLine = (event: PivotEvent): string => {
       return clip(
         `Status ${event.previousStatus ?? "new"} → ${event.status}${event.detail ? `: ${event.detail}` : ""}`,
       );
+    case "teammate.memory-wait-changed":
+      return event.status === null ? "Stopped waiting for memory." : clip(event.status);
     case "teammate.stopped":
       return "Stopped by the Pivot.";
     case "teammate.relaunched":
@@ -834,7 +836,8 @@ export const make = Effect.gen(function* () {
         title: teammate.title,
         kind: teammate.kind,
         status: derived.status,
-        summary: derived.detail ?? teammate.report?.summary ?? null,
+        // A teammate waiting for the machine to have memory has no run to report on yet.
+        summary: teammate.memoryWait ?? derived.detail ?? teammate.report?.summary ?? null,
         branch: teammate.branch,
         pullRequestUrl: pullRequest,
         lastChangeAt: latest?.occurredAt ?? null,

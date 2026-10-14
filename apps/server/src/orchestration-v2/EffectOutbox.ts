@@ -244,6 +244,16 @@ export interface EffectOutboxV2Shape {
     readonly error: string;
     readonly delayMs: number;
   }) => Effect.Effect<boolean, EffectOutboxError>;
+  /**
+   * Puts a claimed effect back to run again after `delayMs` without spending an attempt:
+   * the effect is not failing, it is waiting for something outside it, such as memory.
+   */
+  readonly defer: (input: {
+    readonly effectId: string;
+    readonly workerId: string;
+    readonly reason: string;
+    readonly delayMs: number;
+  }) => Effect.Effect<boolean, EffectOutboxError>;
   readonly fail: (input: {
     readonly effectId: string;
     readonly workerId: string;
@@ -636,6 +646,39 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
         }).pipe(
           Effect.mapError(
             (cause) => new EffectOutboxError({ operation: "retry", effectId, cause }),
+          ),
+        ),
+      defer: ({ effectId, workerId, reason, delayMs }) =>
+        Effect.gen(function* () {
+          const now = yield* DateTime.now;
+          const nowIso = DateTime.formatIso(now);
+          const availableAt = DateTime.formatIso(
+            DateTime.add(now, { milliseconds: Math.max(0, delayMs) }),
+          );
+          // The claim counted an attempt; a deferral gives it back.
+          const rows = yield* sql<{ readonly effect_id: string }>`
+            UPDATE orchestration_v2_effect_outbox
+            SET
+              status = 'pending',
+              attempt_count = MAX(0, attempt_count - 1),
+              available_at = ${availableAt},
+              lease_owner = NULL,
+              lease_expires_at = NULL,
+              updated_at = ${nowIso},
+              last_error = ${reason}
+            WHERE effect_id = ${effectId}
+              AND status = 'running'
+              AND lease_owner = ${workerId}
+            RETURNING effect_id
+          `;
+          if (rows.length === 1) {
+            cancellationSignals.delete(effectId);
+            yield* notifyAvailable();
+          }
+          return rows.length === 1;
+        }).pipe(
+          Effect.mapError(
+            (cause) => new EffectOutboxError({ operation: "defer", effectId, cause }),
           ),
         ),
       fail: ({ effectId, workerId, error }) =>

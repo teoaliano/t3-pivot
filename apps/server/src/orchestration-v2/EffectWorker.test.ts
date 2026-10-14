@@ -9,6 +9,7 @@ import {
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
+import { AgentMemoryDeferral } from "@t3tools/shared/AgentScope";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -906,4 +907,68 @@ it.effect.each(["confirmed", "unconfirmed", "failed"] as const)(
         outcome === "confirmed" ? ["stop-child", "settle-child"] : ["stop-child"],
       );
     }),
+);
+
+it.effect("puts a start held back for memory back in line without spending an attempt", () =>
+  Effect.gen(function* () {
+    const now = DateTime.formatIso(yield* DateTime.now);
+    const effectId = "effect:worker-memory-deferral";
+    const workerId = "worker-memory-deferral";
+    const claimedEffect: EffectOutbox.OrchestrationEffectV2 = {
+      id: effectId,
+      commandId: CommandId.make("command:worker-memory-deferral"),
+      threadId: ThreadId.make("thread:worker-memory-deferral"),
+      request: { type: "provider-turn.start", runId: RunId.make("run:worker-memory-deferral") },
+      status: "running",
+      // The last attempt: a failure here would fail the effect for good.
+      attemptCount: 5,
+      availableAt: now,
+      leaseOwner: workerId,
+      leaseExpiresAt: now,
+      createdAt: now,
+      updatedAt: now,
+      completedAt: null,
+      lastError: null,
+    };
+    const deferrals = yield* Ref.make<ReadonlyArray<string>>([]);
+    const settled = yield* Ref.make(0);
+    const layerOutbox = Layer.mock(EffectOutbox.EffectOutboxV2)({
+      claimNext: () => Effect.succeed(Option.some(claimedEffect)),
+      get: () => Effect.succeed(Option.some(claimedEffect)),
+      awaitCancellation: () => Effect.never,
+      clearCancellation: () => Effect.void,
+      defer: ({ reason }) =>
+        Ref.update(deferrals, (existing) => [...existing, reason]).pipe(Effect.as(true)),
+      retry: () => Ref.update(settled, (count) => count + 1).pipe(Effect.as(true)),
+      fail: () => Ref.update(settled, (count) => count + 1).pipe(Effect.as(true)),
+      succeed: () => Ref.update(settled, (count) => count + 1).pipe(Effect.as(true)),
+    });
+    const layerExecutor = Layer.succeed(
+      EffectWorker.OrchestrationEffectExecutorV2,
+      EffectWorker.OrchestrationEffectExecutorV2.of({
+        execute: (effect) =>
+          Effect.fail(
+            new EffectWorker.OrchestrationEffectExecutionError({
+              effectId: effect.id,
+              effectType: effect.request.type,
+              cause: new ProviderTurnStartService.ProviderTurnStartError({
+                runId: RunId.make("run:worker-memory-deferral"),
+                cause: new AgentMemoryDeferral({ status: "Waiting for memory" }),
+              }),
+            }),
+          ),
+      }),
+    );
+    const layerWorker = EffectWorker.layerWithOptions({ workerId, maxAttempts: 5 }).pipe(
+      Layer.provide(Layer.merge(layerOutbox, layerExecutor)),
+    );
+
+    yield* EffectWorker.OrchestrationEffectWorkerV2.pipe(
+      Effect.flatMap((worker) => worker.runOnce),
+      Effect.provide(layerWorker),
+    );
+
+    assert.deepStrictEqual(yield* Ref.get(deferrals), ["Waiting for memory"]);
+    assert.equal(yield* Ref.get(settled), 0);
+  }),
 );

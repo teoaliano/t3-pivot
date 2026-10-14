@@ -103,6 +103,11 @@ export function teammateCard(
       : shell === null
         ? { status: "unreported" as const, detail: teammate.report?.summary ?? null }
         : deriveTeammateStatus({ ...shell, teammate });
+  // Its agent has not started: the machine is short of memory, and it starts by itself.
+  const memoryWait =
+    teammate.tornDownAt === null && derived.status === "working"
+      ? (teammate.memoryWait ?? null)
+      : null;
   // Anything waiting on the user: a decision the Pivot holds for them, or an approval
   // the teammate is waiting on.
   const needsYou = teammate.hasEscalatedDecision || derived.status === "waiting";
@@ -116,7 +121,11 @@ export function teammateCard(
     title: shell?.title || teammate.title,
     status: derived.status,
     needsYou,
-    label: needsYou ? "Needs you" : STATUS_LABEL[derived.status],
+    label: needsYou
+      ? "Needs you"
+      : memoryWait !== null
+        ? "Waiting for memory"
+        : STATUS_LABEL[derived.status],
     attention,
     tone:
       derived.status === "failed"
@@ -139,7 +148,7 @@ export function teammateCard(
           ? { kind: "pull-request", ...shell.pullRequest }
           : null,
     providerInstanceId: shell?.providerInstanceId ?? null,
-    detail: derived.detail,
+    detail: memoryWait ?? derived.detail,
     followsSetup: teammate.report === null && teammate.tornDownAt === null,
   };
 }

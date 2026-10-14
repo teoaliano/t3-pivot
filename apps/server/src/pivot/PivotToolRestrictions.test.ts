@@ -20,6 +20,7 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as RuntimePolicy from "../orchestration-v2/RuntimePolicy.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as PivotDatabase from "./PivotDatabase.ts";
+import * as PivotHostStore from "./PivotHostStore.ts";
 import * as PivotStore from "./PivotStore.ts";
 import * as PivotToolRestrictions from "./PivotToolRestrictions.ts";
 
@@ -121,7 +122,7 @@ const layer = Layer.mergeAll(
   runtimePolicyLayer,
   PivotToolRestrictions.layer.pipe(
     Layer.provideMerge(Layer.effectDiscard(seed)),
-    Layer.provideMerge(PivotStore.layer),
+    Layer.provideMerge(Layer.merge(PivotStore.layer, PivotHostStore.layer)),
   ),
 ).pipe(Layer.provide(PivotDatabase.layerMemory), Layer.provideMerge(NodeServices.layer));
 

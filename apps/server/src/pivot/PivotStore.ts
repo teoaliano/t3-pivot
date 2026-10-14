@@ -145,6 +145,11 @@ export type PivotCommand =
       readonly resume: TeammateResumeState | null;
     }
   | {
+      readonly type: "teammate.observe-memory-wait";
+      readonly threadId: ThreadId;
+      readonly status: string | null;
+    }
+  | {
       readonly type: "teammate.observe-status";
       readonly threadId: ThreadId;
       readonly status: TeammateStatus;
@@ -349,6 +354,7 @@ interface TeammateSqlRow {
   readonly stuck_run_id: string | null;
   readonly recheck_at: string | null;
   readonly merge_requested_url: string | null;
+  readonly memory_wait: string | null;
   readonly escalated_decisions: number;
 }
 
@@ -420,6 +426,7 @@ const toTeammate = (row: TeammateSqlRow): TeammateRow => ({
   hasScoutReport: row.scout_report !== null,
   dispatchedAt: row.dispatched_at,
   tornDownAt: row.torn_down_at,
+  memoryWait: row.memory_wait,
   baseBranch: row.base_branch,
   worktreePath: row.worktree_path,
   deliveryMode: row.delivery_mode as PivotDeliveryMode,
@@ -482,6 +489,7 @@ export const teammateRecord = (row: TeammateRow): TeammateRecord => ({
   hasScoutReport: row.hasScoutReport,
   dispatchedAt: row.dispatchedAt,
   tornDownAt: row.tornDownAt,
+  memoryWait: row.memoryWait,
 });
 
 const byteLength = (text: string) => new TextEncoder().encode(text).length;
@@ -763,6 +771,20 @@ export const make = Effect.gen(function* () {
         emit(
           { type: "teammate.resume-changed", threadId: command.threadId, resume: command.resume },
           command.resume !== null,
+        );
+        break;
+      }
+      case "teammate.observe-memory-wait": {
+        const teammate = yield* anyTeammate(command.threadId);
+        if (teammate.tornDownAt !== null || teammate.memoryWait === command.status) break;
+        // Shown to the user; the Pivot reads it in list_teammates, so it wakes nobody.
+        emit(
+          {
+            type: "teammate.memory-wait-changed",
+            threadId: command.threadId,
+            status: command.status,
+          },
+          false,
         );
         break;
       }
@@ -1093,6 +1115,12 @@ export const make = Effect.gen(function* () {
         `;
         return;
       }
+      case "teammate.memory-wait-changed":
+        yield* sql`
+          UPDATE pivot_teammates SET memory_wait = ${event.status}
+          WHERE thread_id = ${event.threadId}
+        `;
+        return;
       case "teammate.stopped":
         yield* sql`
           UPDATE pivot_teammates SET stopped_run_id = ${event.runId ?? ""}
