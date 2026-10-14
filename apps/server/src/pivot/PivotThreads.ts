@@ -9,6 +9,7 @@
  * @module PivotThreads
  */
 import {
+  type ChatImageAttachment,
   CommandId,
   MessageId,
   type ModelSelection,
@@ -180,6 +181,7 @@ export class PivotThreads extends Context.Service<
       readonly threadId: ThreadId;
       readonly senderThreadId: ThreadId;
       readonly text: string;
+      readonly attachments?: ReadonlyArray<ChatImageAttachment> | undefined;
       readonly mode: "auto" | "queue";
     }) => Effect.Effect<void, PivotThreadsError>;
     /** Interrupts the running turn, holds the queue, and ends the provider session. */
@@ -209,6 +211,8 @@ export class PivotThreads extends Context.Service<
       readonly text: string;
       readonly summary: string;
       readonly teammateThreadIds: ReadonlyArray<ThreadId>;
+      /** Images the user attached to answers this wake reports. */
+      readonly attachments?: ReadonlyArray<ChatImageAttachment> | undefined;
     }) => Effect.Effect<void, PivotThreadsError>;
     /** Releases the queue restart recovery held, so queued messages run after the resumed turn. */
     readonly releaseHeldQueue: (threadId: ThreadId) => Effect.Effect<void, PivotThreadsError>;
@@ -489,7 +493,7 @@ export const make = Effect.gen(function* () {
         });
       }).pipe(Effect.mapError(fail("settle", threadId))),
 
-    send: ({ threadId, senderThreadId, text, mode }) =>
+    send: ({ threadId, senderThreadId, text, attachments, mode }) =>
       Effect.gen(function* () {
         const shell = yield* threads.getThreadShell(threadId);
         if (shell === null)
@@ -501,7 +505,7 @@ export const make = Effect.gen(function* () {
           messageId: yield* messageId,
           senderThreadId,
           text,
-          attachments: [],
+          attachments: [...(attachments ?? [])],
           mode,
           createdBy: "agent",
           creationSource: "mcp",
@@ -560,7 +564,7 @@ export const make = Effect.gen(function* () {
       Stream.orDie,
     ),
 
-    wake: ({ pivotThreadId, messageId, text, summary, teammateThreadIds }) =>
+    wake: ({ pivotThreadId, messageId, text, summary, teammateThreadIds, attachments }) =>
       Effect.gen(function* () {
         yield* threads.dispatch({
           type: "message.dispatch",
@@ -573,7 +577,7 @@ export const make = Effect.gen(function* () {
             outcome: "updated",
             summary,
           },
-          attachments: [],
+          attachments: [...(attachments ?? [])],
           dispatchMode: { type: "queue_after_active" },
           createdBy: "agent",
           creationSource: "server",

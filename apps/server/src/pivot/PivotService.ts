@@ -9,6 +9,7 @@
  * @module PivotService
  */
 import {
+  type ChatImageAttachment,
   type ModelSelection,
   PIVOT_HISTORY_DEFAULT_LIMIT,
   PIVOT_HISTORY_MAX_LIMIT,
@@ -130,12 +131,16 @@ export class PivotService extends Context.Service<
     readonly decisionLog: (
       pivotThreadId: ThreadId,
     ) => Effect.Effect<ReadonlyArray<PivotDecision>, PivotServiceError>;
-    /** Records the user's answer to an escalated decision, verbatim, and wakes the Pivot. */
+    /**
+     * Records the user's answer to an escalated decision, verbatim, with any images, and
+     * wakes the Pivot.
+     */
     readonly recordUserAnswer: (input: {
       readonly decisionId: PivotDecisionId;
       readonly answer: string;
       /** Required for a decision that asks for approval. */
       readonly approved?: boolean | undefined;
+      readonly attachments?: ReadonlyArray<ChatImageAttachment> | undefined;
     }) => Effect.Effect<PivotDecision, PivotServiceError>;
 
     // The Pivot's tools. `caller` is the calling thread; only the active Pivot may call.
@@ -460,6 +465,7 @@ export const make = Effect.gen(function* () {
     decisionId,
     answer,
     approved,
+    attachments,
   }) =>
     Effect.gen(function* () {
       yield* store.dispatch({
@@ -467,6 +473,7 @@ export const make = Effect.gen(function* () {
         decisionId,
         answer,
         approved: approved ?? null,
+        ...(attachments === undefined ? {} : { attachments }),
       });
       const decision = yield* store.getDecision(decisionId);
       if (decision === null) {
@@ -810,6 +817,7 @@ export const make = Effect.gen(function* () {
             threadId: decision.teammateThreadId,
             senderThreadId: pivot.threadId,
             text: input.answer,
+            attachments: decision.userAttachments,
           });
         }
       }

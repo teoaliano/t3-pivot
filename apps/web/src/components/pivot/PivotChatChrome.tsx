@@ -7,6 +7,7 @@ import { LayoutDashboardIcon } from "lucide-react";
 import { useState } from "react";
 
 import { shortcutLabelForCommand } from "../../keybindings";
+import { useServerConfigs } from "../../state/entities";
 import { usePivotState } from "../../state/pivot";
 import { primaryServerKeybindingsAtom, serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -16,6 +17,11 @@ import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import {
+  clearPivotDecisionAttachments,
+  readyPivotDecisionImages,
+  usePivotDecisionAttachments,
+} from "./pivotDecisionAttachments";
 import { PivotDecisionCard } from "./PivotDecisionCard";
 import { useInPivotView } from "./pivotViewContext";
 import { otherPivotViewMode, usePivotViewMode, usePivotViewStore } from "./pivotViewStore";
@@ -170,8 +176,23 @@ function OpenPivotDecision(props: {
   const answerDecision = useAtomCommand(serverEnvironment.answerPivotDecision, {
     reportFailure: false,
   });
+  const supportsImages =
+    useServerConfigs().get(props.environmentId)?.environment.capabilities
+      .pivotDecisionAttachments === true;
+  const attachments = usePivotDecisionAttachments({
+    environmentId: props.environmentId,
+    decisionId: props.decision.decisionId,
+  });
   const submit = async (text: string, approved?: boolean) => {
     if (text.trim().length === 0 || sending) return;
+    const images = readyPivotDecisionImages(props.environmentId, props.decision.decisionId);
+    if (images === null) {
+      toastManager.add({
+        type: "error",
+        title: "Wait for the images to finish uploading, or remove the failed ones.",
+      });
+      return;
+    }
     setSending(true);
     const result = await answerDecision({
       environmentId: props.environmentId,
@@ -179,12 +200,15 @@ function OpenPivotDecision(props: {
         decisionId: props.decision.decisionId,
         answer: text,
         ...(approved === undefined ? {} : { approved }),
+        ...(images.length === 0 ? {} : { attachments: images }),
       },
     });
     setSending(false);
     if (result._tag === "Failure") {
       toastManager.add({ type: "error", title: "Your answer was not recorded." });
+      return;
     }
+    clearPivotDecisionAttachments(props.environmentId, props.decision.decisionId);
   };
   return (
     <PivotDecisionCard
@@ -193,6 +217,7 @@ function OpenPivotDecision(props: {
       position={props.position}
       sending={sending}
       bodyMaxHeight={props.bodyMaxHeight}
+      attachments={supportsImages ? attachments : undefined}
       onAnswer={(text, approved) => void submit(text, approved)}
     />
   );

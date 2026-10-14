@@ -219,8 +219,8 @@ export const make = Effect.gen(function* () {
         ),
         Effect.andThen(threads.archive(threadId)),
       ),
-    send: ({ threadId, senderThreadId, text }) =>
-      threads.send({ threadId, senderThreadId, text, mode: "queue" }),
+    send: ({ threadId, senderThreadId, text, attachments }) =>
+      threads.send({ threadId, senderThreadId, text, attachments, mode: "queue" }),
     stop: threads.stop,
     // Landed or merged: the session stops first, so the agent never sees its own process
     // killed under it, and then what its scope still runs goes.

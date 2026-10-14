@@ -1,9 +1,18 @@
 import type { PivotDecision } from "@t3tools/contracts";
-import { CheckIcon, ChevronDownIcon, ShieldIcon, SplitIcon } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  PaperclipIcon,
+  ShieldIcon,
+  SplitIcon,
+  XIcon,
+} from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
+import type { ComposerImageAttachment } from "../../composerDraftStore";
 import { cn } from "~/lib/utils";
 import { ComposerBanner } from "../chat/ComposerBanner";
+import { ComposerImageThumbnail } from "../chat/ComposerImageThumbnail";
 import { ComposerOptionRow } from "../chat/ComposerOptionRow";
 import { messageActionPillClassName } from "../chat/ComposerPrimaryActions";
 import { ComposerSurface } from "../chat/ComposerSurface";
@@ -11,6 +20,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { recommendedOption, userAnswerLabel } from "./pivotDecisions.logic";
+import { type PivotDecisionAttachments, pivotDecisionAnswerText } from "./pivotDecisionAttachments";
 
 export interface PivotDecisionCardProps {
   decision: PivotDecision;
@@ -21,6 +31,8 @@ export interface PivotDecisionCardProps {
   sending: boolean;
   /** Caps the question body so a short canvas keeps room for the timeline. */
   bodyMaxHeight?: string | undefined;
+  /** Images for a question's answer. Absent where the server cannot take them. */
+  attachments?: PivotDecisionAttachments | undefined;
   onAnswer: (text: string, approved?: boolean) => void;
 }
 
@@ -165,6 +177,7 @@ function QuestionDecision({
   position,
   sending,
   bodyMaxHeight,
+  attachments,
   onAnswer,
   active,
   onMinimize,
@@ -177,11 +190,26 @@ function QuestionDecision({
   const [text, setText] = useState("");
   // Typing an answer of their own replaces the picked option, as in the composer.
   const typed = text.trim().length > 0;
-  const answer = typed ? text : selected;
+  const images = attachments?.images ?? [];
+  const answer = pivotDecisionAnswerText({
+    typed: typed ? text : null,
+    selected,
+    imageCount: images.length,
+  });
+  // An answer with images waits until they have all uploaded, so the Pivot gets every one.
+  const imagesReady =
+    (attachments?.preparing ?? 0) === 0 && (attachments?.blockReason ?? null) === null;
+  const canSubmit = answer !== null && !sending && imagesReady;
   const submit = () => {
-    if (answer === null || sending) return;
+    if (answer === null || !canSubmit) return;
     onAnswer(answer);
   };
+  const imageStatus =
+    attachments === undefined
+      ? null
+      : attachments.preparing > 0
+        ? "Preparing images…"
+        : attachments.blockReason;
 
   // Number keys pick an option while focus is outside editable fields, like provider questions.
   useEffect(() => {
@@ -284,11 +312,22 @@ function QuestionDecision({
       sending={sending}
       onTextChange={setText}
       onSubmit={submit}
+      leading={
+        attachments === undefined ? null : (
+          <AnswerImages images={images} status={imageStatus} onRemove={attachments.remove} />
+        )
+      }
+      attach={
+        attachments === undefined ? null : (
+          <AttachImagesButton disabled={sending} onFiles={(files) => void attachments.add(files)} />
+        )
+      }
+      onFiles={attachments === undefined ? undefined : (files) => void attachments.add(files)}
       action={
         <button
           type="button"
           className={cn(messageActionPillClassName, "h-8 px-4 sm:h-7")}
-          disabled={answer === null || sending}
+          disabled={!canSubmit}
           onClick={submit}
         >
           {sending ? "Submitting..." : "Submit answer"}
@@ -410,15 +449,42 @@ function DecisionComposer(props: {
   sending: boolean;
   onTextChange: (text: string) => void;
   onSubmit: (() => void) | null;
+  /** Images above the editor, and the attach control beside it, when the answer takes images. */
+  leading?: ReactNode;
+  attach?: ReactNode;
+  /** Receives images dropped on or pasted into the composer. */
+  onFiles?: ((files: ReadonlyArray<File>) => void) | undefined;
   action: ReactNode;
 }) {
-  const { onSubmit } = props;
+  const { onSubmit, onFiles } = props;
   return (
-    <ComposerSurface.Shell className="mb-2" data-pivot-decision={props["data-pivot-decision"]}>
+    <ComposerSurface.Shell
+      className="mb-2"
+      data-pivot-decision={props["data-pivot-decision"]}
+      onDragOver={
+        onFiles === undefined
+          ? undefined
+          : (event) => {
+              if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+            }
+      }
+      onDrop={
+        onFiles === undefined
+          ? undefined
+          : (event) => {
+              const files = Array.from(event.dataTransfer.files);
+              if (files.length === 0) return;
+              event.preventDefault();
+              onFiles(files);
+            }
+      }
+    >
       <ComposerBanner.Attachment>{props.banner}</ComposerBanner.Attachment>
       <ComposerSurface.Host>
         <ComposerSurface.Main>
+          {props.leading}
           <div className="relative flex items-end gap-2 rounded-3xl px-3 py-2.5 sm:px-4">
+            {props.attach}
             <textarea
               aria-label={props.label}
               placeholder={props.placeholder}
@@ -433,6 +499,18 @@ function DecisionComposer(props: {
                 event.preventDefault();
                 onSubmit();
               }}
+              onPaste={
+                onFiles === undefined
+                  ? undefined
+                  : (event) => {
+                      const images = Array.from(event.clipboardData.files).filter((file) =>
+                        file.type.startsWith("image/"),
+                      );
+                      if (images.length === 0) return;
+                      event.preventDefault();
+                      onFiles(images);
+                    }
+              }
               className="field-sizing-content max-h-40 min-h-7 min-w-0 flex-1 resize-none bg-transparent py-0.5 font-(family-name:--font-composer,var(--font-sans)) text-(length:--font-size-prompt,var(--text-sm)) leading-relaxed text-foreground outline-none placeholder:text-placeholder/75 max-sm:pointer-coarse:text-(length:--font-size-prompt-touch)"
             />
             {props.action}
@@ -440,5 +518,83 @@ function DecisionComposer(props: {
         </ComposerSurface.Main>
       </ComposerSurface.Host>
     </ComposerSurface.Shell>
+  );
+}
+
+/** The images an answer carries, each removable until the answer is sent. */
+function AnswerImages(props: {
+  images: ReadonlyArray<ComposerImageAttachment>;
+  status: string | null;
+  onRemove: (imageId: string) => void;
+}) {
+  if (props.images.length === 0 && props.status === null) return null;
+  return (
+    <div className="grid gap-1.5 px-3 pt-2 sm:px-4">
+      {props.images.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {props.images.map((image) => (
+            <div
+              key={image.id}
+              className="relative size-14 overflow-hidden rounded-lg border bg-muted"
+            >
+              <ComposerImageThumbnail
+                file={image.file}
+                alt={image.name}
+                className="size-full object-cover"
+                fallback={
+                  <span className="flex size-full items-center justify-center p-1 text-center text-3xs text-muted-foreground wrap-anywhere">
+                    {image.name}
+                  </span>
+                }
+              />
+              <button
+                type="button"
+                aria-label={`Remove ${image.name}`}
+                className="absolute top-0.5 right-0.5 flex size-4 items-center justify-center rounded-full bg-background/85 text-foreground hover:bg-background"
+                onClick={() => props.onRemove(image.id)}
+              >
+                <XIcon className="size-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {props.status !== null ? (
+        <p className="text-xs text-secondary-label">{props.status}</p>
+      ) : null}
+    </div>
+  );
+}
+
+/** The composer's attach control, for images picked from the file dialog. */
+function AttachImagesButton(props: { disabled: boolean; onFiles: (files: File[]) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(event) => {
+          const files = Array.from(event.currentTarget.files ?? []);
+          event.currentTarget.value = "";
+          props.onFiles(files);
+        }}
+      />
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Attach images"
+        className="shrink-0"
+        disabled={props.disabled}
+        onPointerDown={(event) => event.preventDefault()}
+        onClick={() => inputRef.current?.click()}
+      >
+        <PaperclipIcon />
+      </Button>
+    </>
   );
 }

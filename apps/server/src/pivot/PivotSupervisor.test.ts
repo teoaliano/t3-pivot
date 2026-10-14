@@ -538,6 +538,53 @@ describe("PivotSupervisor", () => {
     }).pipe(Effect.provide(withSupervisor(fake)));
   });
 
+  it.effect("a user's answer with images reaches the Pivot and its teammate with them", () => {
+    const { fake } = setup();
+    return Effect.gen(function* () {
+      const { pivot, teammate } = yield* running(fake);
+      const pivots = yield* PivotService.PivotService;
+      const { decision } = yield* pivots.openDecision(pivot, {
+        teammateThreadId: teammate,
+        question: "Which layout?",
+      });
+      yield* pivots.escalateDecision(pivot, {
+        decisionId: decision.decisionId,
+        questions: ["Which layout?"],
+        evidence: "Two drafts.",
+        consequence: "One ships.",
+        options: [],
+        recommendation: "Left",
+      });
+      const screenshot = {
+        type: "image" as const,
+        id: "layout-left",
+        name: "left.png",
+        mimeType: "image/png",
+        sizeBytes: 4096,
+      };
+      yield* pivots.recordUserAnswer({
+        decisionId: decision.decisionId,
+        answer: "The left one.",
+        attachments: [screenshot],
+      });
+      yield* tick;
+      const [wake] = wakesFor(fake, pivot).slice(-1);
+      assert.deepStrictEqual(wake?.attachments, [screenshot]);
+      assert.include(wake!.text, "with 1 image, attached to this notice");
+
+      yield* pivots.answerDecision(pivot, {
+        decisionId: decision.decisionId,
+        answer: "Use the left one.",
+      });
+      assert.deepStrictEqual(fake.threads.get(teammate)?.messages.at(-1), {
+        senderThreadId: pivot,
+        text: "Use the left one.",
+        mode: "queue",
+        attachments: [screenshot],
+      });
+    }).pipe(Effect.provide(withSupervisor(fake)));
+  });
+
   it.effect("a takeover opens the new Pivot with a digest of every teammate and decision", () => {
     const { fake } = setup();
     return Effect.gen(function* () {
