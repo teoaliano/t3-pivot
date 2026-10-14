@@ -379,7 +379,8 @@ export const make = Effect.gen(function* () {
                     { maxLive: PIVOT_HOST_MAX_LIVE_TEAMMATES },
                   );
                   if (result !== null) return result;
-                  // Nothing was written: the link was revoked, or another launch filled the cap.
+                  // Nothing was written: the link was revoked, the project left its allowlist,
+                  // or another launch filled the cap.
                   const current = yield* store.getGrant(grant.grantId);
                   if (current === null || current.revokedAt !== null) {
                     return yield* new PivotHostRefusedError({
@@ -387,6 +388,7 @@ export const make = Effect.gen(function* () {
                       reason: "This Pivot host link was revoked.",
                     });
                   }
+                  yield* authorize(caller, input);
                   return yield* capReached;
                 }).pipe(
                   Effect.onExit((exit) =>
@@ -421,7 +423,7 @@ export const make = Effect.gen(function* () {
     threadId: ThreadId,
   ) =>
     liveTeammate(command, caller, input).pipe(
-      Effect.tapError(() => host.stop(threadId).pipe(Effect.ignore)),
+      Effect.tapError(() => stopUnreachable([threadId], "Could not stop an unreachable teammate")),
       Effect.asVoid,
     );
 

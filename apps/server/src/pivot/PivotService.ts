@@ -543,7 +543,7 @@ export const make = Effect.gen(function* () {
       if (hosted !== null && !(yield* hostStore.isLive(hosted.threadId))) {
         return yield* new PivotCallerError({
           tool: command,
-          reason: "This teammate's host link was revoked.",
+          reason: "This teammate's host link was revoked, or no longer allows its project.",
         });
       }
       return teammate !== null

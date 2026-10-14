@@ -142,9 +142,12 @@ export class PivotHostStore extends Context.Service<
     readonly getTeammate: (
       threadId: ThreadId,
     ) => Effect.Effect<HostedTeammate | null, PivotStoreError>;
-    /** Whether the thread is a hosted teammate not yet torn down. Answers from memory. */
+    /**
+     * Whether the thread is a hosted teammate not yet torn down, of a link that stands and
+     * still allows its project. Answers from memory.
+     */
     readonly isLive: (threadId: ThreadId) => Effect.Effect<boolean>;
-    /** Every hosted teammate not yet torn down, from memory. */
+    /** Every hosted teammate `isLive` holds, from memory. */
     readonly liveThreadIds: Effect.Effect<ReadonlyArray<ThreadId>>;
     readonly markTornDown: (threadId: ThreadId) => Effect.Effect<void, PivotStoreError>;
     /** Appends to the grant's log. Null when the thread is not a hosted teammate. */
@@ -420,8 +423,9 @@ export const make = Effect.gen(function* () {
         "recordTeammate",
         () => null,
         Effect.gen(function* () {
-          // Inserted only while the link stands, in the same statement, so a revoke that
-          // lands while a launch runs cannot leave a record behind.
+          // Inserted only while the link stands and allows the project, in the same
+          // statement, so a revoke or allowlist edit that lands while a launch runs cannot
+          // leave a record behind.
           yield* sql`
             INSERT INTO pivot_hosted_teammates (
               thread_id, grant_id, dispatch_id, project_id, pivot_thread_id, pivot_label, kind,
@@ -433,8 +437,9 @@ export const make = Effect.gen(function* () {
               ${input.branch}, ${input.baseBranch}, ${input.worktreePath}, ${input.deliveryMode},
               ${input.firstRunId}, ${createdAt}
             WHERE EXISTS (
-              SELECT 1 FROM pivot_host_grants
-              WHERE grant_id = ${input.grantId} AND revoked_at IS NULL
+              SELECT 1 FROM pivot_host_grants g, json_each(g.allowed_project_ids) allowed
+              WHERE g.grant_id = ${input.grantId} AND g.revoked_at IS NULL
+                AND allowed.value = ${input.projectId}
             )
               AND (
                 SELECT COUNT(*) FROM pivot_hosted_teammates

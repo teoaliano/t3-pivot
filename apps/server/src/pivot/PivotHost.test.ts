@@ -1413,7 +1413,7 @@ describe("a revoked link's teammates", () => {
         (yield* pivots
           .reportStatus(a.threadId, { status: "working", summary: "Still going." })
           .pipe(Effect.flip)).message,
-        "This teammate's host link was revoked.",
+        "This teammate's host link was revoked, or no longer allows its project.",
       );
       // A repeat revoke stops them again, which is harmless, and is what retries a stop that failed.
       yield* host.revokeGrant(mine.grantId);
