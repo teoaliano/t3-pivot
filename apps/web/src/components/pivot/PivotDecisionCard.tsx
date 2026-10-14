@@ -1,6 +1,12 @@
 import type { PivotDecision } from "@t3tools/contracts";
 import { CheckIcon, ChevronDownIcon, ShieldIcon, SplitIcon } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import {
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { cn } from "~/lib/utils";
 import { ComposerBanner } from "../chat/ComposerBanner";
@@ -10,7 +16,12 @@ import { ComposerSurface } from "../chat/ComposerSurface";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
-import { recommendedOption, userAnswerLabel } from "./pivotDecisions.logic";
+import {
+  clampDecisionBodyHeight,
+  decisionBodyDefaultMaxHeight,
+  recommendedOption,
+  userAnswerLabel,
+} from "./pivotDecisions.logic";
 
 export interface PivotDecisionCardProps {
   decision: PivotDecision;
@@ -19,8 +30,8 @@ export interface PivotDecisionCardProps {
   /** Where this decision sits among those waiting for the user, when more than one is. */
   position: { readonly index: number; readonly total: number } | null;
   sending: boolean;
-  /** Caps the question body so a short canvas keeps room for the timeline. */
-  bodyMaxHeight?: string | undefined;
+  /** The Pivot canvas's height; 0 when unknown. Bounds how tall the question body gets. */
+  canvasHeight?: number | undefined;
   onAnswer: (text: string, approved?: boolean) => void;
 }
 
@@ -164,7 +175,7 @@ function QuestionDecision({
   asker,
   position,
   sending,
-  bodyMaxHeight,
+  canvasHeight = 0,
   onAnswer,
   active,
   onMinimize,
@@ -175,6 +186,22 @@ function QuestionDecision({
     escalation === null ? null : recommendedOption(options, escalation.recommendation);
   const [selected, setSelected] = useState<string | null>(null);
   const [text, setText] = useState("");
+  // The body's height once dragged; null keeps its default cap, which fits short questions.
+  const [bodyHeight, setBodyHeight] = useState<number | null>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const bodyDrag = useRef<{ pointerId: number; startY: number; startHeight: number } | null>(null);
+  const shownBodyHeight =
+    bodyHeight === null ? null : clampDecisionBodyHeight(bodyHeight, canvasHeight);
+  const defaultBodyMaxHeight = decisionBodyDefaultMaxHeight(canvasHeight);
+  const bodyStyle =
+    shownBodyHeight !== null
+      ? { height: `${shownBodyHeight}px`, maxHeight: "none" }
+      : defaultBodyMaxHeight !== undefined
+        ? { maxHeight: defaultBodyMaxHeight }
+        : undefined;
+  const endBodyDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (bodyDrag.current?.pointerId === event.pointerId) bodyDrag.current = null;
+  };
   // Typing an answer of their own replaces the picked option, as in the composer.
   const typed = text.trim().length > 0;
   const answer = typed ? text : selected;
@@ -232,7 +259,7 @@ function QuestionDecision({
               <ComposerBanner.ToggleIcon expanded />
             </ComposerBanner.Actions>
           </ComposerBanner.Row>
-          <ComposerBanner.Scroll style={bodyMaxHeight ? { maxHeight: bodyMaxHeight } : undefined}>
+          <ComposerBanner.Scroll ref={bodyRef} style={bodyStyle}>
             <ComposerBanner.Body className="pe-1 pb-1 wrap-anywhere">
               {questionsOf(decision).map((question) => (
                 <p key={question} className="text-sm text-foreground/85">
@@ -272,6 +299,42 @@ function QuestionDecision({
               ) : null}
             </ComposerBanner.Body>
           </ComposerBanner.Scroll>
+          {/* The box's top edge: dragging up grows it, since its bottom stays on the composer.
+              The pill shows on hover, like the Pivot view's pane dividers. */}
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize the question"
+            className="group/resize absolute inset-x-0 -top-1.5 z-10 flex h-3 cursor-row-resize items-center justify-center"
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              event.preventDefault();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              bodyDrag.current = {
+                pointerId: event.pointerId,
+                startY: event.clientY,
+                startHeight: bodyRef.current?.offsetHeight ?? 0,
+              };
+            }}
+            onPointerMove={(event) => {
+              const drag = bodyDrag.current;
+              if (drag?.pointerId !== event.pointerId) return;
+              setBodyHeight(
+                clampDecisionBodyHeight(
+                  drag.startHeight + (drag.startY - event.clientY),
+                  canvasHeight,
+                ),
+              );
+            }}
+            onPointerUp={endBodyDrag}
+            onPointerCancel={endBodyDrag}
+            onLostPointerCapture={endBodyDrag}
+          >
+            <span
+              aria-hidden
+              className="h-0.5 w-10 rounded-full bg-muted-foreground/50 opacity-0 transition-opacity group-hover/resize:opacity-100 group-active/resize:opacity-100"
+            />
+          </div>
         </ComposerBanner.Root>
       }
       label="Your answer"
