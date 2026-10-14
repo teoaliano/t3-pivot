@@ -100,6 +100,23 @@ export const pivotGroupHasTeammates = (group: SidebarPivotGroup): boolean =>
   group.teammates.length > 0 || group.needYou > 0;
 
 /**
+ * The status a Pivot's row shows: its own, unless a teammate is working or something
+ * waits on the user. Attention outranks working, as it does for a normal thread.
+ */
+export function pivotSidebarStatus(
+  own: SidebarThreadStatus,
+  group: SidebarPivotGroup | null,
+): SidebarThreadStatus {
+  if (group === null) return own;
+  const teammateWaitingOnApproval = group.teammates.some((card) => card.status === "waiting");
+  const teammateWorking = group.teammates.some((card) => card.status === "working");
+  if (own === "approval" || teammateWaitingOnApproval) return "approval";
+  if (own === "input" || group.needYou > 0) return "input";
+  if (own === "working" || teammateWorking) return "working";
+  return own;
+}
+
+/**
  * Whether a thread entering `status` notifies the user. A teammate does only while a
  * question or approval holds it for the user; the rest of its news reaches the user
  * through its Pivot.

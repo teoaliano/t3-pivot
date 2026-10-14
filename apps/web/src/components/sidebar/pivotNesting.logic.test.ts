@@ -13,6 +13,7 @@ import type { TeammateCardShell } from "../pivot/pivotCards.logic";
 import {
   nestPivotTeammates,
   pivotGroupHasTeammates,
+  pivotSidebarStatus,
   sidebarPivotGroup,
   threadNotifiesUser,
 } from "./pivotNesting.logic";
@@ -161,6 +162,56 @@ describe("Pivot nesting in the sidebar", () => {
     // A decision the Pivot holds for the user still shows, with no teammates.
     expect(pivotGroupHasTeammates({ retired: false, teammates: [], needYou: 1 })).toBe(true);
     expect(sidebarPivotGroup(state, ThreadId.make("first"), () => null)).toBeNull();
+  });
+
+  it("gives a Pivot's row the status of its teammates, with its own status as the fallback", () => {
+    const shell = (overrides: Partial<TeammateCardShell>): TeammateCardShell => ({
+      title: "",
+      providerInstanceId: "codex",
+      status: "idle",
+      latestRunId: null,
+      pendingRuntimeRequest: null,
+      pendingBackgroundTasks: [],
+      lastError: null,
+      usageLimitResetAt: null,
+      latestRunStartedAt: null,
+      latestRunCompletedAt: null,
+      pullRequest: null,
+      settled: false,
+      ...overrides,
+    });
+    const pivotThreadId = ThreadId.make("active");
+    const statusOf = (
+      shellOf: (threadId: ThreadId) => TeammateCardShell | null,
+      pivotState: PivotState = state,
+    ) => pivotSidebarStatus("ready", sidebarPivotGroup(pivotState, pivotThreadId, shellOf));
+
+    // A teammate working while the Pivot itself is idle: the row reads Working.
+    const working = shell({ status: "running" });
+    expect(statusOf((id) => (id === "first" ? working : null))).toBe("working");
+
+    // A teammate waiting on an approval outranks the working one beside it.
+    const waiting = shell({
+      status: "running",
+      pendingRuntimeRequest: { kind: "approval" } as never,
+    });
+    expect(statusOf((id) => (id === "first" ? working : id === "second" ? waiting : null))).toBe(
+      "approval",
+    );
+
+    // A decision a teammate escalated to the user reads as Input.
+    const escalated = {
+      ...state,
+      teammates: {
+        ...state.teammates,
+        first: { ...state.teammates.first!, hasEscalatedDecision: true },
+      },
+    };
+    expect(statusOf(() => null, escalated)).toBe("input");
+
+    // Nothing running or waiting: the Pivot keeps its own status.
+    expect(statusOf(() => null)).toBe("ready");
+    expect(pivotSidebarStatus("working", null)).toBe("working");
   });
 
   it("teammate threads notify only when a question or approval holds them", () => {
