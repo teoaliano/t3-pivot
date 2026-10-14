@@ -145,8 +145,19 @@ function questionsOf(decision: PivotDecision): ReadonlyArray<string> {
   return decision.escalation?.questions ?? [decision.summary];
 }
 
+/** Answered decisions the user dismissed, remembered for the session. Dismissing only hides the row. */
+const dismissedDecisions = new Set<string>();
+
 function AnsweredDecision({ decision, asker }: PivotDecisionCardProps) {
   const [open, setOpen] = useState(false);
+  const [dismissed, setDismissedState] = useState(() =>
+    dismissedDecisions.has(decision.decisionId),
+  );
+  if (dismissed) return null;
+  const dismiss = () => {
+    dismissedDecisions.add(decision.decisionId);
+    setDismissedState(true);
+  };
   return (
     <ComposerBanner.Root placement="floating" className="mb-2" data-pivot-decision="answered">
       <Collapsible open={open} onOpenChange={setOpen}>
@@ -157,16 +168,34 @@ function AnsweredDecision({ decision, asker }: PivotDecisionCardProps) {
           <ComposerBanner.Icon>
             <CheckIcon className="text-success" />
           </ComposerBanner.Icon>
-          <ComposerBanner.Content>
+          <ComposerBanner.Content className="pe-0.5">
             <span className="shrink-0 font-medium text-muted-foreground">
               {userAnswerLabel(decision.userApproved)}
             </span>
-            <span className="min-w-0 truncate text-foreground">“{decision.userAnswer}”</span>
+            <span className="min-w-0 flex-1 truncate text-foreground">“{decision.userAnswer}”</span>
             <ComposerBanner.Separator />
             <span className="shrink-0 text-secondary-label">The Pivot is relaying it</span>
           </ComposerBanner.Content>
-          <ComposerBanner.Actions>
+          <ComposerBanner.Actions className="gap-px">
             <ComposerBanner.ToggleIcon expanded={open} />
+            {/* Sits inside the trigger button, so stop the click from toggling the row. */}
+            <ComposerBanner.Dismiss
+              render={<span role="button" tabIndex={0} />}
+              aria-label="Dismiss"
+              title="Dismiss"
+              data-pivot-decision-dismiss
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                dismiss();
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                event.stopPropagation();
+                dismiss();
+              }}
+            />
           </ComposerBanner.Actions>
         </CollapsibleTrigger>
         <CollapsiblePanel>

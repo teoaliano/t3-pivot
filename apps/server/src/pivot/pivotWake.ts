@@ -52,6 +52,9 @@ const quote = (text: string) => {
   return `"${flat.length > 400 ? `${flat.slice(0, 399)}…` : flat}"`;
 };
 
+/** The user's own words, whole: the Pivot relays them, so nothing is clipped or reflowed. */
+const verbatim = (text: string) => `"${text}"`;
+
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 const teammateLine = (teammate: WakeTeammate) => {
@@ -111,7 +114,7 @@ const decisionLine = (
         : ` with ${plural(images, "image")}`;
   const state =
     decision.userAnswer !== null
-      ? `The user answered ${quote(decision.userAnswer)}${withImages}. Relay it with answer_decision.`
+      ? `The user answered ${verbatim(decision.userAnswer)}${withImages}. Relay it with answer_decision.`
       : decision.escalatedAt !== null
         ? "Held for the user."
         : "Yours to answer or escalate.";
