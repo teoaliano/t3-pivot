@@ -113,6 +113,7 @@ export class PivotService extends Context.Service<
       readonly projectId: ProjectId;
       readonly modelSelection: ModelSelection;
       readonly takeover: boolean;
+      readonly threadId?: ThreadId;
     }) => Effect.Effect<PivotCreateResult, PivotServiceError>;
     /**
      * Rewrites every active Pivot's home contract to this release's, leaving
@@ -393,6 +394,7 @@ export const make = Effect.gen(function* () {
           projectId: input.projectId,
           homePath,
           modelSelection: input.modelSelection,
+          threadId: input.threadId,
         });
         // No Pivot thread exists without its record.
         yield* store
