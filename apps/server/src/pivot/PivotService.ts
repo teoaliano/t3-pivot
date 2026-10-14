@@ -299,8 +299,9 @@ export const historyLine = (event: PivotEvent): string => {
       return clip(`Decision "${event.key}" opened by the ${event.openedBy}: ${event.summary}`);
     case "decision.escalated":
       return clip(`Decision escalated to the user: ${event.escalation.questions.join(" / ")}`);
+    // The user's words are the deliverable, so they read in full.
     case "decision.user-answered":
-      return clip(`The user answered: ${event.answer}`);
+      return `The user answered: ${event.answer}`;
     case "decision.closed":
       return clip(
         event.kind === "answered"

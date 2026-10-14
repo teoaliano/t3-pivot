@@ -354,6 +354,36 @@ describe("PivotSupervisor", () => {
     }).pipe(Effect.provide(withSupervisor(fake)));
   });
 
+  it.effect("wakes with a long multi-paragraph answer intact, not clipped or reflowed", () => {
+    const { fake } = setup();
+    return Effect.gen(function* () {
+      const { pivot, teammate } = yield* running(fake);
+      const pivots = yield* PivotService.PivotService;
+      const { decision } = yield* pivots.openDecision(pivot, {
+        teammateThreadId: teammate,
+        question: "Cap the upload size?",
+      });
+      yield* pivots.escalateDecision(pivot, {
+        decisionId: decision.decisionId,
+        questions: ["Cap the upload size?"],
+        evidence: "Uploads are unbounded today.",
+        consequence: "Large files stall the worker.",
+        options: ["Cap", "No cap"],
+        recommendation: "Cap",
+      });
+      yield* tick;
+      const answer = [
+        "I think it should be capped, but at a generous size.",
+        `The reason is the worker: ${"a single long paragraph of detail. ".repeat(30)}`,
+        "Please keep the tail of this answer: the cap applies per file, not per upload.",
+      ].join("\n\n");
+      yield* pivots.recordUserAnswer({ decisionId: decision.decisionId, answer });
+      yield* tick;
+      const [wake] = wakesFor(fake, pivot);
+      assert.include(wake!.text, `The user answered "${answer}".`);
+    }).pipe(Effect.provide(withSupervisor(fake)));
+  });
+
   it.effect("wakes on the user typing into a teammate, with the text verbatim", () => {
     const { fake } = setup();
     return Effect.gen(function* () {
