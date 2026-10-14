@@ -13,7 +13,6 @@ import type { TeammateCardShell } from "../pivot/pivotCards.logic";
 import {
   nestPivotTeammates,
   pivotGroupHasTeammates,
-  pivotSidebarStatus,
   sidebarPivotGroup,
   threadNotifiesUser,
 } from "./pivotNesting.logic";
@@ -144,8 +143,12 @@ describe("Pivot nesting in the sidebar", () => {
     expect(group?.teammates.map((card) => card.threadId)).toEqual(["first", "second", "third"]);
     // Two teammates need the user, plus the Pivot's own held decision.
     expect(group?.needYou).toBe(3);
+    // The running one is working; the torn-down and the settled one are finished.
+    expect(group?.working).toBe(1);
+    expect(group?.done).toBe(2);
     expect(group?.retired).toBe(false);
-    // A takeover moves every live teammate, so a retired Pivot lists none.
+    // A takeover moves every live teammate and tears them down: the retired Pivot has
+    // nothing to ask of the user, only its finished teammates to count.
     const afterTakeover: PivotState = {
       ...state,
       teammates: {
@@ -154,21 +157,27 @@ describe("Pivot nesting in the sidebar", () => {
       },
     };
     const retired = sidebarPivotGroup(afterTakeover, ThreadId.make("retired"), () => null);
-    expect(retired).toMatchObject({ retired: true, teammates: [], needYou: 0 });
-    // So the retired row reads "Retired" with no zero count, as an empty active Pivot shows none.
-    expect(pivotGroupHasTeammates(retired!)).toBe(false);
-    expect(pivotGroupHasTeammates({ retired: false, teammates: [], needYou: 0 })).toBe(false);
+    expect(retired).toMatchObject({
+      retired: true,
+      teammates: [],
+      needYou: 0,
+      working: 0,
+      done: 1,
+    });
+    const nothing = { retired: false, teammates: [], needYou: 0, working: 0, done: 0 };
+    expect(pivotGroupHasTeammates(nothing)).toBe(false);
     expect(pivotGroupHasTeammates(group!)).toBe(true);
     // A decision the Pivot holds for the user still shows, with no teammates.
-    expect(pivotGroupHasTeammates({ retired: false, teammates: [], needYou: 1 })).toBe(true);
+    expect(pivotGroupHasTeammates({ ...nothing, needYou: 1 })).toBe(true);
     expect(sidebarPivotGroup(state, ThreadId.make("first"), () => null)).toBeNull();
   });
 
-  it("gives a Pivot's row the status of its teammates, with its own status as the fallback", () => {
+  it("counts a Pivot's teammates by the state their icon shows", () => {
+    const T = "2026-10-06T01:00:00.000Z";
     const shell = (overrides: Partial<TeammateCardShell>): TeammateCardShell => ({
       title: "",
       providerInstanceId: "codex",
-      status: "idle",
+      status: "running",
       latestRunId: null,
       pendingRuntimeRequest: null,
       pendingBackgroundTasks: [],
@@ -180,38 +189,61 @@ describe("Pivot nesting in the sidebar", () => {
       settled: false,
       ...overrides,
     });
-    const pivotThreadId = ThreadId.make("active");
-    const statusOf = (
-      shellOf: (threadId: ThreadId) => TeammateCardShell | null,
-      pivotState: PivotState = state,
-    ) => pivotSidebarStatus("ready", sidebarPivotGroup(pivotState, pivotThreadId, shellOf));
+    const counted = (
+      teammates: Record<string, TeammateRecord>,
+      shellOf: (threadId: ThreadId) => TeammateCardShell | null = () => null,
+      decisions: PivotState["decisions"] = {},
+    ) =>
+      sidebarPivotGroup(
+        { pivots: { active: pivot("active") }, teammates, decisions },
+        ThreadId.make("active"),
+        shellOf,
+      );
 
-    // A teammate working while the Pivot itself is idle: the row reads Working.
-    const working = shell({ status: "running" });
-    expect(statusOf((id) => (id === "first" ? working : null))).toBe("working");
-
-    // A teammate waiting on an approval outranks the working one beside it.
-    const waiting = shell({
-      status: "running",
-      pendingRuntimeRequest: { kind: "approval" } as never,
+    // A running teammate is working.
+    expect(counted({ w: teammate("w", "active", T) }, () => shell({}))).toMatchObject({
+      working: 1,
+      needYou: 0,
+      done: 0,
     });
-    expect(statusOf((id) => (id === "first" ? working : id === "second" ? waiting : null))).toBe(
-      "approval",
-    );
 
-    // A decision a teammate escalated to the user reads as Input.
-    const escalated = {
-      ...state,
-      teammates: {
-        ...state.teammates,
-        first: { ...state.teammates.first!, hasEscalatedDecision: true },
-      },
-    };
-    expect(statusOf(() => null, escalated)).toBe("input");
+    // A teammate waiting on an approval and one holding a decision both need the user.
+    const approval = shell({ pendingRuntimeRequest: { kind: "approval" } as never });
+    expect(
+      counted(
+        {
+          a: teammate("a", "active", T),
+          e: { ...teammate("e", "active", T), hasEscalatedDecision: true },
+        },
+        (threadId) => (threadId === "a" ? approval : shell({})),
+      ),
+    ).toMatchObject({ needYou: 2, working: 0, done: 0 });
 
-    // Nothing running or waiting: the Pivot keeps its own status.
-    expect(statusOf(() => null)).toBe("ready");
-    expect(pivotSidebarStatus("working", null)).toBe("working");
+    // A torn-down teammate and a settled one are finished, and both count as done.
+    expect(
+      counted(
+        {
+          t: { ...teammate("t", "active", T), tornDownAt: "2026-10-05T01:00:00.000Z" },
+          s: teammate("s", "active", T),
+        },
+        () => shell({ status: "idle", settled: true }),
+      ),
+    ).toMatchObject({ done: 2, working: 0, needYou: 0, teammates: [] });
+
+    // Only the Pivot's own decisions count toward its own need; a teammate's do not.
+    const decision = (decisionId: string, teammateThreadId: string | null) =>
+      ({
+        decisionId,
+        openedAt: T,
+        pivotThreadId: ThreadId.make("active"),
+        teammateThreadId: teammateThreadId === null ? null : ThreadId.make(teammateThreadId),
+      }) as never;
+    expect(
+      counted({}, undefined, {
+        own: decision("own", null),
+        held: decision("held", "w"),
+      }),
+    ).toMatchObject({ needYou: 1 });
   });
 
   it("teammate threads notify only when a question or approval holds them", () => {

@@ -70,8 +70,12 @@ export interface SidebarPivotGroup {
   readonly retired: boolean;
   /** Every teammate not settled, in dispatch order, as the Pivot view's cards. */
   readonly teammates: ReadonlyArray<TeammateCard>;
-  /** Teammates waiting on the user, plus decisions the Pivot holds about its own work. */
+  /** Teammates that need the user (waiting, blocked, failed), plus the Pivot's own decisions. */
   readonly needYou: number;
+  /** Teammates still working. */
+  readonly working: number;
+  /** Teammates finished, settled or not, so the count reads as the Pivot's record. */
+  readonly done: number;
 }
 
 /** What a Pivot's sidebar row sums up and lists; null for any other thread. */
@@ -82,39 +86,29 @@ export function sidebarPivotGroup(
 ): SidebarPivotGroup | null {
   const pivot = pivotState?.pivots[pivotThreadId];
   if (pivotState == null || pivot === undefined) return null;
-  const teammates = teammatesOfPivot(pivotState, pivotThreadId)
-    .map((teammate) => teammateCard(teammate, shellOf(teammate.threadId)))
-    .filter((card) => !card.settled);
+  const cards = teammatesOfPivot(pivotState, pivotThreadId).map((teammate) =>
+    teammateCard(teammate, shellOf(teammate.threadId)),
+  );
+  const teammates = cards.filter((card) => !card.settled);
   const ownDecisions = decisionsHeldBy(pivotState, pivotThreadId).filter(
     (decision) => decision.teammateThreadId === null,
   ).length;
   return {
     retired: pivot.retiredAt !== null,
     teammates,
-    needYou: teammates.filter((card) => card.needsYou).length + ownDecisions,
+    // The tones that are neither working nor finished: the orange and red ones.
+    needYou:
+      teammates.filter((card) => card.tone === "attention" || card.tone === "failed").length +
+      ownDecisions,
+    working: teammates.filter((card) => card.tone === "working").length,
+    // Settled cards are finished for good, whatever their last report said.
+    done: cards.filter((card) => card.settled || card.tone === "resting").length,
   };
 }
 
-/** Whether a Pivot's row has teammates to count and fold; with none, it shows no count. */
+/** Whether a Pivot's row has any teammate to count; with none, it shows no count. */
 export const pivotGroupHasTeammates = (group: SidebarPivotGroup): boolean =>
-  group.teammates.length > 0 || group.needYou > 0;
-
-/**
- * The status a Pivot's row shows: its own, unless a teammate is working or something
- * waits on the user. Attention outranks working, as it does for a normal thread.
- */
-export function pivotSidebarStatus(
-  own: SidebarThreadStatus,
-  group: SidebarPivotGroup | null,
-): SidebarThreadStatus {
-  if (group === null) return own;
-  const teammateWaitingOnApproval = group.teammates.some((card) => card.status === "waiting");
-  const teammateWorking = group.teammates.some((card) => card.status === "working");
-  if (own === "approval" || teammateWaitingOnApproval) return "approval";
-  if (own === "input" || group.needYou > 0) return "input";
-  if (own === "working" || teammateWorking) return "working";
-  return own;
-}
+  group.needYou > 0 || group.working > 0 || group.done > 0;
 
 /**
  * Whether a thread entering `status` notifies the user. A teammate does only while a

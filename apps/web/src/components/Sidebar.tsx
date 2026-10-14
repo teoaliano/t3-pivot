@@ -6,7 +6,6 @@ import { SidebarPivotSummary } from "./pivot/SidebarPivotStrip";
 import {
   nestPivotTeammates,
   pivotNestingKey,
-  pivotSidebarStatus,
   type SidebarPivotGroup,
   sidebarPivotGroup,
 } from "./sidebar/pivotNesting.logic";
@@ -1159,8 +1158,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   openPullRequestsInRightPanel: boolean;
   // T3 Pivot: a Pivot's teammate count, needs-you count and fold toggle, in its last line.
   pivotSummary: ReactNode;
-  // T3 Pivot: the teammates a Pivot's row takes its status from; null for other threads.
-  pivotGroup: SidebarPivotGroup | null;
   jumpLabel: string | null;
   currentEnvironmentId: string | null;
   environmentLabel: string | null;
@@ -1284,7 +1281,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // Same semantics as the legacy sidebar (never-visited counts as read):
   // switching sidebars must not light up every historical thread as unread.
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
-  const status = pivotSidebarStatus(resolveSidebarThreadStatus(thread), props.pivotGroup);
+  const status = resolveSidebarThreadStatus(thread);
   const isInFlight =
     status === "working" || status === "waiting" || status === "approval" || status === "input";
   // A woken thread reappears at its original position (the sort is
@@ -2514,8 +2511,7 @@ export default function Sidebar() {
   });
   const newThreadContext = useHandleNewThread();
   const pivotStatesByEnvironment = usePivotStatesStore((store) => store.byEnvironment);
-  // T3 Pivot: each Pivot's row sums up its teammates that are not settled, read from
-  // the Pivot records.
+  // T3 Pivot: each Pivot's row counts its teammates by state, read from the Pivot records.
   const pivotGroupsByKey = useMemo(() => {
     const shellByKey = new Map(threads.map((shell) => [pivotNestingKey(shell), shell] as const));
     const groups = new Map<string, SidebarPivotGroup>();
@@ -5526,7 +5522,6 @@ export default function Sidebar() {
                             isActive={routeThreadKey === threadKey}
                             openPullRequestsInRightPanel={routeThreadRef !== null}
                             pivotSummary={renderPivotSummary(thread)}
-                            pivotGroup={pivotGroupsByKey.get(pivotNestingKey(thread)) ?? null}
                             jumpLabel={
                               showJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null
                             }

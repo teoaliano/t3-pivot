@@ -1,24 +1,17 @@
-import { LayoutDashboardIcon } from "lucide-react";
-
 import type { SidebarPivotGroup } from "../sidebar/pivotNesting.logic";
 import { pivotGroupHasTeammates } from "../sidebar/pivotNesting.logic";
-import type { SidebarStatusIconKind } from "../sidebar/SidebarStatusIcon";
-import { Badge } from "../ui/badge";
+import { SidebarStatusIcon, type SidebarStatusIconKind } from "../sidebar/SidebarStatusIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import type { TeammateCard } from "./pivotCards.logic";
+import { TEAMMATE_TONE_CLASSES, type TeammateCard } from "./pivotCards.logic";
 
 /**
- * The last line of a Pivot's sidebar row: how many teammates it has and how many need
- * the user. Its teammates live in the Pivot's right panel, not the sidebar. The row
- * itself opens the Pivot. A Pivot with nothing to count leaves the line empty, apart
- * from "Retired".
+ * The last line of a Pivot's sidebar row: one group per state its teammates are in,
+ * each with the icon that state shows on a thread row and how many teammates are in it.
+ * Only states with teammates show. The teammates themselves live in the Pivot's right
+ * panel. A Pivot with nothing to count leaves the line empty, apart from "Retired".
  */
 export function SidebarPivotSummary(props: { group: SidebarPivotGroup }) {
   const { group } = props;
-  const count = group.teammates.length;
-  // Only the numbers show; the words stay in tooltips and for screen readers.
-  const teammatesLabel = `${count} ${count === 1 ? "teammate" : "teammates"}`;
-  const needYouLabel = `${group.needYou} ${group.needYou === 1 ? "needs you" : "need you"}`;
   if (!pivotGroupHasTeammates(group)) {
     // Still rendered, so the row doesn't fall back to showing the branch here.
     return (
@@ -27,26 +20,57 @@ export function SidebarPivotSummary(props: { group: SidebarPivotGroup }) {
       </span>
     );
   }
+  // Needs-you teammates show the icon of the first one; the Pivot's own decisions ask a question.
+  const needYouCard =
+    group.teammates.find((card) => card.needsYou) ??
+    group.teammates.find((card) => card.tone === "attention" || card.tone === "failed");
+  const states: ReadonlyArray<{
+    readonly key: string;
+    readonly count: number;
+    readonly icon: SidebarStatusIconKind;
+    readonly textClass: string;
+    readonly label: string;
+  }> = [
+    {
+      key: "needs-you",
+      count: group.needYou,
+      icon: needYouCard ? teammateStatusIcon(needYouCard) : "input",
+      textClass: TEAMMATE_TONE_CLASSES.attention.text,
+      label: `${group.needYou} ${group.needYou === 1 ? "needs you" : "need you"}`,
+    },
+    {
+      key: "working",
+      count: group.working,
+      icon: "working",
+      textClass: TEAMMATE_TONE_CLASSES.working.text,
+      label: `${group.working} working`,
+    },
+    {
+      key: "done",
+      count: group.done,
+      icon: "done",
+      textClass: TEAMMATE_TONE_CLASSES.resting.text,
+      label: `${group.done} done`,
+    },
+  ];
   return (
-    <span className="flex min-w-0 flex-1 items-center gap-1.5">
-      <LayoutDashboardIcon aria-hidden className="size-3 shrink-0 text-muted-foreground" />
-      <Tooltip>
-        <TooltipTrigger render={<span className="truncate text-muted-foreground" />}>
-          {group.retired ? "Retired · " : ""}
-          {count}
-          <span className="sr-only"> {count === 1 ? "teammate" : "teammates"}</span>
-        </TooltipTrigger>
-        <TooltipPopup side="top">{teammatesLabel}</TooltipPopup>
-      </Tooltip>
-      {group.needYou > 0 ? (
-        <Tooltip>
-          <TooltipTrigger render={<Badge size="sm" variant="warning" />}>
-            {group.needYou}
-            <span className="sr-only"> {group.needYou === 1 ? "needs you" : "need you"}</span>
-          </TooltipTrigger>
-          <TooltipPopup side="top">{needYouLabel}</TooltipPopup>
-        </Tooltip>
-      ) : null}
+    <span className="flex min-w-0 flex-1 items-center gap-2.5">
+      {group.retired ? <span className="truncate text-muted-foreground">Retired</span> : null}
+      {states
+        .filter((state) => state.count > 0)
+        .map((state) => (
+          <Tooltip key={state.key}>
+            <TooltipTrigger
+              render={<span className={`flex shrink-0 items-center gap-1 ${state.textClass}`} />}
+            >
+              <SidebarStatusIcon kind={state.icon} />
+              {/* Only the numbers show; the words stay in tooltips and for screen readers. */}
+              <span className="tabular-nums">{state.count}</span>
+              <span className="sr-only"> {state.label}</span>
+            </TooltipTrigger>
+            <TooltipPopup side="top">{state.label}</TooltipPopup>
+          </Tooltip>
+        ))}
     </span>
   );
 }
