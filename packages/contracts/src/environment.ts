@@ -102,6 +102,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   attachmentUploads: Schema.optionalKey(Schema.Boolean),
   /** Uploaded files may accompany question answers. */
   questionAttachments: Schema.optionalKey(Schema.Boolean),
+  /** Images may accompany a Pivot decision's answer. */
+  pivotDecisionAttachments: Schema.optionalKey(Schema.Boolean),
   /** Missing on servers that only accept image attachments. */
   fileAttachments: Schema.optionalKey(
     Schema.Struct({

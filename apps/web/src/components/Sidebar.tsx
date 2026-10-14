@@ -2511,8 +2511,7 @@ export default function Sidebar() {
   });
   const newThreadContext = useHandleNewThread();
   const pivotStatesByEnvironment = usePivotStatesStore((store) => store.byEnvironment);
-  // T3 Pivot: each Pivot's row sums up its teammates that are not settled, read from
-  // the Pivot records.
+  // T3 Pivot: each Pivot's row counts its teammates by state, read from the Pivot records.
   const pivotGroupsByKey = useMemo(() => {
     const shellByKey = new Map(threads.map((shell) => [pivotNestingKey(shell), shell] as const));
     const groups = new Map<string, SidebarPivotGroup>();

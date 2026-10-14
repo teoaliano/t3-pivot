@@ -9,6 +9,7 @@
  * @module TeammateHost
  */
 import type {
+  ChatImageAttachment,
   PullRequestDetail,
   PullRequestRef,
   ModelSelection,
@@ -92,6 +93,7 @@ export class TeammateHost extends Context.Service<
       readonly threadId: ThreadId;
       readonly senderThreadId: ThreadId;
       readonly text: string;
+      readonly attachments?: ReadonlyArray<ChatImageAttachment> | undefined;
     }) => Result<void>;
     readonly stop: (threadId: ThreadId) => Result<void>;
     /** Stops what the teammate's agent scope still runs, once its work is landed or merged. */

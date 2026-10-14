@@ -467,6 +467,55 @@ describe("PivotStore", () => {
       ),
     );
 
+    it.effect("a user's answer keeps the images attached to it, for the wake", () =>
+      withStore(
+        Effect.gen(function* () {
+          const store = yield* PivotStore.PivotStore;
+          yield* createPivot(pivotA);
+          yield* dispatchTeammate(shipA);
+          yield* report(shipA, "needs-decision");
+          const [opened] = yield* openDecisions(pivotA);
+          const decisionId = opened!.decisionId;
+          yield* store.dispatch({
+            type: "decision.escalate",
+            pivotThreadId: pivotA,
+            decisionId,
+            escalation: {
+              questions: ["Which screen?"],
+              evidence: "Two layouts.",
+              consequence: "One ships.",
+              options: [],
+              recommendation: "Left",
+            },
+          });
+          const screenshot = {
+            type: "image" as const,
+            id: "shot-1",
+            name: "left.png",
+            mimeType: "image/png",
+            sizeBytes: 2048,
+          };
+          yield* store.dispatch({
+            type: "decision.record-user-answer",
+            decisionId,
+            answer: "This one.",
+            approved: null,
+            attachments: [screenshot],
+          });
+          assert.deepStrictEqual((yield* store.getDecision(decisionId))?.userAttachments, [
+            screenshot,
+          ]);
+          const answered = (yield* store.pendingWake(pivotA)).find(
+            ({ event }) => event.type === "decision.user-answered",
+          );
+          assert.deepStrictEqual(
+            answered?.event.type === "decision.user-answered" ? answered.event.attachments : null,
+            [screenshot],
+          );
+        }),
+      ),
+    );
+
     it.effect("a decision asking for approval records whether the user approved", () =>
       withStore(
         Effect.gen(function* () {
