@@ -375,8 +375,20 @@ const release = Effect.gen(function* () {
       reason: `no Developer ID Application identity for team ${APPLE_TEAM_ID} in the keychain.`,
     });
   }
-  // Fail before a long build if the notary profile is missing.
-  yield* run("xcrun", ["notarytool", "history", "--keychain-profile", NOTARY_KEYCHAIN_PROFILE]);
+  // Notarize with the App Store Connect key when there is one. The keychain profile
+  // can't be read by the 07:30 launchd run while the Mac is locked; the key file can.
+  const notary = Option.match(yield* appStoreConnectKey("release"), {
+    onNone: () => ({
+      args: ["--keychain-profile", NOTARY_KEYCHAIN_PROFILE],
+      env: { APPLE_KEYCHAIN_PROFILE: NOTARY_KEYCHAIN_PROFILE },
+    }),
+    onSome: ({ keyId, issuerId, keyPath }) => ({
+      args: ["--key", keyPath, "--key-id", keyId, "--issuer", issuerId],
+      env: { APPLE_API_KEY: keyPath, APPLE_API_KEY_ID: keyId, APPLE_API_ISSUER: issuerId },
+    }),
+  });
+  // Fail before a long build if notarization can't sign in.
+  yield* run("xcrun", ["notarytool", "history", ...notary.args]);
 
   yield* Console.log(`Building T3 Pivot ${version} on upstream ${upstreamBaseTag.value}...`);
   const outputDir = `release/pivot-${version}`;
@@ -393,7 +405,7 @@ const release = Effect.gen(function* () {
       T3CODE_UPSTREAM_BASE_TAG: upstreamBaseTag.value,
       T3CODE_MACOS_SIGNING_MODE: "developer-id",
       CSC_NAME: identity,
-      APPLE_KEYCHAIN_PROFILE: NOTARY_KEYCHAIN_PROFILE,
+      ...notary.env,
     },
   );
 
@@ -443,16 +455,17 @@ interface AppStoreConnectKey {
   readonly keyPath: string;
 }
 
-// TestFlight uploads use an App Store Connect API key. Its .p8 sits where Apple's
-// tools look for it; its ids come from the environment. None when not set up.
-const appStoreConnectKey = Effect.gen(function* () {
+// TestFlight uploads and notarization use an App Store Connect API key. Its .p8 sits
+// where Apple's tools look for it; its ids come from the environment. None when not
+// set up.
+const appStoreConnectKey = Effect.fn("pivot.appStoreConnectKey")(function* (action: string) {
   const keyId = process.env.T3PIVOT_ASC_KEY_ID?.trim();
   const issuerId = process.env.T3PIVOT_ASC_ISSUER_ID?.trim();
   if (!keyId || !issuerId) return Option.none<AppStoreConnectKey>();
   const keyPath = `${process.env.HOME}/.appstoreconnect/private_keys/AuthKey_${keyId}.p8`;
   if (!(yield* (yield* FileSystem.FileSystem).exists(keyPath))) {
     return yield* new PivotRefusedError({
-      action: "upload to TestFlight",
+      action,
       reason: `no App Store Connect key at ${keyPath}.`,
     });
   }
@@ -551,7 +564,7 @@ const iosRelease = Effect.gen(function* () {
       reason: "main has no desktop release yet. Run `pivot:release` first.",
     });
   }
-  const key = yield* appStoreConnectKey;
+  const key = yield* appStoreConnectKey("upload to TestFlight");
   if (Option.isNone(key)) {
     return yield* new PivotRefusedError({
       action: "upload to TestFlight",
@@ -624,7 +637,7 @@ const nightly = Effect.gen(function* () {
   }
 
   const released = yield* headRelease;
-  const key = yield* appStoreConnectKey;
+  const key = yield* appStoreConnectKey("upload to TestFlight");
   const uploaded = yield* Effect.option(
     run("git", ["rev-parse", "--verify", "--quiet", IOS_UPLOADED_REF]),
   );
