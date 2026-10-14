@@ -149,8 +149,8 @@ const MERGE_PATTERNS: ReadonlyArray<RegExp> = [
   /\/merge_requests\/\d+\/(?:merge|cancel_merge_when_pipeline_succeeds)\b/,
   /\/repos\/[^/\s]+\/[^/\s]+\/merges\b/,
   /\b(?:mergePullRequest|enablePullRequestAutoMerge|mergeBranch)\b/,
-  /\bmerge_request\.(?:merge_when_pipeline_succeeds|auto_merge)\b/,
 ];
+const GITLAB_PUSH_MERGE = /\bmerge_request\.(?:merge_when_pipeline_succeeds|auto_merge)\b/;
 // Closing is a state change on the PR itself, in either order of URL and body. A
 // `?state=closed` list filter is not one.
 const PR_RESOURCE = /\/(?:pulls|issues|merge_requests)\/\d+(?!\/\S)/;
@@ -194,12 +194,12 @@ function violationInSegment(segment: Segment, depth: number): Violation | null {
     const sub = subcommandAfter(rest, program === "gh" ? "pr" : "mr");
     if (sub === "merge" || sub === "close") return sub;
   }
-  if (
-    program === "gh" ||
-    program === "glab" ||
-    program === "git" ||
-    REQUEST_PROGRAMS.has(program)
-  ) {
+  // git reaches the forge only through a GitLab push option; its other arguments are commit
+  // messages, paths and search terms, which may well name a merge mutation.
+  if (program === "git") {
+    return GITLAB_PUSH_MERGE.test(rest.join(" ")) ? "merge" : null;
+  }
+  if (program === "gh" || program === "glab" || REQUEST_PROGRAMS.has(program)) {
     const text = rest.join(" ");
     if (MERGE_PATTERNS.some((pattern) => pattern.test(text))) return "merge";
     if (CLOSE_MUTATION.test(text) || (PR_RESOURCE.test(text) && STATE_CLOSED.test(text))) {

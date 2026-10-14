@@ -81,6 +81,8 @@ describe("ShellForgeGuard", () => {
         "glab mr view 4",
         "glab mr create --fill",
         "git commit -m 'document the gh pr merge refusal'",
+        "git grep mergePullRequest",
+        "git commit -m 'route mergePullRequest through the host'",
         "git merge main",
         "grep -rn 'gh pr merge' docs",
       ]) {

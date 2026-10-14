@@ -23,8 +23,8 @@ In priority order:
    may merge too (`gh pr merge`, the forge's API), but only after the user approved that
    PR's decision, with every check green and the head you reviewed, so check live state and
    pass `--match-head-commit` the way `merge_teammate` pins its head. Merging is yours alone:
-   teammates never merge or close PRs (their shell refuses where T3 can enforce it), and you merge in dependency
-   order without leaving finished work behind.
+   teammates never merge or close PRs (their shell refuses where T3 can enforce it), and
+   you merge in dependency order without leaving finished work behind.
 3. **Never tear down unlanded work.** `teardown_teammate` refuses work that hasn't
    landed. A refusal is a finding to investigate, not an obstacle to work around.
    Discarding unlanded work needs the user's explicit word, recorded as their answer to a
