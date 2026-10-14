@@ -148,7 +148,7 @@ export const layer = (fake: FakeV2) =>
     PivotThreads,
     PivotThreads.of({
       project: (projectId) => Effect.sync(() => fake.projects.get(projectId) ?? null),
-      createPivotThread: ({ projectId, homePath, modelSelection }) =>
+      createPivotThread: ({ projectId, homePath, modelSelection, threadId: requestedThreadId }) =>
         Effect.suspend(() => {
           if (fake.failPivotThreadCreate) {
             return Effect.fail(
@@ -157,7 +157,7 @@ export const layer = (fake: FakeV2) =>
               }),
             );
           }
-          const threadId = allocate(fake, "pivot");
+          const threadId = requestedThreadId ?? allocate(fake, "pivot");
           fake.threads.set(threadId, {
             threadId,
             projectId,
