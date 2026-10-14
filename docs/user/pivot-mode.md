@@ -44,8 +44,9 @@ rest of their updates.
 
 ## Seeing it all
 
-In the sidebar a Pivot shows its teammates nested under it. Clicking a teammate opens its chat,
-and you can type to it directly; the Pivot is told what you said.
+In the sidebar a Pivot's row counts its teammates by state, each with its icon: how many need you,
+how many are working and how many are done. Clicking a teammate opens its chat, and you can type to
+it directly; the Pivot is told what you said.
 
 The switch in a Pivot's header moves between its chat and the **Pivot view**, a full-screen
 layout with no sidebar. Start from a layout preset in the view's menu, then show, hide, resize
