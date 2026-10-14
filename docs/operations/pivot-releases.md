@@ -19,8 +19,9 @@ GitHub Actions stays off on the fork, so upstream's release workflow never runs.
   xcrun notarytool store-credentials t3-pivot --apple-id <apple-id> --team-id N2X3SV5FDD
   ```
 
-  It prompts for an app-specific password. An App Store Connect API key works too (`--key`,
-  `--key-id`, `--issuer`).
+  It prompts for an app-specific password. Releases only use it when the App Store Connect
+  key below isn't set up. With the key, notarization works while the Mac is locked, as it
+  usually is for the 07:30 run.
 
 - `gh` is logged in as `teoaliano`. It doesn't have to be the active account, because the
   commands pass that account's token to `gh` and `git`.
