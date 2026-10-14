@@ -60,6 +60,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import * as ServerSettings from "../serverSettings.ts";
+import { defaultPivotTeammateCap } from "../process/agentScope.ts";
 import {
   BRIEF_TEXTS,
   definitionOfDoneText,
@@ -337,6 +338,13 @@ export const make = Effect.gen(function* () {
     );
 
   /** The project's model per built-in teammate kind, from the same settings as the list. */
+  // The most ships and scouts a Pivot runs at once: the setting, else on Linux what the
+  // agents' memory limit holds at about 3 GB a teammate, else no cap.
+  const teammateCap = Effect.gen(function* () {
+    const setting = (yield* serverSettings.getSettings).pivotMaxTeammates;
+    return setting ?? (yield* defaultPivotTeammateCap);
+  });
+
   const teammateKindModels = (projectId: ProjectId) =>
     serverSettings.getSettings.pipe(
       Effect.map(
@@ -607,6 +615,23 @@ export const make = Effect.gen(function* () {
             input,
           );
           if (choice.type === "refused") return yield* refuse(command, choice.reason);
+          if (input.kind !== "inline") {
+            const cap = yield* teammateCap;
+            const running = (yield* store.listTeammates({ includeTornDown: false })).filter(
+              (teammate) =>
+                teammate.pivotThreadId === pivot.threadId &&
+                teammate.kind !== "inline" &&
+                (teammate.observedStatus === null ||
+                  teammate.observedStatus === "working" ||
+                  teammate.observedStatus === "waiting"),
+            );
+            if (cap !== null && running.length >= cap) {
+              return yield* refuse(
+                command,
+                `${running.length} teammates are already running, the most at once (${cap}). Queue this one and dispatch it when one finishes, or do it inline if it is small.`,
+              );
+            }
+          }
           const pivotShell = yield* threads.shell(pivot.threadId);
           const modelSelection =
             choice.modelSelection ??
@@ -1311,6 +1336,7 @@ export const make = Effect.gen(function* () {
         worktreeExists,
         force: discarding,
         branchDisposal,
+        inline: teammate.kind === "inline",
       });
       yield* store.dispatch({
         type: "teammate.tear-down",

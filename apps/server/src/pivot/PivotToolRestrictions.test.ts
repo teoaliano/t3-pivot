@@ -158,7 +158,7 @@ it.layer(layer)("Pivot and teammate permissions", (it) => {
       // Claude cannot sandbox the shell, so only Edit and Write are confined.
       assert.deepEqual(claudeRuntimeQueryPolicyForRuntimePolicy(resolved), {
         permissionMode: "dontAsk",
-        tools: ["Read", "Glob", "Grep", "Bash", "TaskOutput", "TaskStop", "Edit", "Write"],
+        tools: ["Read", "Glob", "Grep", "Bash", "TaskOutput", "TaskStop", "Agent", "Edit", "Write"],
         allowedTools: [
           "Read",
           "Glob",
@@ -166,6 +166,7 @@ it.layer(layer)("Pivot and teammate permissions", (it) => {
           "Bash",
           "TaskOutput",
           "TaskStop",
+          "Agent",
           `Edit(/${home}/preferences.md)`,
           `Write(/${home}/preferences.md)`,
         ],

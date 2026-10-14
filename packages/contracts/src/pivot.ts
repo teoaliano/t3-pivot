@@ -13,8 +13,12 @@ import {
 import { ModelSelection } from "./modelSelection.ts";
 import { TeammateModelEntry } from "./settings.ts";
 
-/** A ship delivers a change; a scout investigates and leaves a report. */
-export const TeammateKind = Schema.Literals(["ship", "scout"]);
+/**
+ * A ship delivers a change; a scout investigates and leaves a report. An inline task
+ * delivers a small change from the Pivot's own workspace: no worktree, setup run or dev
+ * server of its own, one at a time per project.
+ */
+export const TeammateKind = Schema.Literals(["ship", "scout", "inline"]);
 export type TeammateKind = typeof TeammateKind.Type;
 
 /** What a teammate can say about its latest run through `report_status`. */

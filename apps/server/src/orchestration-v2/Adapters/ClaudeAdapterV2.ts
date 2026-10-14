@@ -1746,6 +1746,9 @@ export interface ClaudeRuntimeQueryPolicy {
 
 // The shell and the tools that manage its background commands.
 const CLAUDE_SHELL_TOOLS = ["Bash", "TaskOutput", "TaskStop"] as const;
+// Native subagents run inside the session under its permissions, so a scoped agent's
+// subagents read and run commands but edit nothing it couldn't.
+const CLAUDE_SUBAGENT_TOOLS = ["Agent"] as const;
 
 // A file-scoped write policy gives built-in reads, the shell, and edits to the listed
 // files only. Claude has no OS sandbox T3 can rely on, so the shell itself is not
@@ -1760,8 +1763,19 @@ function claudeFileScopedQueryPolicy(
   });
   return {
     permissionMode: "dontAsk",
-    tools: [...CLAUDE_READ_ONLY_ALLOWED_TOOLS, ...CLAUDE_SHELL_TOOLS, "Edit", "Write"],
-    allowedTools: [...CLAUDE_READ_ONLY_ALLOWED_TOOLS, ...CLAUDE_SHELL_TOOLS, ...editRules],
+    tools: [
+      ...CLAUDE_READ_ONLY_ALLOWED_TOOLS,
+      ...CLAUDE_SHELL_TOOLS,
+      ...CLAUDE_SUBAGENT_TOOLS,
+      "Edit",
+      "Write",
+    ],
+    allowedTools: [
+      ...CLAUDE_READ_ONLY_ALLOWED_TOOLS,
+      ...CLAUDE_SHELL_TOOLS,
+      ...CLAUDE_SUBAGENT_TOOLS,
+      ...editRules,
+    ],
     installPermissionCallback: false,
   };
 }

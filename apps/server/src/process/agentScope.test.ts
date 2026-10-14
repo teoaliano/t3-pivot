@@ -13,6 +13,7 @@ import * as ProcessRunner from "../processRunner.ts";
 import {
   agentScopeMemoryLimits,
   agentSliceMemoryLimits,
+  teammateCapForMemory,
   classifyMemory,
   classifyScope,
   make,
@@ -61,6 +62,15 @@ describe("agentSliceMemoryLimits", () => {
 
   it("still gives agents most of a small machine", () => {
     expect(agentSliceMemoryLimits(8 * GiB)).toEqual({ high: 4 * GiB, max: 6 * GiB });
+  });
+});
+
+describe("teammateCapForMemory", () => {
+  it("fits a teammate's peak into the agents' memory, and allows at least one", () => {
+    // Homebox: 14 GB leaves 8 GB before throttling, so two teammates at 3 GB each.
+    expect(teammateCapForMemory(14 * GiB)).toBe(2);
+    expect(teammateCapForMemory(64 * GiB)).toBe(19);
+    expect(teammateCapForMemory(4 * GiB)).toBe(1);
   });
 });
 

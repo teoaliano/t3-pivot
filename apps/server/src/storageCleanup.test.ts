@@ -232,128 +232,134 @@ describe("merged pull request cleanup", () => {
   });
 });
 
-const cleanupFixture = Effect.gen(function* () {
-  const fs = yield* FileSystem.FileSystem;
-  const config = yield* ServerConfig.ServerConfig;
-  const git = yield* GitVcsDriver.GitVcsDriver;
-  const repo = yield* fs.makeTempDirectoryScoped({ prefix: "cleanup-repo-" });
-  const command = (cwd: string, args: string[]) =>
-    git.execute({ operation: "cleanup-test", cwd, args });
-  yield* command(repo, ["init", "-b", "main"]);
-  yield* command(repo, ["config", "user.email", "cleanup@example.test"]);
-  yield* command(repo, ["config", "user.name", "Cleanup test"]);
-  yield* fs.writeFileString(`${repo}/tracked.txt`, "original\n");
-  yield* fs.writeFileString(`${repo}/.gitignore`, ".env\ndist/\nnode_modules/\n");
-  yield* command(repo, ["add", "."]);
-  yield* command(repo, ["commit", "-m", "initial"]);
-  yield* fs.makeDirectory(config.worktreesDir, { recursive: true });
-  const worktree = `${config.worktreesDir}/feature`;
-  yield* command(repo, ["worktree", "add", "-b", "feature", worktree]);
-  let settings: import("@t3tools/contracts").ServerSettings = {
-    ...DEFAULT_SERVER_SETTINGS,
-    storageCleanup: { ...DEFAULT_SERVER_SETTINGS.storageCleanup, worktreeAfterDays: 8 },
-  };
-  let threads = [shell({ branch: "feature", worktreePath: worktree })];
-  let editBeforeRemoval = false;
-  let openSessionCwd: string | null = null;
-  let fullStatusCalls = 0;
-  const context = yield* Layer.build(StorageCleanup.layer).pipe(
-    Effect.provideService(GitVcsDriver.GitVcsDriver, {
-      ...git,
-      execute: (input) =>
-        Effect.gen(function* () {
-          if (editBeforeRemoval && input.args.includes("remove"))
-            yield* fs.writeFileString(`${worktree}/tracked.txt`, "late edit\n");
-          return yield* git.execute(input);
-        }),
-      statusDetailsLocal: (...args) => {
-        fullStatusCalls++;
-        return git.statusDetailsLocal(...args);
-      },
-    }),
-    Effect.provideService(Settings.ServerSettingsService, {
-      getSettings: Effect.sync(() => settings),
-      subscribeChanges: Effect.succeed(Stream.empty),
-    } as unknown as Settings.ServerSettingsService["Service"]),
-    Effect.provideService(ProjectStore.ProjectStoreV2, {
-      listShells: () => Effect.succeed([{ id: ProjectId.make("project-1"), workspaceRoot: repo }]),
-    } as unknown as ProjectStore.ProjectStoreV2["Service"]),
-    Effect.provideService(ProjectionStore.ProjectionStoreV2, {
-      getShellSnapshot: (input?: { location?: string }) =>
-        Effect.sync(() => ({ threads: input?.location === "archive" ? [] : threads })),
-    } as unknown as ProjectionStore.ProjectionStoreV2["Service"]),
-    Effect.provideService(Orchestrator.OrchestratorV2, {
-      streamDomainEvents: Stream.empty,
-    } as unknown as Orchestrator.OrchestratorV2["Service"]),
-    Effect.provideService(SqlClient.SqlClient, ((strings: TemplateStringsArray) =>
-      Effect.sync(() =>
-        openSessionCwd !== null && strings.join("").includes("projection_provider_sessions")
-          ? [
-              {
-                payload_json: JSON.stringify({
-                  id: "session-1",
-                  driver: "codex",
-                  providerInstanceId: "codex",
-                  status: "ready",
-                  cwd: openSessionCwd,
-                  model: null,
-                  capabilities: CodexProviderCapabilitiesV2,
-                  createdAt: "2026-06-01T12:00:00.000Z",
-                  updatedAt: "2026-06-01T12:00:00.000Z",
-                  lastError: null,
-                }),
-              },
-            ]
-          : [],
-      )) as unknown as SqlClient.SqlClient),
-    Effect.provideService(GitManager.GitManager, {
-      invalidateStatus: () => Effect.void,
-    } as unknown as GitManager.GitManager["Service"]),
-    Effect.provideService(TerminalManager.TerminalManager, {
-      subscribeMetadata: () => Effect.succeed(() => {}),
-    } as unknown as TerminalManager.TerminalManager["Service"]),
-    Effect.provideService(ManagedProcesses.ManagedProcesses, {
-      stopAllForCheckout: () => Effect.void,
-    } as unknown as ManagedProcesses.ManagedProcesses["Service"]),
-    Effect.provideService(ServerActivation, Effect.never),
-  );
-  return {
-    service: Context.get(context, StorageCleanup.StorageCleanup),
-    editBeforeRemoval: () => {
-      editBeforeRemoval = true;
-    },
-    fs,
-    worktree,
-    config,
-    command,
-    enableFiles: () => {
-      settings = {
-        ...settings,
-        storageCleanup: {
-          ...settings.storageCleanup,
-          browserArtifactsAfterDays: 8,
-          logsAfterDays: 8,
+const makeCleanupFixture = (worktreeName: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const config = yield* ServerConfig.ServerConfig;
+    const git = yield* GitVcsDriver.GitVcsDriver;
+    const repo = yield* fs.makeTempDirectoryScoped({ prefix: "cleanup-repo-" });
+    const command = (cwd: string, args: string[]) =>
+      git.execute({ operation: "cleanup-test", cwd, args });
+    yield* command(repo, ["init", "-b", "main"]);
+    yield* command(repo, ["config", "user.email", "cleanup@example.test"]);
+    yield* command(repo, ["config", "user.name", "Cleanup test"]);
+    yield* fs.writeFileString(`${repo}/tracked.txt`, "original\n");
+    yield* fs.writeFileString(`${repo}/.gitignore`, ".env\ndist/\nnode_modules/\n");
+    yield* command(repo, ["add", "."]);
+    yield* command(repo, ["commit", "-m", "initial"]);
+    yield* fs.makeDirectory(config.worktreesDir, { recursive: true });
+    const worktree = `${config.worktreesDir}/${worktreeName}`;
+    yield* command(repo, ["worktree", "add", "-b", "feature", worktree]);
+    let settings: import("@t3tools/contracts").ServerSettings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      storageCleanup: { ...DEFAULT_SERVER_SETTINGS.storageCleanup, worktreeAfterDays: 8 },
+    };
+    let threads = [shell({ branch: "feature", worktreePath: worktree })];
+    let editBeforeRemoval = false;
+    let openSessionCwd: string | null = null;
+    let fullStatusCalls = 0;
+    const context = yield* Layer.build(StorageCleanup.layer).pipe(
+      Effect.provideService(GitVcsDriver.GitVcsDriver, {
+        ...git,
+        execute: (input) =>
+          Effect.gen(function* () {
+            if (editBeforeRemoval && input.args.includes("remove"))
+              yield* fs.writeFileString(`${worktree}/tracked.txt`, "late edit\n");
+            return yield* git.execute(input);
+          }),
+        statusDetailsLocal: (...args) => {
+          fullStatusCalls++;
+          return git.statusDetailsLocal(...args);
         },
-      };
-    },
-    setPolicy: (worktreeKeepWhen: WorktreeKeepWhen) => {
-      settings = { ...settings, storageCleanup: { ...settings.storageCleanup, worktreeKeepWhen } };
-    },
-    disable: () => {
-      settings = {
-        ...settings,
-        storageCleanup: { ...settings.storageCleanup, worktreeAfterDays: null },
-      };
-    },
-    setThreads: (next: typeof threads) => {
-      threads = next;
-    },
-    setOpenSessionCwd: (cwd: string | null) => {
-      openSessionCwd = cwd;
-    },
-    fullStatusCalls: () => fullStatusCalls,
-  };
-});
+      }),
+      Effect.provideService(Settings.ServerSettingsService, {
+        getSettings: Effect.sync(() => settings),
+        subscribeChanges: Effect.succeed(Stream.empty),
+      } as unknown as Settings.ServerSettingsService["Service"]),
+      Effect.provideService(ProjectStore.ProjectStoreV2, {
+        listShells: () =>
+          Effect.succeed([{ id: ProjectId.make("project-1"), workspaceRoot: repo }]),
+      } as unknown as ProjectStore.ProjectStoreV2["Service"]),
+      Effect.provideService(ProjectionStore.ProjectionStoreV2, {
+        getShellSnapshot: (input?: { location?: string }) =>
+          Effect.sync(() => ({ threads: input?.location === "archive" ? [] : threads })),
+      } as unknown as ProjectionStore.ProjectionStoreV2["Service"]),
+      Effect.provideService(Orchestrator.OrchestratorV2, {
+        streamDomainEvents: Stream.empty,
+      } as unknown as Orchestrator.OrchestratorV2["Service"]),
+      Effect.provideService(SqlClient.SqlClient, ((strings: TemplateStringsArray) =>
+        Effect.sync(() =>
+          openSessionCwd !== null && strings.join("").includes("projection_provider_sessions")
+            ? [
+                {
+                  payload_json: JSON.stringify({
+                    id: "session-1",
+                    driver: "codex",
+                    providerInstanceId: "codex",
+                    status: "ready",
+                    cwd: openSessionCwd,
+                    model: null,
+                    capabilities: CodexProviderCapabilitiesV2,
+                    createdAt: "2026-06-01T12:00:00.000Z",
+                    updatedAt: "2026-06-01T12:00:00.000Z",
+                    lastError: null,
+                  }),
+                },
+              ]
+            : [],
+        )) as unknown as SqlClient.SqlClient),
+      Effect.provideService(GitManager.GitManager, {
+        invalidateStatus: () => Effect.void,
+      } as unknown as GitManager.GitManager["Service"]),
+      Effect.provideService(TerminalManager.TerminalManager, {
+        subscribeMetadata: () => Effect.succeed(() => {}),
+      } as unknown as TerminalManager.TerminalManager["Service"]),
+      Effect.provideService(ManagedProcesses.ManagedProcesses, {
+        stopAllForCheckout: () => Effect.void,
+      } as unknown as ManagedProcesses.ManagedProcesses["Service"]),
+      Effect.provideService(ServerActivation, Effect.never),
+    );
+    return {
+      service: Context.get(context, StorageCleanup.StorageCleanup),
+      editBeforeRemoval: () => {
+        editBeforeRemoval = true;
+      },
+      fs,
+      worktree,
+      config,
+      command,
+      enableFiles: () => {
+        settings = {
+          ...settings,
+          storageCleanup: {
+            ...settings.storageCleanup,
+            browserArtifactsAfterDays: 8,
+            logsAfterDays: 8,
+          },
+        };
+      },
+      setPolicy: (worktreeKeepWhen: WorktreeKeepWhen) => {
+        settings = {
+          ...settings,
+          storageCleanup: { ...settings.storageCleanup, worktreeKeepWhen },
+        };
+      },
+      disable: () => {
+        settings = {
+          ...settings,
+          storageCleanup: { ...settings.storageCleanup, worktreeAfterDays: null },
+        };
+      },
+      setThreads: (next: typeof threads) => {
+        threads = next;
+      },
+      setOpenSessionCwd: (cwd: string | null) => {
+        openSessionCwd = cwd;
+      },
+      fullStatusCalls: () => fullStatusCalls,
+    };
+  });
+const cleanupFixture = makeCleanupFixture("feature");
 const cleanupTestLayer = GitVcsDriver.layer.pipe(
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "storage-cleanup-" })),
   Layer.provideMerge(NodeServices.layer),
@@ -391,6 +397,19 @@ describe("storage cleanup reports and local file policies", () => {
         expect(report.entries[0]).toMatchObject({ outcome: "removed", bytes, files: null });
         expect(report.bytesFreed).toBe(bytes);
         expect(yield* fs.readFileString(`${outside}/external`)).toBe("must not count");
+      }),
+    ),
+  );
+  it.live("keeps the Pivot's workspace, which it sets up once and reuses", () =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const { service, fs, worktree } = yield* makeCleanupFixture("pivot-inline");
+        const report = yield* service.runNow;
+        expect(report.entries[0]).toMatchObject({
+          outcome: "kept",
+          reason: "It is the Pivot's workspace",
+        });
+        expect(yield* fs.exists(worktree)).toBe(true);
       }),
     ),
   );

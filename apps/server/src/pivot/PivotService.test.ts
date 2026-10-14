@@ -338,3 +338,86 @@ describe("PivotService teammate tools after teardown", () => {
     }).pipe(Effect.provide(layer));
   });
 });
+
+describe("PivotService inline tasks", () => {
+  const inline = (pivot: ThreadId, title: string) =>
+    Effect.flatMap(PivotService.PivotService, (pivots) =>
+      pivots.dispatchTeammate(pivot, {
+        title,
+        kind: "inline",
+        intent: "Fix the typo in the README.",
+        spec: "One-line change.",
+      }),
+    );
+
+  it.effect("makes the Pivot's workspace once, with the setup script, and reuses it", () => {
+    const { fake, workspaceRoot, layer } = setup();
+    return Effect.gen(function* () {
+      const pivots = yield* PivotService.PivotService;
+      const pivot = (yield* pivots.create({ projectId, modelSelection, takeover: false })).threadId;
+      const first = yield* inline(pivot, "Fix the README typo");
+      assert.strictEqual(NodePath.basename(first.worktreePath), "pivot-inline");
+      assert.match(first.branch, /^pivot-inline\/fix-the-readme-typo/);
+      assert.strictEqual(first.setupScript, "succeeded");
+      assert.strictEqual(sh(first.worktreePath, "git branch --show-current"), first.branch);
+
+      // A second inline task waits for the first to land.
+      assert.include(yield* refusal(inline(pivot, "Another typo")), "One inline task at a time");
+
+      commitFile(first.worktreePath, "README.md");
+      sh(workspaceRoot, `git merge -q --ff-only ${first.branch}`);
+      yield* pivots.teardownTeammate(pivot, { threadId: first.threadId });
+      // The workspace stays, back on the default branch with the inline branch gone.
+      assert.isTrue(NodeFS.existsSync(first.worktreePath));
+      assert.strictEqual(sh(first.worktreePath, "git branch --show-current"), "");
+      assert.strictEqual(sh(workspaceRoot, `git branch --list ${first.branch}`), "");
+
+      const second = yield* inline(pivot, "Another typo");
+      assert.strictEqual(second.worktreePath, first.worktreePath);
+      assert.strictEqual(second.setupScript, "none");
+      assert.deepStrictEqual(
+        fake.inlineSetups.map((launch) => launch.ran),
+        [true, false],
+      );
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("refuses an inline task while the workspace holds someone's uncommitted work", () => {
+    const { workspaceRoot, layer } = setup();
+    return Effect.gen(function* () {
+      const pivots = yield* PivotService.PivotService;
+      const pivot = (yield* pivots.create({ projectId, modelSelection, takeover: false })).threadId;
+      const first = yield* inline(pivot, "Fix the README typo");
+      commitFile(first.worktreePath, "README.md");
+      sh(workspaceRoot, `git merge -q --ff-only ${first.branch}`);
+      yield* pivots.teardownTeammate(pivot, { threadId: first.threadId });
+      NodeFS.writeFileSync(NodePath.join(first.worktreePath, "stray.txt"), "left behind\n");
+
+      assert.include(yield* refusal(inline(pivot, "Another typo")), "stray.txt");
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("caps running ships and scouts, but not inline tasks", () => {
+    const { layer } = setup({ settings: { pivotMaxTeammates: 1 } });
+    return Effect.gen(function* () {
+      const pivots = yield* PivotService.PivotService;
+      const pivot = (yield* pivots.create({ projectId, modelSelection, takeover: false })).threadId;
+      yield* pivots.dispatchTeammate(pivot, {
+        title: "Fix the login bug",
+        kind: "ship",
+        intent: "Make the login button work on Safari.",
+        spec: "Reproduce, fix, test.",
+      });
+      const refused = yield* refusal(
+        pivots.dispatchTeammate(pivot, {
+          title: "Look into the flaky test",
+          kind: "scout",
+          intent: "Why does the test flake?",
+          spec: "Find out.",
+        }),
+      );
+      assert.include(refused, "the most at once (1)");
+      yield* inline(pivot, "Fix the README typo");
+    }).pipe(Effect.provide(layer));
+  });
+});

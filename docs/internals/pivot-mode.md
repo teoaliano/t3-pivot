@@ -133,3 +133,14 @@ and loses Edit and Write, but its shell is not sandboxed, so the contract keeps 
 OpenCode and ACP agents (Cursor's ACP flavors, Grok) lose the shell under a read-only sandbox.
 Cursor's own sandbox only switches on or off and lets the agent write its cwd, and Antigravity,
 Muse and Pi ignore the sandbox, so there the contract alone keeps a subagent read-only.
+
+## Inline tasks share one workspace
+
+An inline task is a teammate of kind `inline` that works in the Pivot workspace instead of a
+worktree of its own (`LocalTeammateHost.launchInline`). Its thread is created directly on the
+workspace rather than launched, because a V2 launch prepares a workspace and runs the setup
+script every time; the setup script runs once, when the workspace is first made. One inline
+task runs per project, so the workspace has one owner at a time: dispatch refuses a second,
+and refuses while the workspace holds uncommitted changes. Teardown returns it to a clean,
+detached default branch instead of removing it, and storage cleanup keeps any worktree named
+`pivot-inline`.

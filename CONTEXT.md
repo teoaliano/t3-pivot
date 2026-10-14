@@ -60,6 +60,16 @@ to a ship in place.
 _Avoid_: session (see below), crewmate (firstmate's word), worker, subagent (V2's word
 for a provider-native helper or a `delegate_task` child thread; a teammate is neither)
 
+**Inline task**:
+A teammate of kind `inline`: a small change made in the Pivot workspace rather than a
+worktree of its own. One runs at a time per project. It delivers through a PR like a ship.
+_Avoid_: calling it a subagent; the Pivot's subagents only read
+
+**Pivot workspace**:
+The one worktree per project a Pivot keeps for inline tasks. It is set up once and reused,
+never removed by teardown or storage cleanup.
+_Avoid_: Pivot home (the Pivot's own folder, which is not the project)
+
 **Teammate status**:
 What a teammate is doing, as the user and the Pivot see it. It combines the teammate's
 **reported status** (what it last said about its latest turn) with its runtime state

@@ -63,6 +63,10 @@ describe("teammate cards", () => {
     });
   });
 
+  it("marks an inline task as one", () => {
+    expect(teammateCard(teammate({ kind: "inline" }), shell()).label).toBe("Inline · Working");
+  });
+
   it("says a teammate is waiting for memory while its agent has not started", () => {
     const status = "Waiting for memory: agents use 9.7 of 9.4 GB";
     const card = teammateCard(
