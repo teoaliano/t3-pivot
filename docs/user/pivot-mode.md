@@ -68,6 +68,19 @@ A Pivot and its teammates carry on by themselves after T3 restarts, whatever the
 continue-after-update setting says. The Pivot's first update tells you which teammates resumed
 and which did not.
 
+## Small changes run inline
+
+For a small, self-contained change, such as a typo, a one-file fix or a docs edit, the Pivot
+runs an inline task instead of a full teammate. It works in the Pivot's workspace, a copy of
+the project the Pivot sets up once and reuses, so it starts without a new worktree, setup
+run or dev server, and runs only targeted checks. It still delivers a PR for your approval,
+and its card is marked **Inline**. One runs at a time per project. When it isn't clear
+whether a change is small enough, the Pivot asks you.
+
+The Pivot runs at most a few teammates at once and queues the rest. Set the number in
+**Settings → General → Teammates at once**; left on Auto, it follows your machine's memory on
+Linux and has no cap elsewhere.
+
 ## When the machine is short of memory
 
 On Linux, a teammate's agent starts only when the machine has memory to spare, and teammates

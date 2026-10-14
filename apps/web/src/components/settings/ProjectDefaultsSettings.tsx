@@ -2,7 +2,6 @@ import {
   DEFAULT_SERVER_SETTINGS,
   type ModelSelection,
   type ProviderInstanceId,
-  type TeammateKind,
   type TeammateModelEntry,
   type WorktreeSubmodules,
 } from "@t3tools/contracts";
@@ -29,6 +28,13 @@ import { PULL_REQUEST_MERGE_METHOD_LABELS } from "../pullRequest/pullRequestDeta
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
+import {
+  NumberField,
+  NumberFieldDecrement,
+  NumberFieldGroup,
+  NumberFieldIncrement,
+  NumberFieldInput,
+} from "../ui/number-field";
 import { Radio, RadioGroup } from "../ui/radio-group";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
@@ -339,7 +345,10 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   );
   const defaultTeammateIndex = defaultTeammateModelIndex(teammateModels);
   const teammateKindModels = settings.teammateKindModelSelections;
-  const setTeammateKindModel = (kind: TeammateKind, value: ModelSelection | null) => {
+  const setTeammateKindModel = (
+    kind: keyof typeof TEAMMATE_KIND_LABELS,
+    value: ModelSelection | null,
+  ) => {
     const reason = value ? modelDisabledReason(value.instanceId, value.model) : null;
     if (reason) {
       toastManager.add({ type: "error", title: "Teammate model not saved", description: reason });
@@ -387,7 +396,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     >
       {!mixedTeammateKindModels
         ? Object.entries(TEAMMATE_KIND_LABELS).map(([kind, label]) => {
-            const kindModel = teammateKindModels[kind as TeammateKind];
+            const kindModel = teammateKindModels[kind as keyof typeof TEAMMATE_KIND_LABELS];
             const shown = kindModel ?? teammateKindFallback;
             return (
               <div
@@ -398,7 +407,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
                 <div className="min-w-0 flex-1">
                   {shown ? (
                     modelControl(shown, entries, false, (value) =>
-                      setTeammateKindModel(kind as TeammateKind, value),
+                      setTeammateKindModel(kind as keyof typeof TEAMMATE_KIND_LABELS, value),
                     )
                   ) : (
                     <span className="text-sm text-muted-foreground">No providers available</span>
@@ -409,7 +418,9 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
                 ) : (
                   <SettingResetButton
                     label={`${label} model`}
-                    onClick={() => setTeammateKindModel(kind as TeammateKind, null)}
+                    onClick={() =>
+                      setTeammateKindModel(kind as keyof typeof TEAMMATE_KIND_LABELS, null)
+                    }
                   />
                 )}
               </div>
@@ -559,6 +570,52 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
           {modelRow}
           {pivotModelRow}
           {teammateModelsRow}
+          {isProjectScope ? null : (
+            <SettingsRow
+              serverScoped
+              settingKeys={["pivotMaxTeammates"]}
+              id="pivot-max-teammates"
+              title="Teammates at once"
+              description="The most teammates a Pivot runs at a time; it queues the rest. Small changes it makes inline don't count."
+              status={
+                settings.pivotMaxTeammates === null ? "Auto, from this machine's memory" : undefined
+              }
+              resetAction={
+                settings.pivotMaxTeammates !== null ? (
+                  <SettingResetButton
+                    label="Teammates at once"
+                    onClick={() => updateSettings({ pivotMaxTeammates: null })}
+                  />
+                ) : null
+              }
+              control={
+                <NumberField
+                  value={settings.pivotMaxTeammates}
+                  min={1}
+                  max={20}
+                  step={1}
+                  size="sm"
+                  className="w-auto"
+                  onValueCommitted={(next) =>
+                    updateSettings({
+                      pivotMaxTeammates:
+                        next === null ? null : Math.min(20, Math.max(1, Math.round(next))),
+                    })
+                  }
+                >
+                  <NumberFieldGroup>
+                    <NumberFieldDecrement aria-label="Fewer teammates at once" />
+                    <NumberFieldInput
+                      aria-label="Teammates at once"
+                      placeholder="Auto"
+                      className="w-12 text-right"
+                    />
+                    <NumberFieldIncrement aria-label="More teammates at once" />
+                  </NumberFieldGroup>
+                </NumberField>
+              }
+            />
+          )}
           <SettingsRow
             serverScoped
             settingKeys={["defaultRuntimeMode"]}

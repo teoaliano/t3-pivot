@@ -13,6 +13,7 @@ import {
   ForwardCompatibleNullable,
   ForwardCompatibleOptional,
   OmittedWhenNull,
+  PositiveInt,
   ProjectId,
   ThreadId,
   TrimmedNonEmptyString,
@@ -1202,6 +1203,13 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({ ship: null, scout: null })),
   ),
   /**
+   * The most ships and scouts a Pivot runs at once; inline tasks don't count. Null picks
+   * one from the machine: on Linux from the agents' memory limit, elsewhere no cap.
+   */
+  pivotMaxTeammates: Schema.NullOr(PositiveInt).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  /**
    * Per-project overrides of the keys in `PROJECT_SCOPED_SERVER_SETTING_KEYS`,
    * plus `providerInstances`. The source of truth for project
    * settings; `projectAgentBrowserAccessOverrides`, `projectAutoPullOverrides`
@@ -1597,6 +1605,7 @@ export const ServerSettingsPatch = Schema.Struct({
   /** Replaces the whole list. */
   teammateModels: Schema.optionalKey(Schema.Array(TeammateModelEntry)),
   teammateKindModelSelections: Schema.optionalKey(TeammateKindModelSelections),
+  pivotMaxTeammates: Schema.optionalKey(Schema.NullOr(PositiveInt)),
   /**
    * Per-project entry replacement: each entry replaces that project's whole
    * override set and `null` removes it. Clearing one override means resending

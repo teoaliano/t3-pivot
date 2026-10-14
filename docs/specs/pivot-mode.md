@@ -84,7 +84,9 @@ cards, one teammate's chat, a preview, files, a diff), with an optional wallpape
 11. As a user, I want to describe work to the Pivot in plain words and have it dispatch
     teammates, so that I state intent once instead of opening threads myself.
 12. As a user, I want each teammate to start in its own worktree on its own branch, so
-    that teammates never step on each other or on my checkout.
+    that teammates never step on each other or on my checkout. A small change runs as an
+    inline task in the Pivot's workspace instead, which is set up once and reused, so it
+    costs no worktree, setup run or dev server.
 13. As a user, I want the teammate's brief to carry my words verbatim, separate from the
     Pivot's instructions, so that reviewers and the teammate see what I actually asked.
 14. As a user, I want teammates to use my project's default model unless I name one, so
@@ -102,10 +104,11 @@ cards, one teammate's chat, a preview, files, a diff), with an optional wallpape
     that investigation comes back as a report instead of a half-built change.
 20. As a user, I want a scout that finds shippable work to be promoted in place, so that
     its context is not thrown away.
-21. As a user, I want the Pivot to dispatch independent work in parallel, so that the
-    whole job finishes sooner.
+21. As a user, I want the Pivot to dispatch independent work in parallel, up to a cap that
+    fits my machine's memory, so that the whole job finishes sooner without starving it.
 22. As a user, I want the Pivot never to edit my project itself, so that every change
-    comes from a teammate with a branch and a review path.
+    comes from a teammate or an inline task with a branch and a review path. It answers
+    questions and reviews diffs with read-only subagents.
 23. As a user, I want teammates to keep every T3 tool any thread has, including starting
     helper threads of their own, so that a teammate works like any other thread.
 
@@ -302,7 +305,10 @@ cards, one teammate's chat, a preview, files, a diff), with an optional wallpape
 - **Permanence.** No release, no adoption. A thread is a Pivot or a teammate from
   creation and stays one. Teammates only come from dispatch.
 - **Worktrees are required.** The server refuses a dispatch that does not produce a
-  worktree, so a teammate can never commit in the primary checkout. Pivot mode needs a
+  worktree, so a teammate can never commit in the primary checkout. An inline task's
+  worktree is the Pivot's workspace (`<worktrees>/<repo>/pivot-inline`): created on the first
+  inline task with the setup script, reused after, one inline task at a time, returned to a
+  clean default branch at teardown and kept by storage cleanup. Pivot mode needs a
   git repository, so it is unavailable for threads without a project.
 - **Dispatch belongs to the Pivot. V2's tools belong to every thread.** Only a Pivot
   creates teammates, and only in its own project, because a teammate is defined by its
