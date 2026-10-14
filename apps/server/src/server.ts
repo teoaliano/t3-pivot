@@ -34,6 +34,7 @@ import { guardHttpResponseWriteErrors } from "./httpResponseErrorGuard.ts";
 import { fixPath } from "./os-jank.ts";
 import * as Ws from "./ws.ts";
 import * as AgentScopeLive from "./process/agentScope.ts";
+import * as ScopeSweep from "./process/ScopeSweep.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as NodePtyAdapter from "./terminal/NodePtyAdapter.ts";
 import * as PullRequestHttp from "./pullRequest/http.ts";
@@ -627,6 +628,8 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   // existed, or by a cleanup write that failed. See ProjectService.delete
   // for the normal (on-delete) path.
   Layer.effectDiscard(ProjectSettingsOverrideSweep.sweep),
+  // Stops what an agent that already exited left in its scope.
+  ScopeSweep.layer,
 ).pipe(
   // Pivot mode: its service and the adapter it reaches V2 threads, PRs and
   // checkouts through. Teardown stops a worktree's managed processes, so it
@@ -1197,6 +1200,7 @@ const layerMakeServer = Layer.unwrap(
       Layer.provide(VcsProcess.layer),
       // Every agent and terminal spawn reads this, so it sits below everything.
       Layer.provideMerge(AgentScopeLive.layer),
+      Layer.provideMerge(AgentScopeLive.layerOwner),
       Layer.provideMerge(layerPlatformServices),
     );
   }),

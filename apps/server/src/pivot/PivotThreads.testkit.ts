@@ -1,7 +1,10 @@
+// @effect-diagnostics nodeBuiltinImport:off
 /**
  * An in-memory V2 for Pivot mode's tests: threads, the messages sent into them,
  * and the outcome of a teammate's first run.
  */
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
 import {
   type ModelSelection,
   type PullRequestDetail,
@@ -292,8 +295,13 @@ export const layer = (fake: FakeV2) =>
         Effect.sync(() => {
           fake.stoppedCheckouts.push(worktreePath);
         }),
-      removeWorktree: ({ worktreePath, force }) =>
+      removeWorktree: ({ projectRoot, worktreePath, force }) =>
         Effect.sync(() => {
+          if (NodeFS.existsSync(worktreePath)) {
+            NodeChildProcess.execSync(`git worktree remove --force ${worktreePath}`, {
+              cwd: projectRoot,
+            });
+          }
           fake.removedWorktrees.push({ worktreePath, force });
         }),
     }),

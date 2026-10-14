@@ -1159,6 +1159,7 @@ export const make = Effect.gen(function* () {
       yield* host
         .mergePullRequest({ ...ref, expectedHeadSha: head })
         .pipe(Effect.tapError(() => recordMerge(null).pipe(Effect.ignore)));
+      yield* host.stopScope(teammate.threadId);
       return { threadId: teammate.threadId, url: link.url, mergedHead: head };
     });
 
@@ -1191,6 +1192,7 @@ export const make = Effect.gen(function* () {
         threadId: teammate.threadId,
         head: result.head,
       });
+      yield* (yield* hostOf(command, teammate)).stopScope(teammate.threadId);
       return {
         threadId: teammate.threadId,
         branch: teammate.branch,
@@ -1206,9 +1208,30 @@ export const make = Effect.gen(function* () {
       const teammate = yield* ownTeammate(command, pivot, input.threadId);
       const host = yield* hostOf(command, teammate);
       yield* host.project(command, pivot.projectId);
+      // Teardown deletes the worktree and branch, so nobody else may still be using them.
+      const others = (yield* store.listTeammates({ includeTornDown: false })).filter(
+        (other) => other.threadId !== teammate.threadId && other.projectId === teammate.projectId,
+      );
+      const sharing: Array<PivotStore.TeammateRow> = [];
+      for (const other of others) {
+        const resolved = yield* withRecordedWorktree(other);
+        if (
+          resolved.worktreePath === teammate.worktreePath ||
+          resolved.branch === teammate.branch
+        ) {
+          sharing.push(resolved);
+        }
+      }
+      if (sharing.length > 0) {
+        return yield* refuse(
+          command,
+          `Not torn down: ${sharing.map((other) => other.threadId).join(", ")} still ${sharing.length === 1 ? "works" : "work"} on the same worktree or branch. Tear that one down first, or hand the work over.`,
+        );
+      }
       const worktreeExists = yield* host.worktreeExists(teammate.worktreePath);
 
       let reason: string;
+      let landedHead: string | null = null;
       if (teammate.kind === "scout" && teammate.scoutReport !== null) {
         reason = "Its scout report is recorded.";
         // The report is the deliverable, but files it left uncommitted are still the user's.
@@ -1245,6 +1268,7 @@ export const make = Effect.gen(function* () {
         });
         if (verdict.landed) {
           reason = verdict.reason;
+          landedHead = verdict.head;
         } else if (input.discardDecisionId !== undefined) {
           yield* userApproval(command, pivot, teammate, input.discardDecisionId, "Discarding work");
           reason = `Discarded on the user's word: ${verdict.reason}`;
@@ -1256,6 +1280,14 @@ export const make = Effect.gen(function* () {
         }
       }
       const discarding = reason.startsWith("Discarded");
+      // Landed work's branch goes while it is still at the verified tip; a scout's
+      // report-only branch goes only if git agrees it is merged; discarded work keeps it.
+      const branchDisposal =
+        discarding || (landedHead === null && teammate.kind !== "scout")
+          ? ("keep" as const)
+          : landedHead === null
+            ? ("safe" as const)
+            : { tip: landedHead };
 
       yield* host.teardown(command, {
         projectId: pivot.projectId,
@@ -1264,6 +1296,7 @@ export const make = Effect.gen(function* () {
         branch: teammate.branch,
         worktreeExists,
         force: discarding,
+        branchDisposal,
       });
       yield* store.dispatch({
         type: "teammate.tear-down",

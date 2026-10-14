@@ -36,6 +36,9 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
+import { AgentScope } from "@t3tools/shared/AgentScope";
+import { AgentScopeOwner } from "../process/agentScope.ts";
+import { procHost, stopWorktreeProcesses } from "../process/scopeReaper.ts";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadLifecycle from "../orchestration-v2/ThreadLifecycleService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
@@ -217,6 +220,8 @@ export const make = Effect.gen(function* () {
   const processes = yield* ManagedProcesses.ManagedProcesses;
   const git = yield* GitWorkflow.GitWorkflowService;
   const setupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
+  const agentScope = yield* AgentScope;
+  const scopeOwner = yield* AgentScopeOwner;
 
   const fail = (operation: string, threadId?: string) => (cause: unknown) =>
     new PivotThreadsError({
@@ -415,6 +420,7 @@ export const make = Effect.gen(function* () {
           reason: "Stopped by the Pivot.",
         });
         yield* detachSessions(threadId, "stop");
+        yield* agentScope.stop(threadId);
       }).pipe(Effect.mapError(fail("stop", threadId))),
 
     relaunch: ({ threadId, senderThreadId, text }) =>
@@ -511,8 +517,15 @@ export const make = Effect.gen(function* () {
         .runAction({ ...ref, action: "merge", mergeMethod: "squash", expectedHeadSha })
         .pipe(Effect.mapError(fail("merge the PR"))),
 
+    // Terminals and dev servers are found by working directory, not by name.
     stopProcesses: (worktreePath) =>
-      processes.stopAllForCheckout(worktreePath, { releaseReservation: true }),
+      processes
+        .stopAllForCheckout(worktreePath, { releaseReservation: true })
+        .pipe(
+          Effect.andThen(
+            stopWorktreeProcesses(procHost, { worktreePath, owner: scopeOwner, self: process.pid }),
+          ),
+        ),
 
     removeWorktree: ({ projectRoot, worktreePath, force }) =>
       git

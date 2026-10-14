@@ -22,6 +22,7 @@ import * as PivotStore from "./PivotStore.ts";
 import { loadPivotText } from "./pivotTexts.ts";
 import * as PivotThreads from "./PivotThreads.ts";
 import { TeammateHost } from "./TeammateHost.ts";
+import { removeTeammateTemp } from "./teammateTemp.ts";
 
 export const make = Effect.gen(function* () {
   const store = yield* PivotStore.PivotStore;
@@ -115,6 +116,16 @@ export const make = Effect.gen(function* () {
     send: ({ threadId, senderThreadId, text }) =>
       threads.send({ threadId, senderThreadId, text, mode: "queue" }),
     stop: threads.stop,
+    // Landed or merged: the session stops first, so the agent never sees its own process
+    // killed under it, and then what its scope still runs goes.
+    stopScope: (threadId) =>
+      threads
+        .stop(threadId)
+        .pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("Could not stop the landed teammate's session", { threadId, cause }),
+          ),
+        ),
     retryLaunch: threads.retryLaunch,
     relaunch: threads.relaunch,
     pullRequestDetail: threads.pullRequestDetail,
@@ -162,7 +173,12 @@ export const make = Effect.gen(function* () {
         // The session goes first; if it will not stop, nothing else is touched.
         yield* threads.stop(input.threadId);
         yield* threads.stopProcesses(input.worktreePath);
+        yield* removeTeammateTemp(input.worktreePath).pipe(
+          Effect.provideService(FileSystem.FileSystem, fs),
+          Effect.provideService(Path.Path, path),
+        );
         if (input.worktreeExists) {
+          yield* Effect.logInfo("Removing teammate worktree", { path: input.worktreePath });
           yield* threads.removeWorktree({
             projectRoot: project.workspaceRoot,
             worktreePath: input.worktreePath,
@@ -170,6 +186,23 @@ export const make = Effect.gen(function* () {
           });
         }
         yield* threads.archive(input.threadId);
+        // Last, so a teardown that stops early still finds the branch it verified.
+        if (input.branchDisposal !== "keep") {
+          // A branch that cannot go (checked out elsewhere, unmerged, moved past the
+          // verified tip) stays.
+          yield* git
+            .deleteBranch({
+              projectRoot: project.workspaceRoot,
+              branch: input.branch,
+              tip: input.branchDisposal === "safe" ? undefined : input.branchDisposal.tip,
+            })
+            .pipe(
+              Effect.tap(() => Effect.logInfo("Deleted teammate branch", { branch: input.branch })),
+              Effect.catch((cause) =>
+                Effect.logWarning("Kept teammate branch", { branch: input.branch, cause }),
+              ),
+            );
+        }
       }),
   });
 });
