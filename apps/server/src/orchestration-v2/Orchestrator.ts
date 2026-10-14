@@ -3,6 +3,7 @@ import type {
   OrchestrationV2SearchThreadResult,
   OrchestrationV2ThreadHistoryPage,
 } from "@t3tools/contracts";
+import { describeCause } from "../process/startFailureDiagnosis.ts";
 import {
   latestExecutedRun,
   latestRootProviderFailure,
@@ -11289,7 +11290,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         )
         .pipe(
           Effect.catchCause((cause) =>
-            Effect.logWarning("Failed to start the next queued V2 run", { threadId, cause }),
+            Effect.logWarning("Failed to start the next queued V2 run", {
+              threadId,
+              failures: describeCause(cause),
+            }),
           ),
         );
       // After the queue decision: a provider failure holds the child's queued

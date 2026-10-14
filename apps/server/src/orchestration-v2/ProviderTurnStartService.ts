@@ -22,9 +22,16 @@ import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 
+import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
+import {
+  StartFailureMemoryCheck,
+  describeCause,
+  formatStartFailureMemory,
+  userFacingStartFailureMemory,
+} from "../process/startFailureDiagnosis.ts";
 import * as EventSink from "./EventSink.ts";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
 import {
@@ -555,6 +562,27 @@ export const layer: Layer.Layer<
       }) =>
         Effect.gen(function* () {
           const nestedCause = "cause" in failed.error ? failed.error.cause : undefined;
+          const reason =
+            nestedCause instanceof Error
+              ? nestedCause.message
+              : typeof nestedCause === "string"
+                ? nestedCause
+                : failed.error.message;
+          // Linux only: a start that dies for lack of memory says so, in the
+          // log and in the error the user sees.
+          const memory = yield* yield* StartFailureMemoryCheck;
+          yield* Effect.logWarning("provider session failed to start", {
+            threadId: projection.thread.id,
+            runId,
+            signal: failed.signal,
+            failures: describeCause(Cause.fail(failed.error)),
+            ...(memory === undefined ? {} : { memory: formatStartFailureMemory(memory) }),
+          });
+          // An agent the kernel killed for memory is the plainest answer of all.
+          const oomKilled = yield* (yield* AgentScope).oomKilled(projection.thread.id);
+          const memoryReason = oomKilled
+            ? "Couldn't start: the agent was killed because memory ran out. Stop idle dev servers or teammates and retry."
+            : userFacingStartFailureMemory(memory);
           yield* settleRunBeforeStart({
             signal: failed.signal,
             status: "failed",
@@ -566,12 +594,7 @@ export const layer: Layer.Layer<
               title: failed.title,
               failure: makeProviderFailure({
                 cause: failed.error,
-                message:
-                  nestedCause instanceof Error
-                    ? nestedCause.message
-                    : typeof nestedCause === "string"
-                      ? nestedCause
-                      : failed.error.message,
+                message: memoryReason === undefined ? reason : `${reason}\n${memoryReason}`,
                 class: "provider_error",
               }),
             },

@@ -20,6 +20,7 @@ import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import { StartFailureMemoryCheck } from "../process/startFailureDiagnosis.ts";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -542,7 +543,19 @@ function makeLocalCommandHarness(input: {
     projection: () => projection,
     start: Effect.gen(function* () {
       yield* (yield* ProviderTurnStart.ProviderTurnStartServiceV2).start({ threadId, runId });
-    }).pipe(Effect.provide(layer)),
+    }).pipe(
+      Effect.provide(layer),
+      // Made-up reading, so the test never reads the host's cgroup files.
+      Effect.provideService(
+        StartFailureMemoryCheck,
+        Effect.succeed({
+          kind: "slice",
+          status: "over",
+          memory: { currentBytes: 9.8e9, maxBytes: 9.4e9 },
+          pressure: undefined,
+        }),
+      ),
+    ),
     startWithRetry: Effect.gen(function* () {
       yield* (yield* ProviderTurnStart.ProviderTurnStartServiceV2).start({
         threadId,
@@ -580,7 +593,8 @@ effectIt.effect("terminalizes a starting run when its provider session cannot op
         status: "failed",
         failure: {
           class: "provider_error",
-          message: "DESCRIPTION is not valid ACP JSON",
+          message:
+            "DESCRIPTION is not valid ACP JSON\nCouldn't start: the agent slice is over its memory limit (9.8 GB of 9.4 GB). Stop idle dev servers or teammates and retry.",
         },
       },
     ]);
@@ -678,7 +692,8 @@ effectIt.effect("fails a starting run when its last start attempt cannot load th
         title: "Provider turn failed to start",
         failure: {
           class: "provider_error",
-          message: "Pi RPC read failed: pi process exited with code 1.",
+          message:
+            "Pi RPC read failed: pi process exited with code 1.\nCouldn't start: the agent slice is over its memory limit (9.8 GB of 9.4 GB). Stop idle dev servers or teammates and retry.",
         },
       },
     ]);

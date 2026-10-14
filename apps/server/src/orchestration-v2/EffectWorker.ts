@@ -1,4 +1,5 @@
 import { CommandId } from "@t3tools/contracts";
+import { describeCause } from "../process/startFailureDiagnosis.ts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -860,9 +861,9 @@ export const runDaemonWithOptions = (options: OrchestrationEffectDaemonOptions =
           const outcome = yield* worker.runOnce.pipe(
             Effect.map((worked) => (worked ? ("worked" as const) : ("idle" as const))),
             Effect.catchCause((cause) =>
-              Effect.logWarning("Orchestration effect worker failed", cause).pipe(
-                Effect.as("failed" as const),
-              ),
+              Effect.logWarning("Orchestration effect worker failed", {
+                failures: describeCause(cause),
+              }).pipe(Effect.as("failed" as const)),
             ),
           );
           if (outcome === "worked") {
