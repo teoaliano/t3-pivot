@@ -55,7 +55,8 @@ const toolRestrictions = Layer.effect(
 
 // A Pivot's cwd is its home (see PivotThreads.createPivotThread), so the home is the
 // thread's worktree. A subagent a Pivot delegates to is not a Pivot, but it copies the
-// Pivot's thread, home path included. It runs in the project's checkout with no writes, so
+// Pivot's thread, home path included. It runs in the project's checkout with no writes, under a
+// read-only sandbox where the provider has one, so
 // it reads the project without ever writing to the home or the checkout. Failing a lookup
 // fails the run: nothing falls back to full access.
 const writeAccess = Layer.effect(
@@ -73,10 +74,10 @@ const writeAccess = Layer.effect(
         if (home === null) return yield* new PivotHomeMissingError({ threadId: thread.id });
         return { writableRoots: [home], writableFiles: [path.join(home, "preferences.md")] };
       }
-      const parentId = thread.lineage.parentThreadId;
-      if (thread.lineage.relationshipToParent !== "subagent" || parentId === null) return null;
-      const parent = yield* store.getPivot(parentId);
-      if (parent === null) return null;
+      // Any depth: a subagent's own subagent is still the Pivot's.
+      const rootId = thread.lineage.rootThreadId;
+      if (thread.lineage.relationshipToParent !== "subagent" || rootId === thread.id) return null;
+      if ((yield* store.getPivot(rootId)) === null) return null;
       const project = yield* projects.get(thread.projectId);
       if (Option.isNone(project)) {
         return yield* new PivotSubagentProjectMissingError({ threadId: thread.id });

@@ -494,8 +494,9 @@ cards, one teammate's chat, a preview, files, a diff), with an optional wallpape
   after the user approves that PR. It is held to the same conditions as `merge_teammate`:
   the approval, a live read of open, not draft, mergeable and green, and the head pinned
   with `--match-head-commit`. Teammates never merge or close a PR, on any path, the shell
-  included. Only the Pivot's contract states the Pivot's side of this; the shell block that
-  keeps teammates off `gh pr merge` and `gh pr close` is not yet on this branch.
+  included. On Claude a teammate's shell refuses `gh pr merge`, `gh pr close` and the forge's merge
+  and close calls, and so does the shell of any subagent under a teammate or the Pivot; other
+  providers keep the rule in the teammate's instructions.
 - **Merge order.** Only the Pivot merges or lands; a teammate's brief forbids it and the
   Pivot tools refuse a teammate caller. The approval decision carries a `mergeOrder` of
   branches, shown to the user with the approval. A merge or landing refuses a branch

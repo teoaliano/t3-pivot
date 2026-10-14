@@ -183,14 +183,29 @@ it.layer(layer)("Pivot and teammate permissions", (it) => {
       // A child of the Pivot is not a Pivot, so before the fix it ran with full access in
       // the home. It reads the project's checkout and writes nothing.
       assert.equal(resolved.cwd, "/project-root");
-      assert.deepEqual(resolved.sandboxPolicy, {
-        type: "workspaceWrite",
-        writableRoots: [],
-        networkAccess: true,
-        excludeSlashTmp: true,
-        excludeTmpdirEnvVar: true,
-      });
+      // Read-only, not workspace-write with no roots: Codex's workspace-write always lets
+      // the agent write its cwd, which here is the project's checkout.
+      assert.deepEqual(resolved.sandboxPolicy, { type: "readOnly", networkAccess: true });
       assert.deepEqual(resolved.writableFiles, []);
+    }),
+  );
+
+  it.effect("confines a subagent's own subagent the same way", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const child = subagentOf(thread(pivotThreadId, home), ThreadId.make("subagent-1"));
+      const grandchild: OrchestrationV2AppThread = {
+        ...child,
+        id: ThreadId.make("subagent-2"),
+        lineage: {
+          parentThreadId: child.id,
+          relationshipToParent: "subagent",
+          rootThreadId: pivotThreadId,
+        },
+      };
+      const resolved = yield* policy.resolve({ thread: grandchild, modelSelection });
+      assert.equal(resolved.cwd, "/project-root");
+      assert.deepEqual(resolved.sandboxPolicy, { type: "readOnly", networkAccess: true });
     }),
   );
 

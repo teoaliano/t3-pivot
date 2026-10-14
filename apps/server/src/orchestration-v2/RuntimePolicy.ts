@@ -162,13 +162,18 @@ export const layerFromProjectStore: Layer.Layer<
           ...(writeScope === null
             ? {}
             : {
-                sandboxPolicy: {
-                  type: "workspaceWrite",
-                  writableRoots: [...writeScope.writableRoots],
-                  networkAccess: true,
-                  excludeSlashTmp: true,
-                  excludeTmpdirEnvVar: true,
-                },
+                // With nothing to write, the sandbox is read-only: a workspace-write sandbox
+                // would still make the cwd writable.
+                sandboxPolicy:
+                  writeScope.writableRoots.length === 0
+                    ? { type: "readOnly", networkAccess: true }
+                    : {
+                        type: "workspaceWrite",
+                        writableRoots: [...writeScope.writableRoots],
+                        networkAccess: true,
+                        excludeSlashTmp: true,
+                        excludeTmpdirEnvVar: true,
+                      },
                 writableFiles: [...writeScope.writableFiles],
               }),
         });
