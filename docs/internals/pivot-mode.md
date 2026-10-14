@@ -85,9 +85,9 @@ delegating the merge doesn't get around it. Only the Claude adapter enforces it,
 Antigravity keep the contract in the teammate's instructions: teammates run in full access,
 where those providers never ask T3 before a command. The guard reads one command line, so a
 script file or a variable it cannot see goes unchecked, and a direct `git push` to the
-default branch is left to branch protection. The Pivot's shell
-is not guarded: it may merge, but its instructions allow that only after the user approved
-that PR, with checks green and the reviewed head, as `merge_teammate` enforces.
+default branch is left to branch protection. The Pivot's own shell is not guarded: it may
+merge, and the contract's merge rule is the only guard there (the user's approval of that PR,
+checks green, the reviewed head pinned), so those conditions must stay in the contract.
 
 A teammate's brief names its worktree path, which V2 only creates during launch
 preparation. Dispatch derives the path the way V2 does and records the teammate as soon as
@@ -123,3 +123,13 @@ a ticket whose start stopped asking (a stopped run, a dead server) drops out aft
 Teammates are marked as background agents (`ThreadAdmission`), which start only with memory to
 spare and spaced out; the supervisor copies the waiting state onto the teammate's record for its
 card and `list_teammates`.
+
+## A Pivot's subagents only read
+
+A subagent or fork under a Pivot (lineage root, any depth) runs in the project's checkout with
+an empty write scope, which resolves to a read-only sandbox. How firmly that holds depends on the
+provider. Codex keeps the shell and blocks writes. Claude keeps Read, Glob, Grep and the shell
+and loses Edit and Write, but its shell is not sandboxed, so the contract keeps it from writing.
+OpenCode and ACP agents (Cursor's ACP flavors, Grok) lose the shell under a read-only sandbox.
+Cursor's own sandbox only switches on or off and lets the agent write its cwd, and Antigravity,
+Muse and Pi ignore the sandbox, so there the contract alone keeps a subagent read-only.

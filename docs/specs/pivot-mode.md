@@ -490,6 +490,13 @@ cards, one teammate's chat, a preview, files, a diff), with an optional wallpape
   reports every failing condition. It passes the verified head to the forge, so a push
   after the check fails the merge. Default method: squash. The only way past a red check
   is an explicit user waiver naming that check.
+- **Shell merges.** The Pivot may merge from the shell (`gh pr merge`, the forge's CLI)
+  after the user approves that PR. It is held to the same conditions as `merge_teammate`:
+  the approval, a live read of open, not draft, mergeable and green, and the head pinned
+  with `--match-head-commit`. Teammates never merge or close a PR, on any path, the shell
+  included. On Claude a teammate's shell refuses `gh pr merge`, `gh pr close` and the forge's merge
+  and close calls, and so does the shell of any subagent under a teammate or the Pivot; other
+  providers keep the rule in the teammate's instructions.
 - **Merge order.** Only the Pivot merges or lands; a teammate's brief forbids it and the
   Pivot tools refuse a teammate caller. The approval decision carries a `mergeOrder` of
   branches, shown to the user with the approval. A merge or landing refuses a branch
@@ -547,8 +554,10 @@ cards, one teammate's chat, a preview, files, a diff), with an optional wallpape
   Storage cleanup skips the home. T3 Code's own cleanup cannot remove it either, because
   it is not a worktree of the project's repository.
 - **"Never write to a project"** is held by the contract, as in firstmate. The Pivot runs
-  full-access so it can read teammate worktrees and use `gh`. Where a harness sandboxes
-  writes to its working directory, that enforcement comes for free.
+  full-access so it can read teammate worktrees, use `gh` to read PR state, and merge an
+  approved PR from the shell. Where a harness sandboxes writes to its working directory,
+  that enforcement comes for free. The shell is not confined for Claude, so the merge rules
+  in the contract are the only guard on that path.
 - **Capabilities.** V2 grants every thread `orchestration`, `worktree` and
   `pull-requests`. The Pivot also gets a `pivot` capability with the tools its contract
   names: `dispatch_teammate`, `promote_scout`, `add_intent`, `open_decision`,
