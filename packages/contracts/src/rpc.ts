@@ -2072,7 +2072,8 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
   { error: EnvironmentAuthorizationError },
 ) {}
 
-export const WsRpcGroup = RpcGroup.make(
+/** What clients call, but the terminal, preview and device tools, kept in WsToolsRpcGroup. */
+export const WsCoreRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
@@ -2130,18 +2131,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsPivotAnswerDecisionRpc,
   WsPivotTeammateDetailRpc,
   WsPivotDecisionLogRpc,
-  WsPivotHostDescribeRpc,
-  WsPivotHostLaunchTeammateRpc,
-  WsPivotHostSendRpc,
-  WsPivotHostStopRpc,
-  WsPivotHostRelaunchRpc,
-  WsPivotHostRetryLaunchRpc,
-  WsPivotHostSettleRpc,
-  WsPivotHostTeardownRpc,
-  WsPivotHostPullRequestDetailRpc,
-  WsPivotHostMergePullRequestRpc,
-  WsPivotHostLandRpc,
-  WsPivotHostEventsRpc,
   WsScheduledTasksUpsertRpc,
   WsScheduledTasksSetEnabledRpc,
   WsScheduledTasksDeleteRpc,
@@ -2232,42 +2221,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsInitRpc,
   WsReviewGetDiffPreviewRpc,
   WsReviewGetDiffFileContentsRpc,
-  WsTerminalOpenRpc,
-  WsTerminalAttachRpc,
-  WsTerminalObserveRpc,
-  WsTerminalWriteRpc,
-  WsTerminalResizeRpc,
-  WsTerminalClearRpc,
-  WsTerminalRestartRpc,
-  WsTerminalCloseRpc,
-  WsSubscribeTerminalEventsRpc,
-  WsSubscribeTerminalMetadataRpc,
-  WsPreviewOpenRpc,
-  WsPreviewNavigateRpc,
-  WsPreviewResizeRpc,
-  WsPreviewAdjustRpc,
-  WsPreviewRefreshRpc,
-  WsPreviewCloseRpc,
-  WsPreviewListRpc,
-  WsPreviewClearProfileRpc,
-  WsPreviewReportProfilesRpc,
-  WsPreviewReportStatusRpc,
-  WsSubscribePreviewEventsRpc,
   WsSubscribeDiscoveredLocalServersRpc,
   WsSubscribeManagedProcessesRpc,
   WsSubscribeManagedProcessOverviewRpc,
   WsManagedProcessStartRpc,
   WsManagedProcessStopRpc,
   WsManagedProcessSetPinnedRpc,
-  WsDeviceConfigureRpc,
-  WsDeviceListRpc,
-  WsDeviceTestHostRpc,
-  WsDeviceOpenRpc,
-  WsDeviceCloseRpc,
-  WsDeviceShutdownRpc,
-  WsDeviceDetailRpc,
-  WsDeviceActionRpc,
-  WsSubscribeDeviceStateRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,
@@ -2289,3 +2248,61 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribeShellRpc,
   WsOrchestrationV2SubscribeThreadRpc,
 ).middleware(RpcScopeAuthorization);
+
+/** The terminal, preview and device tools clients call. */
+export const WsToolsRpcGroup = RpcGroup.make(
+  WsTerminalOpenRpc,
+  WsTerminalAttachRpc,
+  WsTerminalObserveRpc,
+  WsTerminalWriteRpc,
+  WsTerminalResizeRpc,
+  WsTerminalClearRpc,
+  WsTerminalRestartRpc,
+  WsTerminalCloseRpc,
+  WsSubscribeTerminalEventsRpc,
+  WsSubscribeTerminalMetadataRpc,
+  WsPreviewOpenRpc,
+  WsPreviewNavigateRpc,
+  WsPreviewResizeRpc,
+  WsPreviewAdjustRpc,
+  WsPreviewRefreshRpc,
+  WsPreviewCloseRpc,
+  WsPreviewListRpc,
+  WsPreviewClearProfileRpc,
+  WsPreviewReportProfilesRpc,
+  WsPreviewReportStatusRpc,
+  WsSubscribePreviewEventsRpc,
+  WsDeviceConfigureRpc,
+  WsDeviceListRpc,
+  WsDeviceTestHostRpc,
+  WsDeviceOpenRpc,
+  WsDeviceCloseRpc,
+  WsDeviceShutdownRpc,
+  WsDeviceDetailRpc,
+  WsDeviceActionRpc,
+  WsSubscribeDeviceStateRpc,
+).middleware(RpcScopeAuthorization);
+
+/** Everything clients call. The server builds each part's handlers apart, to keep them checkable. */
+export const WsClientRpcGroup = WsCoreRpcGroup.merge(WsToolsRpcGroup);
+
+/**
+ * What a Pivot host link's session calls: another environment's Pivot running teammates
+ * here. Its own group, so the server builds its handlers apart from the client table.
+ */
+export const PivotHostRpcGroup = RpcGroup.make(
+  WsPivotHostDescribeRpc,
+  WsPivotHostLaunchTeammateRpc,
+  WsPivotHostSendRpc,
+  WsPivotHostStopRpc,
+  WsPivotHostRelaunchRpc,
+  WsPivotHostRetryLaunchRpc,
+  WsPivotHostSettleRpc,
+  WsPivotHostTeardownRpc,
+  WsPivotHostPullRequestDetailRpc,
+  WsPivotHostMergePullRequestRpc,
+  WsPivotHostLandRpc,
+  WsPivotHostEventsRpc,
+).middleware(RpcScopeAuthorization);
+
+export const WsRpcGroup = WsClientRpcGroup.merge(PivotHostRpcGroup);
