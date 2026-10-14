@@ -55,10 +55,10 @@ const toolRestrictions = Layer.effect(
 
 // A Pivot's cwd is its home (see PivotThreads.createPivotThread), so the home is the
 // thread's worktree. A subagent a Pivot delegates to is not a Pivot, but it copies the
-// Pivot's thread, home path included. It runs in the project's checkout with no writes, under a
-// read-only sandbox where the provider has one, so
-// it reads the project without ever writing to the home or the checkout. Failing a lookup
-// fails the run: nothing falls back to full access.
+// Pivot's thread, home path included. It runs in the project's checkout with no write scope,
+// so it reads the project but never writes the home or the checkout. How firmly depends on
+// the provider (docs/internals/pivot-mode.md). Failing a lookup fails the run: nothing falls
+// back to full access.
 const writeAccess = Layer.effect(
   ThreadWriteAccess.ThreadWriteAccess,
   Effect.gen(function* () {

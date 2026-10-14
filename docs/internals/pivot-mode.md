@@ -124,3 +124,13 @@ a ticket whose start stopped asking (a stopped run, a dead server) drops out aft
 Teammates are marked as background agents (`ThreadAdmission`), which start only with memory to
 spare and spaced out; the supervisor copies the waiting state onto the teammate's record for its
 card and `list_teammates`.
+
+## A Pivot's subagents only read
+
+A subagent or fork under a Pivot (lineage root, any depth) runs in the project's checkout with
+an empty write scope, which resolves to a read-only sandbox. How firmly that holds depends on the
+provider. Codex keeps the shell and blocks writes. Claude keeps Read, Glob, Grep and the shell
+and loses Edit and Write, but its shell is not sandboxed, so the contract keeps it from writing.
+OpenCode and ACP agents (Cursor's ACP flavors, Grok) lose the shell under a read-only sandbox.
+Cursor's own sandbox only switches on or off and lets the agent write its cwd, and Antigravity,
+Muse and Pi ignore the sandbox, so there the contract alone keeps a subagent read-only.
