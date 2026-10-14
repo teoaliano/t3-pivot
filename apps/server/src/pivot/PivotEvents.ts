@@ -5,6 +5,7 @@
  * @module PivotEvents
  */
 import {
+  ChatImageAttachment,
   IsoDateTime,
   MessageId,
   PivotDecisionEscalation,
@@ -129,6 +130,7 @@ export const PivotEvent = Schema.Union([
     answer: Schema.String,
     /** For a decision asking for approval: whether the user approved. */
     approved: Schema.optional(Schema.NullOr(Schema.Boolean)),
+    attachments: Schema.optional(Schema.Array(ChatImageAttachment)),
   }),
   event("decision.closed", {
     decisionId: PivotDecisionId,

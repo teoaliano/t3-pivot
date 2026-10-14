@@ -6,6 +6,7 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import {
+  type ChatImageAttachment,
   type ModelSelection,
   type PullRequestDetail,
   type OrchestrationV2ThreadShell,
@@ -29,6 +30,7 @@ export interface FakeMessage {
   readonly senderThreadId: ThreadId | null;
   readonly text: string;
   readonly mode: "launch" | "auto" | "queue" | "relaunch";
+  readonly attachments?: ReadonlyArray<ChatImageAttachment> | undefined;
 }
 
 export interface FakeThread {
@@ -87,6 +89,7 @@ export interface FakeWake {
   readonly text: string;
   readonly summary: string;
   readonly teammateThreadIds: ReadonlyArray<ThreadId>;
+  readonly attachments?: ReadonlyArray<ChatImageAttachment> | undefined;
 }
 
 export const makeFakeV2 = (): FakeV2 => ({
@@ -261,12 +264,12 @@ export const layer = (fake: FakeV2) =>
         Effect.map(thread(fake, threadId, "settle"), (found) => {
           found.settled = true;
         }),
-      send: ({ threadId, senderThreadId, text, mode }) =>
+      send: ({ threadId, senderThreadId, text, attachments, mode }) =>
         Effect.flatMap(thread(fake, threadId, "send"), (found) =>
           fake.failSend
             ? Effect.fail(new PivotThreadsError({ operation: "send", threadId }))
             : Effect.sync(() => {
-                found.messages.push({ senderThreadId, text, mode });
+                found.messages.push({ senderThreadId, text, mode, attachments });
               }),
         ),
       stop: (threadId) =>

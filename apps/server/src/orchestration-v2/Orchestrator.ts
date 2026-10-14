@@ -4763,7 +4763,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         });
       }
       // T3 Pivot: a teammate wake joins one still queued on the thread, so changes that
-      // land before it is delivered reach the Pivot as one notice.
+      // land before it is delivered reach the Pivot as one notice, images included.
       if (command.notification?.source.kind === "teammate") {
         const queuedWake = projection.runs
           .filter((run) => run.status === "queued")
@@ -4788,6 +4788,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             payload: {
               ...message,
               text: command.text,
+              attachments: command.attachments,
               notification: command.notification,
               updatedAt: now,
             },

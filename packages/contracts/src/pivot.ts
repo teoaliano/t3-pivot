@@ -10,6 +10,7 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
+import { ChatImageAttachment } from "./chatAttachment.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import { TeammateModelEntry } from "./settings.ts";
 
@@ -130,6 +131,8 @@ export const PivotDecision = Schema.Struct({
   /** The user's answer, verbatim. */
   userAnswer: Schema.NullOr(VerbatimText),
   userAnsweredAt: Schema.NullOr(IsoDateTime),
+  /** Images the user attached to the answer. Absent or empty when there are none. */
+  userAttachments: Schema.optional(Schema.Array(ChatImageAttachment)),
   /** For a decision asking for approval: whether the user approved. Null otherwise. */
   userApproved: Schema.NullOr(Schema.Boolean),
   resolution: Schema.NullOr(PivotDecisionResolution),
@@ -223,6 +226,8 @@ export const PivotAnswerDecisionInput = Schema.Struct({
   answer: VerbatimText,
   /** Required for a decision that asks for approval. */
   approved: Schema.optional(Schema.Boolean),
+  /** Images uploaded through the composer's attachment path, sent with the answer. */
+  attachments: Schema.optional(Schema.Array(ChatImageAttachment)),
 });
 export type PivotAnswerDecisionInput = typeof PivotAnswerDecisionInput.Type;
 

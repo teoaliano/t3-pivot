@@ -21,6 +21,7 @@ import {
   type PivotDeliveryMode,
   type PivotRecord,
   PivotDecisionResolution,
+  ChatImageAttachment,
   type PivotStreamEvent,
   type ProjectId,
   type RunId,
@@ -227,6 +228,7 @@ export type PivotCommand =
       readonly answer: string;
       /** Required when the decision asks for approval; ignored otherwise. */
       readonly approved: boolean | null;
+      readonly attachments?: ReadonlyArray<ChatImageAttachment> | undefined;
     }
   | {
       readonly type: "decision.answer";
@@ -371,6 +373,7 @@ interface DecisionSqlRow {
   readonly user_answer: string | null;
   readonly user_answered_at: string | null;
   readonly user_approved: number | null;
+  readonly user_attachments_json: string | null;
   readonly resolution_json: string | null;
   readonly closed_at: string | null;
 }
@@ -387,6 +390,9 @@ const decodeEscalation = Schema.decodeUnknownSync(
   Schema.fromJsonString(PivotDecisionEscalationSchema),
 );
 const decodeResolution = Schema.decodeUnknownSync(Schema.fromJsonString(PivotDecisionResolution));
+const AttachmentsJson = Schema.fromJsonString(Schema.Array(ChatImageAttachment));
+const decodeAttachments = Schema.decodeUnknownSync(AttachmentsJson);
+const encodeAttachments = Schema.encodeSync(AttachmentsJson);
 const decodeEvent = Schema.decodeUnknownSync(Schema.fromJsonString(PivotEvent));
 const encodeEvent = Schema.encodeSync(Schema.fromJsonString(PivotEvent));
 const IntentJson = Schema.fromJsonString(Schema.Array(Schema.String));
@@ -455,6 +461,8 @@ const toDecision = (row: DecisionSqlRow): PivotDecision => ({
   userAnswer: row.user_answer,
   userAnsweredAt: row.user_answered_at,
   userApproved: row.user_approved === null ? null : row.user_approved === 1,
+  userAttachments:
+    row.user_attachments_json === null ? [] : decodeAttachments(row.user_attachments_json),
   resolution: row.resolution_json === null ? null : decodeResolution(row.resolution_json),
 });
 
@@ -978,6 +986,9 @@ export const make = Effect.gen(function* () {
             decisionId: command.decisionId,
             answer: command.answer,
             approved: asksApproval ? command.approved : null,
+            ...(command.attachments === undefined || command.attachments.length === 0
+              ? {}
+              : { attachments: [...command.attachments] }),
           },
           true,
         );
@@ -1186,7 +1197,8 @@ export const make = Effect.gen(function* () {
         yield* sql`
           UPDATE pivot_decisions
           SET user_answer = ${event.answer}, user_answered_at = ${at},
-            user_approved = ${event.approved === true ? 1 : event.approved === false ? 0 : null}
+            user_approved = ${event.approved === true ? 1 : event.approved === false ? 0 : null},
+            user_attachments_json = ${event.attachments === undefined ? null : encodeAttachments(event.attachments)}
           WHERE decision_id = ${event.decisionId}
         `;
         return;

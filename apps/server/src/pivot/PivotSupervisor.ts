@@ -352,6 +352,7 @@ export const make = Effect.gen(function* () {
         text: wake.text,
         summary: wake.summary,
         teammateThreadIds: wake.teammateThreadIds,
+        attachments: wake.attachments,
       });
       digests.delete(pivot.threadId);
       const through = events.at(-1)?.sequence ?? pivot.wakeCursor;

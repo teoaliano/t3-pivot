@@ -4,6 +4,7 @@
  * one-line summary and the teammates it names come out.
  */
 import type {
+  ChatImageAttachment,
   PivotDecision,
   TeammateKind,
   TeammateResumeState,
@@ -42,6 +43,8 @@ export interface Wake {
   readonly text: string;
   readonly summary: string;
   readonly teammateThreadIds: ReadonlyArray<ThreadId>;
+  /** Images the user attached to answers this wake reports, to send with it. */
+  readonly attachments: ReadonlyArray<ChatImageAttachment>;
 }
 
 const quote = (text: string) => {
@@ -90,14 +93,25 @@ const teammateOf = (stored: StoredPivotEvent): string | null =>
     ? stored.event.threadId
     : null;
 
-const decisionLine = (decision: PivotDecision, teammates: ReadonlyMap<string, WakeTeammate>) => {
+const decisionLine = (
+  decision: PivotDecision,
+  teammates: ReadonlyMap<string, WakeTeammate>,
+  answeredHere: boolean,
+) => {
   const owner =
     decision.teammateThreadId === null
       ? "your own"
       : `on ${quote(teammates.get(decision.teammateThreadId)?.title ?? decision.teammateThreadId)}`;
+  const images = decision.userAttachments?.length ?? 0;
+  const withImages =
+    images === 0
+      ? ""
+      : answeredHere
+        ? ` with ${plural(images, "image")}, attached to this notice`
+        : ` with ${plural(images, "image")}`;
   const state =
     decision.userAnswer !== null
-      ? `The user answered ${quote(decision.userAnswer)}. Relay it with answer_decision.`
+      ? `The user answered ${quote(decision.userAnswer)}${withImages}. Relay it with answer_decision.`
       : decision.escalatedAt !== null
         ? "Held for the user."
         : "Yours to answer or escalate.";
@@ -105,6 +119,13 @@ const decisionLine = (decision: PivotDecision, teammates: ReadonlyMap<string, Wa
 };
 
 export const composeWake = (input: WakeInput): Wake => {
+  const answeredHere = new Set<string>();
+  for (const { event } of input.events) {
+    if (event.type === "decision.user-answered") answeredHere.add(event.decisionId);
+  }
+  const attachments = input.openDecisions
+    .filter((decision) => answeredHere.has(decision.decisionId))
+    .flatMap((decision) => decision.userAttachments ?? []);
   const changed = new Map<string, Array<string>>();
   for (const stored of input.events) {
     const threadId = teammateOf(stored);
@@ -152,7 +173,9 @@ export const composeWake = (input: WakeInput): Wake => {
   }
 
   lines.push("", input.openDecisions.length === 0 ? "No open decisions." : "Open decisions:");
-  for (const decision of input.openDecisions) lines.push(decisionLine(decision, input.teammates));
+  for (const decision of input.openDecisions) {
+    lines.push(decisionLine(decision, input.teammates, answeredHere.has(decision.decisionId)));
+  }
 
   const needsLadder = listed.some(
     (teammate) =>
@@ -183,5 +206,6 @@ export const composeWake = (input: WakeInput): Wake => {
         ? summary
         : `${summary} · ${decisionsSummary}`,
     teammateThreadIds: listed.map((teammate) => teammate.threadId),
+    attachments,
   };
 };
