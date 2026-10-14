@@ -261,7 +261,7 @@ export const historyLine = (event: PivotEvent): string => {
         `Status ${event.previousStatus ?? "new"} → ${event.status}${event.detail ? `: ${event.detail}` : ""}`,
       );
     case "teammate.memory-wait-changed":
-      return event.status === null ? "Memory freed up; its agent started." : clip(event.status);
+      return event.status === null ? "Stopped waiting for memory." : clip(event.status);
     case "teammate.stopped":
       return "Stopped by the Pivot.";
     case "teammate.relaunched":

@@ -98,18 +98,22 @@ describe("tryAdmit", () => {
     expect(next.queue.tickets).toEqual([]);
   });
 
-  it("keeps a ticket in line while its caller keeps asking", () => {
-    let queue = attempt(empty, { id: "a", now: 0, memory: "starved" }).queue;
-    queue = attempt(queue, { id: "b", now: 1, memory: "starved" }).queue;
-    for (let now = 5_000; now < 60_000; now += 5_000) {
-      queue = attempt(queue, { id: "a", now, memory: "starved" }).queue;
-      queue = attempt(queue, { id: "b", now, memory: "starved" }).queue;
-    }
+  it("keeps a teammate's place in line while its caller keeps asking", () => {
+    const ask = (queue: AdmissionQueue, id: string, now: number) =>
+      attempt(queue, { id, now, memory: "starved", spaced: true }).queue;
+    let queue = ask(ask(empty, "a", 0), "b", 1);
+    for (let now = 5_000; now < 60_000; now += 5_000) queue = ask(ask(queue, "a", now), "b", now);
     expect(queue.tickets.map((ticket) => ticket.id)).toEqual(["a", "b"]);
-    expect(attempt(queue, { id: "b", now: 60_000, memory: "ok" }).outcome).toEqual({
+    expect(attempt(queue, { id: "b", now: 60_000, memory: "ok", spaced: true }).outcome).toEqual({
       _tag: "waiting",
       position: 2,
     });
+  });
+
+  it("starts a user's agent once memory is fine, whoever waits ahead of it", () => {
+    // An earlier start is stuck at the head (stopped, not yet stale).
+    const queue = attempt(empty, { id: "stuck", now: 0, memory: "starved" }).queue;
+    expect(attempt(queue, { id: "chat", now: 1, memory: "ok" }).outcome._tag).toBe("admitted");
   });
 
   it("gives up on a start that waited past its timeout, and frees its place", () => {
@@ -211,13 +215,15 @@ describe("admitAgent", () => {
     withQueueDir((queuePath) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        // Two servers (two Pivots on different projects) ask on the same file.
-        expect(yield* ask(fs, queuePath, { ticketId: "a", token: "one", probe: starved })).toEqual({
+        // Two servers (two Pivots on different projects) queue teammates on the same file.
+        const teammate = (ticketId: string, token: string, probe: MemoryProbe) =>
+          ask(fs, queuePath, { ticketId, token, probe, spaced: true });
+        expect(yield* teammate("a", "one", starved)).toEqual({
           _tag: "waiting",
           status: "Waiting for memory: agents use 9.7 of 9.4 GB",
         });
         yield* TestClock.adjust("1 second");
-        expect(yield* ask(fs, queuePath, { ticketId: "b", token: "two", probe: starved })).toEqual({
+        expect(yield* teammate("b", "two", starved)).toEqual({
           _tag: "waiting",
           status: "Waiting for memory: agents use 9.7 of 9.4 GB, 2 in line",
         });
@@ -225,16 +231,12 @@ describe("admitAgent", () => {
           ...(yield* queuedThreads(fs, queuePath, yield* Clock.currentTimeMillis, timing)),
         ]).toEqual(["thread-a", "thread-b"]);
 
-        // Memory is back: "b" asks first but "a" is ahead of it.
-        expect((yield* ask(fs, queuePath, { ticketId: "b", token: "two", probe: free }))._tag).toBe(
-          "waiting",
-        );
-        expect((yield* ask(fs, queuePath, { ticketId: "a", token: "one", probe: free }))._tag).toBe(
-          "admitted",
-        );
-        expect((yield* ask(fs, queuePath, { ticketId: "b", token: "two", probe: free }))._tag).toBe(
-          "admitted",
-        );
+        // Memory is back: "b" asks first but "a" is ahead of it, and "b" then waits its spacing.
+        expect((yield* teammate("b", "two", free))._tag).toBe("waiting");
+        expect((yield* teammate("a", "one", free))._tag).toBe("admitted");
+        expect((yield* teammate("b", "two", free))._tag).toBe("waiting");
+        yield* TestClock.adjust(timing.spacingMs);
+        expect((yield* teammate("b", "two", free))._tag).toBe("admitted");
         expect([
           ...(yield* queuedThreads(fs, queuePath, yield* Clock.currentTimeMillis, timing)),
         ]).toEqual([]);

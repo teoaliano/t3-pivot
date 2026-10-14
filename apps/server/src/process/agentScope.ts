@@ -124,7 +124,8 @@ export function classifyMemory(input: {
 export const ADMISSION_POLL_MS = 5_000;
 export const ADMISSION_TIMING: AdmissionTiming = {
   spacingMs: 30_000,
-  staleMs: 4 * ADMISSION_POLL_MS,
+  // Generous: a deferred start is asked again only once a busy effect worker claims it.
+  staleMs: 12 * ADMISSION_POLL_MS,
   timeoutMs: 10 * 60_000,
   // A teammate is background work: it waits for memory as long as the machine is busy.
   spacedTimeoutMs: 2 * 60 * 60_000,

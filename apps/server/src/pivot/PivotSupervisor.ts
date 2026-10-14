@@ -445,7 +445,9 @@ export const make = Effect.gen(function* () {
     for (const teammate of teammates) {
       if (teammate.environmentId !== null) continue;
       const next = queued.has(teammate.threadId) ? status : null;
-      if (teammate.memoryWait === next) continue;
+      // Recorded when the wait starts and ends, not on every reading in between: each
+      // change is an event the Pivot's history keeps.
+      if ((teammate.memoryWait === null) === (next === null)) continue;
       yield* store.dispatch({
         type: "teammate.observe-memory-wait",
         threadId: teammate.threadId,

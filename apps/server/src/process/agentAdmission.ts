@@ -145,7 +145,9 @@ export function tryAdmit(
     !ticket.spaced ||
     queue.lastAdmittedAt === undefined ||
     now - queue.lastAdmittedAt >= timing.spacingMs;
-  if (position === 0 && memoryAllows && spacedOut) {
+  // Teammates keep their order; another agent waits only while memory is starved, so a
+  // ticket ahead of it never holds it back once memory is fine.
+  if ((position === 0 || !ticket.spaced) && memoryAllows && spacedOut) {
     return {
       queue: {
         tickets: inLine.filter((candidate) => candidate.id !== input.id),
