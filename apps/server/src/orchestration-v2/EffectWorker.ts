@@ -9,6 +9,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Metric from "effect/Metric";
 import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 
 import {
@@ -61,6 +62,26 @@ export function isNonRetryableProviderTurnControlFailure(
     /treating as already interrupted/i.test(errorText) ||
     /treating as already stopped/i.test(errorText)
   );
+}
+
+/** How soon a start held back for memory asks again; see agentScope's ADMISSION_POLL_MS. */
+const MEMORY_DEFERRAL_DELAY_MS = 5_000;
+
+/** The wait status of a start held back for memory, found anywhere in its failure chain. */
+export function memoryDeferralIn(cause: Cause.Cause<unknown>): string | undefined {
+  const find = (error: unknown, depth: number): string | undefined => {
+    if (depth > 8 || typeof error !== "object" || error === null) return undefined;
+    if (Predicate.isTagged(error, "AgentMemoryDeferral") && "status" in error) {
+      return String(error.status);
+    }
+    return "cause" in error ? find(error.cause, depth + 1) : undefined;
+  };
+  for (const reason of cause.reasons) {
+    if (!Cause.isFailReason(reason)) continue;
+    const status = find(reason.error, 0);
+    if (status !== undefined) return status;
+  }
+  return undefined;
 }
 
 export interface OrchestrationEffectExecutorV2Shape {
@@ -761,6 +782,27 @@ export const layerWithOptions = (
             }).pipe(Effect.onError((cause) => recoverPostSuccessSettlement(effect, cause)));
           }
 
+          // A start held back for memory is not a failure: it goes back in line without
+          // spending an attempt, and frees this worker slot while it waits.
+          const deferral = memoryDeferralIn(exit.cause);
+          if (deferral !== undefined) {
+            const deferred = yield* outbox
+              .defer({
+                effectId: effect.id,
+                workerId,
+                reason: deferral,
+                delayMs: MEMORY_DEFERRAL_DELAY_MS,
+              })
+              .pipe(Effect.onError((cause) => requeueClaim(effect, cause)));
+            if (!deferred && !(yield* wasCancelled(effect.id))) {
+              return yield* new OrchestrationEffectWorkerError({
+                operation: "reschedule",
+                effectId: effect.id,
+                cause: "The worker no longer owns the effect lease.",
+              });
+            }
+            return true;
+          }
           const error = Cause.pretty(exit.cause);
           const nonRetryable = isNonRetryableProviderTurnControlFailure(effect.request.type, error);
           yield* Effect.logWarning("Orchestration effect execution failed", {

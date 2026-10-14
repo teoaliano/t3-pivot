@@ -22,7 +22,7 @@ import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 
-import { AgentScope } from "@t3tools/shared/AgentScope";
+import { AgentMemoryDeferral, AgentMemoryWaitError, AgentScope } from "@t3tools/shared/AgentScope";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
@@ -51,6 +51,7 @@ import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
+import * as ThreadAdmission from "./ThreadAdmission.ts";
 import {
   isRestartNoteContinuation,
   pendingRestartCancelledBackgroundWork,
@@ -118,6 +119,8 @@ export const layer: Layer.Layer<
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
     const runtimePolicy = yield* RuntimePolicy.RuntimePolicyV2;
+    const agentScope = yield* AgentScope;
+    const threadAdmission = yield* ThreadAdmission.ThreadAdmission;
 
     // These callbacks outlive startup while a run drains background work. Build
     // them outside start's scope so they cannot retain its full thread history.
@@ -531,26 +534,6 @@ export const layer: Layer.Layer<
       const existingSessionProjection = projection.providerSessions.find(
         (candidate) => candidate.id === providerSessionId,
       );
-      const sessionResult = yield* Effect.result(
-        providerSessions.open({
-          threadId: projection.thread.id,
-          providerSessionId,
-          modelSelection: run.modelSelection,
-          runtimePolicy: resolvedRuntimePolicy,
-          ...(existingSessionProjection === undefined
-            ? {}
-            : { resumeFromSession: existingSessionProjection }),
-          ...(providerThread.nativeThreadRef?.nativeId == null
-            ? {}
-            : { initialNativeThreadId: providerThread.nativeThreadRef.nativeId }),
-          ...(providerThread.nativeMetadata?.itemIdentityVersion === undefined
-            ? {}
-            : {
-                initialProviderItemIdentityVersion:
-                  providerThread.nativeMetadata.itemIdentityVersion,
-              }),
-        }),
-      );
       // The last start attempt fails the run with the provider's own reason
       // instead of leaving it `starting` after the effect gives up. A run that
       // already left `starting` is not overwritten, and a failed write returns
@@ -578,11 +561,15 @@ export const layer: Layer.Layer<
             failures: describeCause(Cause.fail(failed.error)),
             ...(memory === undefined ? {} : { memory: formatStartFailureMemory(memory) }),
           });
-          // An agent the kernel killed for memory is the plainest answer of all.
-          const oomKilled = yield* (yield* AgentScope).oomKilled(projection.thread.id);
-          const memoryReason = oomKilled
-            ? "Couldn't start: the agent was killed because memory ran out. Stop idle dev servers or teammates and retry."
-            : userFacingStartFailureMemory(memory);
+          // An agent the kernel killed for memory is the plainest answer of all. A start that
+          // ran out of time waiting for memory already says so.
+          const oomKilled = yield* agentScope.oomKilled(projection.thread.id);
+          const memoryReason =
+            Predicate.isTagged(failed.error, "AgentMemoryWaitError")
+              ? undefined
+              : oomKilled
+                ? "Couldn't start: the agent was killed because memory ran out. Stop idle dev servers or teammates and retry."
+                : userFacingStartFailureMemory(memory);
           yield* settleRunBeforeStart({
             signal: failed.signal,
             status: "failed",
@@ -600,6 +587,50 @@ export const layer: Layer.Layer<
             },
           });
         });
+      // A new agent waits its turn for memory; a session that already runs is never held
+      // back. Waiting is not done here: the start is put back for the effect worker to try
+      // again shortly, so it holds no worker slot while the machine is short of memory.
+      const liveSession = yield* providerSessions
+        .get(providerSessionId)
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      if (Option.isNone(liveSession)) {
+        const admission = yield* agentScope.admit({
+          ticketId: run.id,
+          threadId: projection.thread.id,
+          spaced: yield* threadAdmission.isBackgroundAgent(projection.thread.id),
+        });
+        if (admission._tag === "waiting") {
+          return yield* new AgentMemoryDeferral({ status: admission.status });
+        }
+        if (admission._tag === "expired") {
+          yield* settleStartFailure({
+            signal: "agent-memory-wait-expired",
+            title: "Provider session did not start",
+            error: new AgentMemoryWaitError({ summary: admission.message }),
+          });
+          return;
+        }
+      }
+      const sessionResult = yield* Effect.result(
+        providerSessions.open({
+          threadId: projection.thread.id,
+          providerSessionId,
+          modelSelection: run.modelSelection,
+          runtimePolicy: resolvedRuntimePolicy,
+          ...(existingSessionProjection === undefined
+            ? {}
+            : { resumeFromSession: existingSessionProjection }),
+          ...(providerThread.nativeThreadRef?.nativeId == null
+            ? {}
+            : { initialNativeThreadId: providerThread.nativeThreadRef.nativeId }),
+          ...(providerThread.nativeMetadata?.itemIdentityVersion === undefined
+            ? {}
+            : {
+                initialProviderItemIdentityVersion:
+                  providerThread.nativeMetadata.itemIdentityVersion,
+              }),
+        }),
+      );
       if (sessionResult._tag === "Failure") {
         if (input.willRetry === true) return yield* sessionResult.failure;
         yield* settleStartFailure({

@@ -44,20 +44,34 @@ export interface AgentScopeShape {
    * SIGTERM first, then SIGKILL for what survives the grace period.
    */
   readonly stop: (threadId: string) => Effect.Effect<void>;
-   * Waits until the machine has memory for one more agent, then returns. Agents
-   * start in the order they asked, one at a time. Fails with
-   * AgentMemoryWaitError when the wait runs out. Nothing waits on a session that
-   * already runs. Call it before opening a provider session.
+  /**
+   * One admission attempt for an agent about to start; it never waits. Agents start in
+   * the order they asked, across every T3 server of this user. A ticket that is not
+   * admitted stays in line only while its caller keeps asking: one that stops asking
+   * (a stopped run, a dead server) drops out after a few missed polls. `spaced` marks a
+   * Pivot teammate: those start only with memory to spare, one at a time, spaced out,
+   * while other agents are held back only when memory is starved.
    */
   readonly admit: (input: {
+    /** Stable across attempts for one start, such as the run id. */
+    readonly ticketId: string;
     readonly threadId: string;
-    readonly name: string;
-  }) => Effect.Effect<void, AgentMemoryWaitError>;
+    readonly spaced: boolean;
+  }) => Effect.Effect<AgentAdmission>;
   /** The machine's memory for agents now, or undefined where it is not measured. */
   readonly memory: () => Effect.Effect<MemoryProbe | undefined>;
   /** Threads whose agent is waiting in the admission queue. */
   readonly queuedThreadIds: () => Effect.Effect<ReadonlySet<string>>;
 }
+
+/**
+ * admitted: start now. waiting: ask again shortly; `status` says why, for the user.
+ * expired: it waited too long, and `message` is the failure to show.
+ */
+export type AgentAdmission =
+  | { readonly _tag: "admitted" }
+  | { readonly _tag: "waiting"; readonly status: string }
+  | { readonly _tag: "expired"; readonly message: string };
 
 /**
  * ok: a new agent starts now. tight: the slice is near its limit and the kernel
@@ -72,16 +86,27 @@ export interface MemoryProbe {
   readonly currentBytes: number;
   /** `memory.high` of the agents slice, in bytes; undefined when unlimited. */
   readonly highBytes: number | undefined;
-  /** The `some avg10` share of time stalled on memory, from /proc/pressure/memory. */
+  /** The `some avg10` share of time stalled on memory, from the slice's memory.pressure. */
   readonly psiSomeAvg10: number;
 }
 
+/** A start that waited for memory longer than it may. */
 export class AgentMemoryWaitError extends Schema.TaggedError<AgentMemoryWaitError>()(
   "AgentMemoryWaitError",
   { summary: Schema.String },
 ) {
   override get message() {
     return this.summary;
+  }
+}
+
+/** A start held back for memory; whoever runs it asks again shortly instead of failing. */
+export class AgentMemoryDeferral extends Schema.TaggedError<AgentMemoryDeferral>()(
+  "AgentMemoryDeferral",
+  { status: Schema.String },
+) {
+  override get message() {
+    return this.status;
   }
 }
 
@@ -96,7 +121,7 @@ export const AgentScope = Context.Reference<AgentScopeShape>("@t3tools/shared/Ag
     oomKilled: () => Effect.succeed(false),
     clear: () => Effect.void,
     stop: () => Effect.void,
-    admit: () => Effect.void,
+    admit: () => Effect.succeed({ _tag: "admitted" }),
     memory: () => Effect.succeed(undefined),
     queuedThreadIds: () => Effect.succeed(new Set<string>()),
   }),

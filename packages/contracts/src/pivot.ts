@@ -163,6 +163,11 @@ export const TeammateRecord = Schema.Struct({
   /** Order among the Pivot's teammates, so cards keep dispatch order. */
   dispatchedAt: IsoDateTime,
   tornDownAt: Schema.NullOr(IsoDateTime),
+  /**
+   * Why its agent has not started yet while the machine is short of memory, such as
+   * "Waiting for memory: agents use 9.7 of 9.4 GB". Null or absent when it is not waiting.
+   */
+  memoryWait: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type TeammateRecord = typeof TeammateRecord.Type;
 

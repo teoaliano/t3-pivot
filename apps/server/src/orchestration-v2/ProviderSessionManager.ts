@@ -2104,17 +2104,6 @@ export const layerWithOptions = (
               // The previous session's agent scope must not explain this
               // session's failures, even when this provider runs without one.
               yield* agentScope.clear(input.threadId);
-              // Starting an agent into a machine without memory only thrashes the others.
-              yield* agentScope.admit({ threadId: input.threadId, name: "agent" }).pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new ProviderSessionOpenError({
-                      instanceId: input.modelSelection.instanceId,
-                      providerSessionId: input.providerSessionId,
-                      cause,
-                    }),
-                ),
-              );
               const runtime = yield* adapter
                 .openSession({
                   threadId: input.threadId,

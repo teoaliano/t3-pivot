@@ -120,9 +120,15 @@ export function classifyMemory(input: {
   return "ok";
 }
 
-export const ADMISSION_TIMING: AdmissionTiming = { spacingMs: 30_000, staleMs: 11 * 60_000 };
-const ADMISSION_TIMEOUT_MS = 10 * 60_000;
-const ADMISSION_POLL_MS = 2_000;
+/** How often a start held for memory asks again; its ticket goes stale after a few misses. */
+export const ADMISSION_POLL_MS = 5_000;
+export const ADMISSION_TIMING: AdmissionTiming = {
+  spacingMs: 30_000,
+  staleMs: 4 * ADMISSION_POLL_MS,
+  timeoutMs: 10 * 60_000,
+  // A teammate is background work: it waits for memory as long as the machine is busy.
+  spacedTimeoutMs: 2 * 60 * 60_000,
+};
 
 export interface ScopeState {
   readonly loadState: string;
@@ -233,16 +239,6 @@ export const make = Effect.gen(function* () {
       // Stop the whole scope when the kernel kills one of its processes, and
       // record the result as oom-kill. Scopes take OOMPolicy from systemd 253;
       // older user managers still get plain scopes, without the OOM label.
-      const oomOptions = ["--property=OOMPolicy=stop"];
-      const scopeOptions = (yield* probe(oomOptions))
-        ? oomOptions
-        : (yield* probe([]))
-          ? []
-          : undefined;
-      if (scopeOptions === undefined) {
-        yield* Effect.logInfo("Agent scopes are off: no systemd user manager");
-        return undefined;
-      }
       const limits = agentSliceMemoryLimits(NodeOS.totalmem());
       const scopeLimits = agentScopeMemoryLimits(limits, {
         high: parseMemoryShare(
@@ -254,6 +250,24 @@ export const make = Effect.gen(function* () {
           AGENT_SCOPE_MAX_SHARE,
         ),
       });
+      // Each option set is proven before use, so a user manager without the memory
+      // controller still gets scopes, just without per-scope limits.
+      const oomOptions = ["--property=OOMPolicy=stop"];
+      const memoryOptions = [
+        `--property=MemoryHigh=${scopeLimits.high}`,
+        `--property=MemoryMax=${scopeLimits.max}`,
+      ];
+      let scopeOptions: ReadonlyArray<string> | undefined;
+      for (const candidate of [[...oomOptions, ...memoryOptions], oomOptions, memoryOptions, []]) {
+        if (yield* probe(candidate)) {
+          scopeOptions = candidate;
+          break;
+        }
+      }
+      if (scopeOptions === undefined) {
+        yield* Effect.logInfo("Agent scopes are off: no systemd user manager");
+        return undefined;
+      }
       const limited = yield* run(systemctl, [
         "--user",
         "set-property",
@@ -281,17 +295,14 @@ export const make = Effect.gen(function* () {
         slice: AGENT_SLICE,
         ...limits,
         scope: scopeLimits,
-        oomPolicy: scopeOptions.length > 0,
+        oomPolicy: scopeOptions.includes(oomOptions[0]!),
+        scopeMemoryLimits: scopeOptions.includes(memoryOptions[0]!),
       });
       return {
         systemdRun,
         systemctl,
         runtimeDir,
-        scopeOptions: [
-          ...scopeOptions,
-          `--property=MemoryHigh=${scopeLimits.high}`,
-          `--property=MemoryMax=${scopeLimits.max}`,
-        ],
+        scopeOptions,
         sliceCgroup,
       };
     }),
@@ -306,16 +317,43 @@ export const make = Effect.gen(function* () {
       .readFileString(path.join("/sys/fs/cgroup", controlGroup, file))
       .pipe(Effect.orElseSucceed(() => ""));
 
-  // Reads the agents slice's memory; undefined when the slice has no cgroup to read.
-  const readMemory = (sliceCgroup: string) =>
+  // The slice's cgroup exists only while something runs in it, so an empty answer is asked
+  // again on the next read instead of being kept for the life of the server.
+  let sliceCgroup = "";
+  const resolveSliceCgroup = (scope: {
+    readonly systemctl: string;
+    readonly sliceCgroup: string;
+  }) =>
     Effect.gen(function* () {
-      if (sliceCgroup === "") return undefined;
-      const currentBytes = parseMemoryBytes(yield* readCgroupFile(sliceCgroup, "memory.current"));
+      if (sliceCgroup === "") sliceCgroup = scope.sliceCgroup;
+      if (sliceCgroup !== "") return sliceCgroup;
+      const shown = yield* run(scope.systemctl, [
+        "--user",
+        "show",
+        AGENT_SLICE,
+        "--property=ControlGroup",
+      ]);
+      if (shown._tag === "Some" && shown.value.code === 0) {
+        sliceCgroup = parseKeyValues(shown.value.stdout).get("ControlGroup") ?? "";
+      }
+      return sliceCgroup;
+    });
+
+  // Reads the agents slice's memory; undefined when the slice has no cgroup to read. Pressure
+  // is the slice's own, so a browser swapping outside it does not hold agents back.
+  const readMemory = (cgroup: string) =>
+    Effect.gen(function* () {
+      if (cgroup === "") return undefined;
+      const currentBytes = parseMemoryBytes(yield* readCgroupFile(cgroup, "memory.current"));
       if (currentBytes === undefined) return undefined;
-      const highBytes = parseMemoryBytes(yield* readCgroupFile(sliceCgroup, "memory.high"));
-      const pressure = yield* fileSystem
-        .readFileString("/proc/pressure/memory")
-        .pipe(Effect.orElseSucceed(() => ""));
+      const highBytes = parseMemoryBytes(yield* readCgroupFile(cgroup, "memory.high"));
+      const slicePressure = yield* readCgroupFile(cgroup, "memory.pressure");
+      const pressure =
+        slicePressure !== ""
+          ? slicePressure
+          : yield* fileSystem
+              .readFileString("/proc/pressure/memory")
+              .pipe(Effect.orElseSucceed(() => ""));
       const psiSomeAvg10 = parsePressureSomeAvg10(pressure);
       return {
         state: classifyMemory({ currentBytes, highBytes, psiSomeAvg10 }),
@@ -429,22 +467,25 @@ export const make = Effect.gen(function* () {
   const memory: AgentScopeShape["memory"] = () =>
     Effect.gen(function* () {
       const scope = yield* systemd;
-      return scope === undefined ? undefined : yield* readMemory(scope.sliceCgroup);
+      return scope === undefined ? undefined : yield* readMemory(yield* resolveSliceCgroup(scope));
     });
+
+  // Names this server's writes to the shared queue, so its lock is never released by another.
+  const admissionToken = NodeCrypto.randomUUID();
 
   const admit: AgentScopeShape["admit"] = (input) =>
     Effect.gen(function* () {
       const scope = yield* systemd;
-      if (scope === undefined) return;
-      yield* admitAgent({
+      if (scope === undefined) return { _tag: "admitted" } as const;
+      return yield* admitAgent({
         fs: fileSystem,
         queuePath: path.join(scope.runtimeDir, ADMISSION_FILE),
-        ticketId: NodeCrypto.randomUUID(),
+        token: admissionToken,
+        ticketId: input.ticketId,
         threadId: input.threadId,
-        probe: readMemory(scope.sliceCgroup),
+        spaced: input.spaced,
+        probe: Effect.flatMap(resolveSliceCgroup(scope), readMemory),
         timing: ADMISSION_TIMING,
-        timeoutMs: ADMISSION_TIMEOUT_MS,
-        pollMs: ADMISSION_POLL_MS,
       });
     });
 

@@ -75,6 +75,11 @@ export const PivotEvent = Schema.Union([
     threadId: ThreadId,
     resume: Schema.NullOr(TeammateResumeState),
   }),
+  /** The teammate's agent started waiting for memory (`status`), or stopped waiting (null). */
+  event("teammate.memory-wait-changed", {
+    threadId: ThreadId,
+    status: Schema.NullOr(Schema.String),
+  }),
   /** The supervisor saw the combined status change. */
   event("teammate.status-observed", {
     threadId: ThreadId,

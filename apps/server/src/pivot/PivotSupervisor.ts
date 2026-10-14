@@ -30,6 +30,8 @@ import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
+import { AgentScope } from "@t3tools/shared/AgentScope";
+import { memoryWaitStatus } from "../process/agentAdmission.ts";
 import * as ServerActivation from "../serverActivation.ts";
 import { loadPivotText } from "./pivotTexts.ts";
 import * as PivotHostStore from "./PivotHostStore.ts";
@@ -46,6 +48,8 @@ export const STUCK_AFTER_MS = 30 * 60 * 1000;
 export const HOSTED_ACTIVITY_LOG_SPACING_MS = 30 * 1000;
 /** How often the timers are checked when nothing else happens. */
 const SWEEP_INTERVAL = "30 seconds";
+// How often teammates waiting for memory are looked for; a start asks every 5 seconds.
+const MEMORY_WAIT_INTERVAL = "5 seconds";
 const MIN_TICK_SPACING = "1 second";
 
 export class PivotSupervisor extends Context.Service<
@@ -60,6 +64,8 @@ export class PivotSupervisor extends Context.Service<
      * bound, and wakes every Pivot with something pending.
      */
     readonly tick: Effect.Effect<void>;
+    /** Records which of this server's teammates wait for memory, and why. */
+    readonly observeMemoryWaits: Effect.Effect<void>;
   }
 >()("t3/pivot/PivotSupervisor") {}
 
@@ -427,6 +433,27 @@ export const make = Effect.gen(function* () {
     for (const pivot of yield* store.listActivePivots) yield* wakePivot(pivot);
   }).pipe(Effect.catchCause(logFailure("tick")));
 
+  // A teammate whose agent is held back for memory shows why on its card and in
+  // list_teammates, and stops showing it once its agent starts. Only this server's own
+  // teammates: a teammate on another environment waits in that machine's queue.
+  const agentScope = yield* AgentScope;
+  const observeMemoryWaits = Effect.gen(function* () {
+    const queued = yield* agentScope.queuedThreadIds();
+    const teammates = yield* store.listTeammates({ includeTornDown: false });
+    const waiting = teammates.some((teammate) => queued.has(teammate.threadId));
+    const status = waiting ? memoryWaitStatus(yield* agentScope.memory()) : null;
+    for (const teammate of teammates) {
+      if (teammate.environmentId !== null) continue;
+      const next = queued.has(teammate.threadId) ? status : null;
+      if (teammate.memoryWait === next) continue;
+      yield* store.dispatch({
+        type: "teammate.observe-memory-wait",
+        threadId: teammate.threadId,
+        status: next,
+      });
+    }
+  }).pipe(Effect.catchCause(logFailure("memory waits")));
+
   const start: PivotSupervisor["Service"]["start"] = Effect.gen(function* () {
     const signal = yield* Queue.sliding<void>(1);
     const poke = Queue.offer(signal, undefined).pipe(Effect.asVoid);
@@ -436,6 +463,9 @@ export const make = Effect.gen(function* () {
           threads.events.pipe(
             Stream.runForEach((event) => Effect.andThen(handleEvent(event), poke)),
           ),
+        );
+        yield* Effect.forkScoped(
+          Effect.forever(Effect.andThen(observeMemoryWaits, Effect.sleep(MEMORY_WAIT_INTERVAL))),
         );
         yield* Effect.forkScoped(
           store.stream.pipe(
@@ -455,7 +485,7 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  return PivotSupervisor.of({ start, handleEvent, tick });
+  return PivotSupervisor.of({ start, handleEvent, tick, observeMemoryWaits });
 });
 
 export const layer = Layer.effect(PivotSupervisor, make);

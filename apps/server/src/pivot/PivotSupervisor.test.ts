@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { RunId, SourceControlProviderKind, type ThreadId } from "@t3tools/contracts";
+import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
@@ -79,6 +80,43 @@ const wakesFor = (fake: FakeV2, pivot: ThreadId) =>
   fake.wakes.filter((wake) => wake.pivotThreadId === pivot);
 
 describe("PivotSupervisor", () => {
+  it.effect("shows a teammate waiting for memory, and clears it once its agent starts", () => {
+    const { fake } = setup();
+    const queued = new Set<string>();
+    const agentScope = {
+      ...AgentScope.defaultValue(),
+      queuedThreadIds: () => Effect.sync(() => new Set(queued)),
+      memory: () =>
+        Effect.succeed({
+          state: "starved" as const,
+          currentBytes: 9.7 * 1024 ** 3,
+          highBytes: 9.4 * 1024 ** 3,
+          psiSomeAvg10: 20,
+        }),
+    };
+    return Effect.gen(function* () {
+      const { pivot, teammate } = yield* running(fake);
+      const supervisor = yield* PivotSupervisor.PivotSupervisor;
+      const store = yield* PivotStore.PivotStore;
+      queued.add(teammate);
+      yield* supervisor.observeMemoryWaits;
+      assert.strictEqual(
+        (yield* store.getTeammate(teammate))?.memoryWait,
+        "Waiting for memory: agents use 9.7 of 9.4 GB",
+      );
+      const pivots = yield* PivotService.PivotService;
+      const listed = yield* pivots.listTeammates(pivot, {});
+      assert.strictEqual(
+        listed.teammates[0]?.summary,
+        "Waiting for memory: agents use 9.7 of 9.4 GB",
+      );
+
+      queued.delete(teammate);
+      yield* supervisor.observeMemoryWaits;
+      assert.isNull((yield* store.getTeammate(teammate))?.memoryWait);
+    }).pipe(Effect.provide(withSupervisor(fake)), Effect.provideService(AgentScope, agentScope));
+  });
+
   it.effect("wakes the Pivot when a teammate is done, once", () => {
     const { fake } = setup();
     return Effect.gen(function* () {

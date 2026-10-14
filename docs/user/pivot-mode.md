@@ -68,6 +68,21 @@ A Pivot and its teammates carry on by themselves after T3 restarts, whatever the
 continue-after-update setting says. The Pivot's first update tells you which teammates resumed
 and which did not.
 
+## When the machine is short of memory
+
+On Linux, a teammate's agent starts only when the machine has memory to spare, and teammates
+start one at a time, about 30 seconds apart, so a batch of them never starts together. Until
+then its card says **Waiting for memory**, with what the agents use against their limit. It
+starts by itself as soon as there is room; stopping the teammate takes it out of line. Every
+Pivot on the machine shares one line, across projects and across T3 servers. Your own threads
+are held back only when memory is critically short, and fail with a plain memory message after
+10 minutes.
+
+Each agent also gets its own memory limit, so one runaway command is throttled inside its own
+agent instead of the whole machine. Set `T3CODE_AGENT_SCOPE_MEMORY_HIGH_SHARE` and
+`T3CODE_AGENT_SCOPE_MEMORY_MAX_SHARE` (between 0 and 1, defaults 0.5 and 0.75) on the server to
+change each agent's share of the agents' total.
+
 ## Teammates on another machine
 
 A Pivot can start teammates on another machine you have paired, such as a home server, once that

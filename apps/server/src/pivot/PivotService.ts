@@ -49,7 +49,6 @@ import {
   type ThreadId,
   type ThreadPullRequestLink,
 } from "@t3tools/contracts";
-import { AgentScope } from "@t3tools/shared/AgentScope";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { deriveTeammateStatus } from "@t3tools/shared/teammateStatus";
 import * as Context from "effect/Context";
@@ -261,6 +260,8 @@ export const historyLine = (event: PivotEvent): string => {
       return clip(
         `Status ${event.previousStatus ?? "new"} → ${event.status}${event.detail ? `: ${event.detail}` : ""}`,
       );
+    case "teammate.memory-wait-changed":
+      return event.status === null ? "Memory freed up; its agent started." : clip(event.status);
     case "teammate.stopped":
       return "Stopped by the Pivot.";
     case "teammate.relaunched":
@@ -318,7 +319,6 @@ export const make = Effect.gen(function* () {
   const store = yield* PivotStore.PivotStore;
   const hostStore = yield* PivotHostStore.PivotHostStore;
   const threads = yield* PivotThreads.PivotThreads;
-  const agentScope = yield* AgentScope;
   const home = yield* PivotHome.PivotHome;
   const git = yield* PivotGit.PivotGit;
   const localHost = yield* TeammateHost;
@@ -811,7 +811,7 @@ export const make = Effect.gen(function* () {
 
   // --- Reads ---
 
-  const teammateLine = (teammate: PivotStore.TeammateRow, queued: ReadonlySet<string>) =>
+  const teammateLine = (teammate: PivotStore.TeammateRow) =>
     Effect.gen(function* () {
       const shell = yield* threads.shell(teammate.threadId);
       const derived =
@@ -837,9 +837,7 @@ export const make = Effect.gen(function* () {
         kind: teammate.kind,
         status: derived.status,
         // A teammate waiting for the machine to have memory has no run to report on yet.
-        summary: queued.has(teammate.threadId)
-          ? "Queued for memory"
-          : (derived.detail ?? teammate.report?.summary ?? null),
+        summary: teammate.memoryWait ?? derived.detail ?? teammate.report?.summary ?? null,
         branch: teammate.branch,
         pullRequestUrl: pullRequest,
         lastChangeAt: latest?.occurredAt ?? null,
@@ -856,10 +854,7 @@ export const make = Effect.gen(function* () {
         pivotThreadId: pivot.threadId,
         includeTornDown: input.includeTornDown ?? false,
       });
-      const queued = yield* agentScope.queuedThreadIds();
-      return {
-        teammates: yield* Effect.forEach(teammates, (teammate) => teammateLine(teammate, queued)),
-      };
+      return { teammates: yield* Effect.forEach(teammates, teammateLine) };
     });
 
   const teammateHistory: PivotService["Service"]["teammateHistory"] = (caller, input) =>

@@ -9,6 +9,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
+import * as ThreadAdmission from "../orchestration-v2/ThreadAdmission.ts";
 import * as ThreadToolRestrictions from "../orchestration-v2/ThreadToolRestrictions.ts";
 import * as ThreadWriteAccess from "../orchestration-v2/ThreadWriteAccess.ts";
 import * as PivotStore from "./PivotStore.ts";
@@ -68,4 +69,20 @@ const writeAccess = Layer.effect(
   }),
 );
 
-export const layer = Layer.mergeAll(toolRestrictions, writeAccess);
+// A teammate is background work: when memory is short it waits for room, one start at a
+// time, so the user's own threads are not starved by a batch of teammates.
+const admission = Layer.effect(
+  ThreadAdmission.ThreadAdmission,
+  Effect.gen(function* () {
+    const store = yield* PivotStore.PivotStore;
+    return {
+      isBackgroundAgent: (threadId) =>
+        store.getTeammate(threadId).pipe(
+          Effect.map((teammate) => teammate !== null && teammate.tornDownAt === null),
+          Effect.orElseSucceed(() => false),
+        ),
+    };
+  }),
+);
+
+export const layer = Layer.mergeAll(toolRestrictions, writeAccess, admission);
