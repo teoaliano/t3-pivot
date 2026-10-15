@@ -113,15 +113,11 @@ it never takes T3 Code's address. An explicit `T3CODE_HOME` still wins, and deve
 keep upstream's `~/.t3/dev`. Server hosts run the same split by flags. T3 Pivot starts with
 no projects; nothing is copied from `~/.t3`.
 
-**Single-server guard.** Before a server records itself in the T3 home's runtime state file,
-it reads the file. If the file names another process that is still alive and whose recorded
-origin still answers, startup fails with a typed error that carries that process's pid and
-origin. A missing file, a dead pid, or an origin that does not answer means the file is
-stale, and startup continues and overwrites it. The guard lives in the server's
-runtime-state module next to the existing read, write and liveness helpers. The desktop app
-shows the error in its existing backend-start failure path, with the text "Another
-server is already using this data (pid N, origin O). Quit it and reopen T3 Pivot." Both
-checks are needed because a pid alone can be reused after a crash.
+**Single-server guard.** Upstream's server ownership lock (`serverOwnership.ts`) keeps a second
+server off a T3 home: startup fails with `ServerAlreadyRunningError`, and the desktop app
+stops restarting the backend, tells the user, and quits. T3 Pivot adds no guard of its own. It
+does add one for the database: a server refuses a database a newer build already migrated
+(`databaseNewerGuard.ts`), and the desktop app reports it the same way.
 
 **URL schemes and renderer origin.** The internal `t3code://app` renderer origin and the
 registered `t3code` schemes stay as they are. Changing them ripples through the server's

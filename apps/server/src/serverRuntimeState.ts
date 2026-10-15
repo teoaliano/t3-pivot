@@ -1,20 +1,19 @@
-import { DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
-import * as Runtime from "effect/Runtime";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientRequest } from "effect/http";
 
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
+import packageJson from "../package.json" with { type: "json" };
 import type * as ServerConfig from "./config.ts";
 import { formatHostForUrl, isWildcardHost } from "./startupAccess.ts";
 
 export const PersistedServerRuntimeState = Schema.Struct({
+  // Schema version of this file, not the server build. See `serverVersion`.
   version: Schema.Literal(1),
   pid: Schema.Int,
+  ownerId: Schema.optional(Schema.String),
   host: Schema.optional(Schema.String),
   port: Schema.Int,
   origin: Schema.String,
@@ -28,6 +27,12 @@ export const PersistedServerRuntimeState = Schema.Struct({
    * the difference between "restart the service" and "stop your terminal".
    */
   serviceManaged: Schema.optional(Schema.Boolean),
+  /**
+   * The server build that wrote this record. `t3 triage` reports it because
+   * the CLI that runs triage can be a different build. Missing on records
+   * written by older servers.
+   */
+  serverVersion: Schema.optional(Schema.String),
 });
 export type PersistedServerRuntimeState = typeof PersistedServerRuntimeState.Type;
 
@@ -41,21 +46,6 @@ export class ServerRuntimeStateError extends Schema.TaggedError<ServerRuntimeSta
 ) {
   override get message(): string {
     return `Failed to ${this.operation} server runtime state at ${this.statePath}.`;
-  }
-}
-
-/** Another live server owns this T3 home, so starting would share its database. */
-export class ServerHomeInUseError extends Schema.TaggedError<ServerHomeInUseError>()(
-  "ServerHomeInUseError",
-  {
-    pid: Schema.Int,
-    origin: Schema.String,
-  },
-) {
-  override readonly [Runtime.errorExitCode] = DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE;
-
-  override get message(): string {
-    return `Another T3 Code server is already using this data (pid ${this.pid}, origin ${this.origin}).`;
   }
 }
 
@@ -86,6 +76,7 @@ export const makePersistedServerRuntimeState = (input: {
     ...(input.config.devUrl ? { devUrl: input.config.devUrl.toString() } : {}),
     startedAt: DateTime.formatIso(now),
     ...(input.serviceManaged ? { serviceManaged: true } : {}),
+    serverVersion: packageJson.version,
   }));
 
 export const persistServerRuntimeState = (input: {
@@ -138,6 +129,7 @@ export const clearPersistedServerRuntimeState = (path: string) =>
  * alive.
  */
 export const isProcessAlive = (pid: number): boolean => {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
     return true;
@@ -145,43 +137,6 @@ export const isProcessAlive = (pid: number): boolean => {
     return error instanceof Error && "code" in error && error.code === "EPERM";
   }
 };
-
-const ORIGIN_PROBE_TIMEOUT = Duration.seconds(1);
-
-/** Report whether a T3 server answers its environment descriptor at `origin`. */
-export const serverOriginAnswers = (origin: string) =>
-  Effect.gen(function* () {
-    const client = yield* HttpClient.HttpClient;
-    const response = yield* client.execute(
-      HttpClientRequest.get(new URL("/.well-known/t3/environment", origin).toString()),
-    );
-    return response.status >= 200 && response.status < 300;
-  }).pipe(
-    Effect.timeout(ORIGIN_PROBE_TIMEOUT),
-    Effect.orElseSucceed(() => false),
-  );
-
-/**
- * Check the T3 home's runtime state file before this server records itself.
- * A missing file, a dead pid, an origin that does not answer, or a file that
- * names this process all mean no other server owns the data. Both liveness
- * checks are needed because a crashed server's pid can be reused.
- */
-export const ensureHomeNotInUse = (input: {
-  readonly path: string;
-  readonly currentPid: number;
-  readonly isAlive: (pid: number) => boolean;
-  readonly originAnswers: (origin: string) => Effect.Effect<boolean>;
-}) =>
-  Effect.gen(function* () {
-    const state = yield* readPersistedServerRuntimeState(input.path);
-    if (Option.isNone(state)) return;
-    const { pid, origin } = state.value;
-    if (pid === input.currentPid || !input.isAlive(pid)) return;
-    if (yield* input.originAnswers(origin)) {
-      return yield* new ServerHomeInUseError({ pid, origin });
-    }
-  });
 
 export const readPersistedServerRuntimeState = (path: string) =>
   Effect.gen(function* () {

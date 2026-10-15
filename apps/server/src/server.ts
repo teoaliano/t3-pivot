@@ -16,8 +16,10 @@ import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import type * as Crypto from "effect/Crypto";
 import type * as FileSystem from "effect/FileSystem";
 import type * as Path from "effect/Path";
+import type { ChildProcessSpawner } from "effect/process";
 import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
@@ -81,6 +83,7 @@ import * as GitManager from "./git/GitManager.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
+import * as ServerOwnership from "./serverOwnership.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import * as ServerSettings from "./serverSettings.ts";
@@ -187,14 +190,7 @@ import * as ThreadSettlementService from "./orchestration-v2/ThreadSettlementSer
 import * as ThreadPullRequestService from "./orchestration-v2/ThreadPullRequestService.ts";
 import * as RunFinalizationService from "./orchestration-v2/RunFinalizationService.ts";
 import * as ProjectionStoreV2 from "./orchestration-v2/ProjectionStore.ts";
-import {
-  clearPersistedServerRuntimeState,
-  ensureHomeNotInUse,
-  isProcessAlive,
-  makePersistedServerRuntimeState,
-  persistServerRuntimeState,
-  serverOriginAnswers,
-} from "./serverRuntimeState.ts";
+import { makePersistedServerRuntimeState } from "./serverRuntimeState.ts";
 import * as OrchestrationHttp from "./orchestration-v2/http.ts";
 import * as ProjectHttp from "./project/http.ts";
 import * as NetService from "@t3tools/shared/Net";
@@ -824,6 +820,8 @@ const layerMakeRoutes = Layer.mergeAll(
 const layerMakeServer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
+    // Before anything opens the database: one server per T3 home.
+    const ownership = yield* ServerOwnership.acquireServerOwnership(config.serverRuntimeStatePath);
     const activation = yield* Deferred.make<void>();
     const awaitActivation = Deferred.await(activation);
     const layerActivation = Layer.succeed(ServerActivation.ServerActivation, awaitActivation);
@@ -835,16 +833,6 @@ const layerMakeServer = Layer.unwrap(
 
     yield* fixPath({ shellEnvironmentPrepared: config.shellEnvironmentPrepared });
 
-    // Refuse to share a T3 home with another live server before anything
-    // opens its database. A launcher-managed standby would be refused too,
-    // but T3 Pivot never runs under the service launcher.
-    yield* ensureHomeNotInUse({
-      path: config.serverRuntimeStatePath,
-      currentPid: process.pid,
-      isAlive: isProcessAlive,
-      originAnswers: (origin) =>
-        serverOriginAnswers(origin).pipe(Effect.provide(FetchHttpClient.layer)),
-    }).pipe(Effect.provide(layerPlatformServices));
     // Refuse a database a newer build already migrated.
     yield* ensureDatabaseNotNewer(config.dbPath).pipe(Effect.provide(layerPlatformServices));
 
@@ -856,38 +844,30 @@ const layerMakeServer = Layer.unwrap(
       }),
     );
     const layerRuntimeState = Layer.effectDiscard(
-      Effect.acquireRelease(
-        Effect.gen(function* () {
-          yield* Deferred.succeed(runtimeStateParked, undefined).pipe(Effect.orDie);
-          yield* awaitActivation;
-          const server = yield* HttpServer.HttpServer;
-          const address = server.address;
-          if (typeof address === "string" || !("port" in address)) {
-            return;
-          }
+      Effect.gen(function* () {
+        yield* Deferred.succeed(runtimeStateParked, undefined).pipe(Effect.orDie);
+        yield* awaitActivation;
+        const server = yield* HttpServer.HttpServer;
+        const address = server.address;
+        if (typeof address === "string" || !("port" in address)) {
+          return;
+        }
 
-          const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
-          const state = yield* makePersistedServerRuntimeState({
-            config,
-            port: address.port,
-            serviceManaged: launcher.managed,
-          });
-          yield* persistServerRuntimeState({
-            path: config.serverRuntimeStatePath,
-            state,
-          }).pipe(
+        const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
+        const state = yield* makePersistedServerRuntimeState({
+          config,
+          port: address.port,
+          serviceManaged: launcher.managed,
+        });
+        // Ownership release removes this record.
+        yield* ownership
+          .publish(state)
+          .pipe(
             Effect.catchCause((cause) =>
               Effect.logWarning("Failed to persist server runtime state", { cause }),
             ),
           );
-        }),
-        () =>
-          clearPersistedServerRuntimeState(config.serverRuntimeStatePath).pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("Failed to clear server runtime state", { cause }),
-            ),
-          ),
-      ),
+      }),
     );
     const layerTailscaleServe = config.tailscaleServeEnabled
       ? Layer.effectDiscard(
@@ -1211,15 +1191,19 @@ const layerMakeServer = Layer.unwrap(
       Layer.provideMerge(layerPlatformServices),
     );
   }),
-);
+).pipe(Layer.provide(ProcessRunner.layer));
 
 // The CLI supplies configuration.
 const launchServer = Layer.launch(layerMakeServer);
 
-// Declared so callers read three services instead of re-inferring the whole
+// Declared so callers read five services instead of re-inferring the whole
 // layer graph, which the Effect language service misreads as `any`.
 export const runServer: Effect.Effect<
   never,
   Effect.Error<typeof launchServer>,
-  FileSystem.FileSystem | Path.Path | ServerConfig.ServerConfig
+  | ChildProcessSpawner.ChildProcessSpawner
+  | Crypto.Crypto
+  | FileSystem.FileSystem
+  | Path.Path
+  | ServerConfig.ServerConfig
 > = launchServer;

@@ -186,12 +186,6 @@ export type BackendInstanceFactoryRequirements =
   | DesktopBrowserHost.DesktopBrowserHost
   | DesktopWslEnvironment.DesktopWslEnvironment;
 
-// The part of the server's runtime state file that names the server holding
-// the T3 home.
-const decodeHomeOwner = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(Schema.Struct({ pid: Schema.Int, origin: Schema.String })),
-);
-
 interface ActiveRegisteredInstance {
   readonly _tag: "Active";
   readonly instance: DesktopBackendInstance;
@@ -289,29 +283,6 @@ export const layer = Layer.effect(
       },
     );
 
-    // The primary backend refused to start because another live server owns
-    // the T3 home. The server has just read the owner from the runtime state
-    // file; read it again to name it, then quit so the user can close it.
-    const handlePrimaryHomeInUse = Effect.fn("desktop.backendPool.primaryHomeInUse")(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const owner = yield* fileSystem
-        .readFileString(environment.path.join(environment.stateDir, "server-runtime.json"))
-        .pipe(Effect.flatMap(decodeHomeOwner), Effect.option);
-      const holder = Option.match(owner, {
-        onNone: () => "",
-        onSome: ({ pid, origin }) => ` (pid ${pid}, origin ${origin})`,
-      });
-      const appName = environment.branding.baseName;
-      yield* logBackendPoolWarning("primary backend refused: another server owns the T3 home", {
-        stateDir: environment.stateDir,
-      });
-      yield* electronDialog.showErrorBox(
-        `${appName} can't start`,
-        `Another server is already using this data${holder}. Quit it and reopen ${appName}.`,
-      );
-      yield* electronApp.quit;
-    }, Effect.provide(factoryContext));
-
     const handlePrimaryDatabaseNewer = Effect.fn("desktop.backendPool.primaryDatabaseNewer")(
       function* () {
         const appName = environment.branding.baseName;
@@ -351,7 +322,13 @@ export const layer = Layer.effect(
         ),
       onShutdown: () => desktopWindow.handleBackendNotReady,
       onPreflightFailed: handlePrimaryPreflightFailure,
-      onHomeInUse: handlePrimaryHomeInUse,
+      onStateDirOwned: () =>
+        electronDialog
+          .showErrorBox(
+            "This T3 home is unavailable",
+            "Another T3 Code server, such as the background service, is using this data directory. Stop that server and reopen T3 Code, or set a separate T3CODE_HOME and pair with the running server.",
+          )
+          .pipe(Effect.andThen(electronApp.quit)),
       onDatabaseNewer: handlePrimaryDatabaseNewer,
     });
 

@@ -1,4 +1,3 @@
-import { DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
@@ -7,11 +6,11 @@ import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import * as PlatformError from "effect/PlatformError";
 import * as References from "effect/References";
-import * as Runtime from "effect/Runtime";
 import * as Schema from "effect/Schema";
 
+import * as ProcessRunner from "./processRunner.ts";
+import * as ServerOwnership from "./serverOwnership.ts";
 import * as ServerRuntimeState from "./serverRuntimeState.ts";
 
 const isServerRuntimeStateError = Schema.is(ServerRuntimeState.ServerRuntimeStateError);
@@ -20,6 +19,103 @@ interface CapturedLog {
   readonly message: unknown;
   readonly annotations: Readonly<Record<string, unknown>>;
 }
+
+describe("server ownership", () => {
+  const layerOwnership = ProcessRunner.layer.pipe(Layer.provideMerge(NodeServices.layer));
+  const makeState = ServerRuntimeState.makePersistedServerRuntimeState({
+    config: { host: undefined, devUrl: undefined },
+    port: 3773,
+  });
+
+  it.effect("lets only one of two racing starts own a state directory", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-owner-race-" });
+      const statePath = path.join(root, "server-runtime.json");
+      const attempts = yield* Effect.all(
+        [
+          ServerOwnership.acquireServerOwnership(statePath).pipe(Effect.result),
+          ServerOwnership.acquireServerOwnership(statePath).pipe(Effect.result),
+        ],
+        { concurrency: "unbounded" },
+      );
+      assert.equal(attempts.filter((result) => result._tag === "Success").length, 1);
+      const refused = attempts.find((result) => result._tag === "Failure");
+      assert.equal(refused?.failure._tag, "ServerAlreadyRunningError");
+    }).pipe(Effect.provide(layerOwnership)),
+  );
+
+  it.effect("refuses a second owner without touching its record, then allows a restart", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-owner-" });
+      const statePath = path.join(root, "server-runtime.json");
+      const state = yield* makeState;
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const owner = yield* ServerOwnership.acquireServerOwnership(statePath);
+          yield* owner.publish(state);
+          const before = yield* fs.readFileString(statePath);
+          const refused = yield* ServerOwnership.acquireServerOwnership(statePath).pipe(
+            Effect.flip,
+          );
+          assert.equal(refused._tag, "ServerAlreadyRunningError");
+          assert.equal(yield* fs.readFileString(statePath), before);
+        }),
+      );
+      assert.isFalse(yield* fs.exists(statePath));
+      yield* Effect.scoped(ServerOwnership.acquireServerOwnership(statePath));
+    }).pipe(Effect.provide(layerOwnership)),
+  );
+
+  it.effect("refuses beside a live pre-lock server and ignores a stale record", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-owner-legacy-" });
+      const statePath = path.join(root, "server-runtime.json");
+      const state = yield* makeState;
+      yield* ServerRuntimeState.persistServerRuntimeState({
+        path: statePath,
+        // @effect-diagnostics-next-line globalDateInEffect:off - Legacy identity uses the real process start time, not TestClock.
+        state: { ...state, startedAt: new Date().toISOString() },
+      });
+      const refused = yield* Effect.scoped(ServerOwnership.acquireServerOwnership(statePath)).pipe(
+        Effect.flip,
+      );
+      assert.equal(refused._tag, "ServerAlreadyRunningError");
+      yield* ServerRuntimeState.persistServerRuntimeState({
+        path: statePath,
+        state: { ...state, pid: 0 },
+      });
+      yield* Effect.scoped(ServerOwnership.acquireServerOwnership(statePath));
+    }).pipe(Effect.provide(layerOwnership)),
+  );
+
+  it.effect("never removes a runtime record another server published", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-owner-cleanup-" });
+      const statePath = path.join(root, "server-runtime.json");
+      const state = yield* makeState;
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const owner = yield* ServerOwnership.acquireServerOwnership(statePath);
+          yield* owner.publish(state);
+          yield* ServerRuntimeState.persistServerRuntimeState({
+            path: statePath,
+            state: { ...state, ownerId: "other-owner" },
+          });
+        }),
+      );
+      const remaining = yield* ServerRuntimeState.readPersistedServerRuntimeState(statePath);
+      assert.equal(Option.getOrThrow(remaining).ownerId, "other-owner");
+    }).pipe(Effect.provide(layerOwnership)),
+  );
+});
 
 describe("serverRuntimeState", () => {
   it.effect("persists and reads the runtime state", () =>
@@ -205,94 +301,4 @@ describe("serverRuntimeState", () => {
       }
     }).pipe(Effect.provide(NodeServices.layer)),
   );
-
-  describe("ensureHomeNotInUse", () => {
-    const statePath = "/home/alice/.t3/userdata/server-runtime.json";
-    const recorded: ServerRuntimeState.PersistedServerRuntimeState = {
-      version: 1,
-      pid: 4_242,
-      host: "127.0.0.1",
-      port: 3_773,
-      origin: "http://127.0.0.1:3773",
-      startedAt: "2026-09-29T00:00:00.000Z",
-    };
-    const recordedFile = Schema.encodeSync(
-      Schema.fromJsonString(ServerRuntimeState.PersistedServerRuntimeState),
-    )(recorded);
-    const withStateFile = (contents: string | undefined) =>
-      FileSystem.layerNoop({
-        readFileString: (path) =>
-          contents !== undefined && path === statePath
-            ? Effect.succeed(contents)
-            : Effect.fail(
-                PlatformError.systemError({
-                  _tag: "NotFound",
-                  module: "FileSystem",
-                  method: "readFileString",
-                  pathOrDescriptor: path,
-                }),
-              ),
-      });
-    const guard = (input: {
-      readonly contents: string | undefined;
-      readonly alivePids: ReadonlyArray<number>;
-      readonly answeringOrigins: ReadonlyArray<string>;
-      readonly currentPid?: number;
-    }) =>
-      ServerRuntimeState.ensureHomeNotInUse({
-        path: statePath,
-        currentPid: input.currentPid ?? 1_000,
-        isAlive: (pid) => input.alivePids.includes(pid),
-        originAnswers: (origin) => Effect.succeed(input.answeringOrigins.includes(origin)),
-      }).pipe(Effect.provide(withStateFile(input.contents)));
-
-    it.effect("continues when no server has recorded itself", () =>
-      guard({ contents: undefined, alivePids: [], answeringOrigins: [] }),
-    );
-
-    it.effect("continues past a runtime file left by a server that crashed", () =>
-      guard({
-        contents: recordedFile,
-        alivePids: [],
-        answeringOrigins: [recorded.origin],
-      }),
-    );
-
-    it.effect("continues when the recorded pid was reused by a process that is not a server", () =>
-      guard({
-        contents: recordedFile,
-        alivePids: [recorded.pid],
-        answeringOrigins: [],
-      }),
-    );
-
-    it.effect("refuses to start while a live server answers on its recorded origin", () =>
-      Effect.gen(function* () {
-        const error = yield* guard({
-          contents: recordedFile,
-          alivePids: [recorded.pid],
-          answeringOrigins: [recorded.origin],
-        }).pipe(Effect.flip);
-
-        assert.instanceOf(error, ServerRuntimeState.ServerHomeInUseError);
-        assert.equal(error.pid, 4_242);
-        assert.equal(error.origin, "http://127.0.0.1:3773");
-        assert.equal(
-          error.message,
-          "Another T3 Code server is already using this data (pid 4242, origin http://127.0.0.1:3773).",
-        );
-        // The desktop recognises this exit code and stops restarting the backend.
-        assert.equal(Runtime.getErrorExitCode(error), DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE);
-      }),
-    );
-
-    it.effect("continues when the runtime file names the current process", () =>
-      guard({
-        contents: recordedFile,
-        alivePids: [recorded.pid],
-        answeringOrigins: [recorded.origin],
-        currentPid: recorded.pid,
-      }),
-    );
-  });
 });

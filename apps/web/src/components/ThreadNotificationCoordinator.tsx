@@ -1,4 +1,8 @@
-import { presentThreadShell } from "@t3tools/client-runtime/state/models";
+import {
+  type PendingSubagentRequest,
+  presentThreadShell,
+} from "@t3tools/client-runtime/state/models";
+import { pendingSubagentRequestsByThread } from "@t3tools/client-runtime/state/threads";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import type { PivotState } from "@t3tools/client-runtime/pivot-state";
@@ -95,6 +99,7 @@ export function ThreadNotificationCoordinator() {
 
 interface NotificationState {
   readonly raw: OrchestrationV2ThreadShell;
+  readonly subagentRequest: PendingSubagentRequest | null;
   readonly attention: string | null;
   readonly completion: number | null;
 }
@@ -203,15 +208,18 @@ function EnvironmentNotifications({
       return;
     }
     const next = new Map<ThreadId, NotificationState>();
+    // Subagents are skipped below, so their requests notify through the thread above them.
+    const subagentRequests = pendingSubagentRequestsByThread(threads);
     for (const rawThread of threads) {
       if (rawThread.lineage.relationshipToParent === "subagent") continue;
       const prior = previous.current.get(rawThread.id);
+      const subagentRequest = subagentRequests.get(rawThread.id) ?? null;
       // The same object cannot produce a new notification.
-      if (prior?.raw === rawThread) {
+      if (prior?.raw === rawThread && prior.subagentRequest === subagentRequest) {
         next.set(rawThread.id, prior);
         continue;
       }
-      const thread = presentThreadShell(environmentId, rawThread);
+      const thread = presentThreadShell(environmentId, rawThread, subagentRequest);
       const isPivot = pivotState?.pivots[rawThread.id] !== undefined;
       let status = resolveSidebarThreadStatus(thread);
       if (status === "ready" && thread.latestRun?.status === "failed") status = "failed";
@@ -227,7 +235,7 @@ function EnvironmentNotifications({
         Number.isFinite(completedAt)
           ? completedAt
           : (prior?.completion ?? null);
-      next.set(thread.id, { raw: rawThread, attention, completion });
+      next.set(thread.id, { raw: rawThread, subagentRequest, attention, completion });
       if (!prior || thread.archivedAt !== null) continue;
       const kind =
         attention && attention !== prior.attention

@@ -43,7 +43,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import {
   DESKTOP_BACKEND_DATABASE_NEWER_EXIT_CODE,
-  DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE,
+  SERVER_EXIT_CODE_STATE_DIR_OWNED,
   DesktopBackendBootstrap,
   type DesktopBackendBootstrap as DesktopBackendBootstrapValue,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
@@ -67,7 +67,9 @@ const MAX_PREFLIGHT_FAILURE_ATTEMPTS = 5;
 const DEFAULT_BACKEND_READINESS_TIMEOUT = Duration.minutes(1);
 const DEFAULT_BACKEND_READINESS_INTERVAL = Duration.millis(100);
 const DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT = Duration.seconds(1);
-const DEFAULT_BACKEND_TERMINATE_GRACE = Duration.seconds(2);
+// Same as the service launcher. A killed backend leaves its agents running,
+// and a busy one needs a few seconds to stop every provider session.
+const DEFAULT_BACKEND_TERMINATE_GRACE = Duration.seconds(5);
 const DEFAULT_BACKEND_OUTPUT_DRAIN_TIMEOUT = Duration.seconds(5);
 const BACKEND_READINESS_PATH = "/.well-known/t3/environment";
 const { logWarning: logBackendProcessWarning } =
@@ -308,7 +310,7 @@ export interface BackendInstanceSpec {
   readonly onPreflightFailed?: (failure: PreflightFailure) => Effect.Effect<boolean>;
   // Fired when the backend exits because another live server owns its T3
   // home. The instance stops instead of restarting into the same refusal.
-  readonly onHomeInUse?: () => Effect.Effect<void>;
+  readonly onStateDirOwned?: () => Effect.Effect<void>;
   // Fired when the backend exits because a newer build migrated its
   // database. The instance stops, since a restart cannot fix it.
   readonly onDatabaseNewer?: () => Effect.Effect<void>;
@@ -875,7 +877,15 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
 
         const finalizeRun = Effect.fn("desktop.backendInstance.finalizeRun")(function* (
           reason: string,
+          exitCode?: number,
         ) {
+          // A restart cannot fix these refusals, so the instance stops and reports.
+          const onRefused =
+            exitCode === SERVER_EXIT_CODE_STATE_DIR_OWNED
+              ? (spec.onStateDirOwned ?? (() => Effect.void))
+              : exitCode === DESKTOP_BACKEND_DATABASE_NEWER_EXIT_CODE
+                ? (spec.onDatabaseNewer ?? (() => Effect.void))
+                : undefined;
           yield* mutex.withPermits(1)(
             Effect.gen(function* () {
               const { isCurrentRun, nextState, pid, exitObserved, stopRequested, wasReady } =
@@ -945,6 +955,11 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
               }
 
               if (isCurrentRun && nextState.desiredRunning) {
+                if (onRefused !== undefined && !stopRequested) {
+                  yield* Ref.update(state, (latest) => ({ ...latest, desiredRunning: false }));
+                  yield* onRefused().pipe(Effect.ignore);
+                  return;
+                }
                 yield* scheduleRestart(reason);
               }
             }),
@@ -1021,21 +1036,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
           Scope.provide(runScope),
           Effect.matchEffect({
             onFailure: (error) => finalizeRun(error.message),
-            onSuccess: (exit) => {
-              const code = Option.getOrUndefined(exit.code);
-              const onRefused =
-                code === DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE
-                  ? (spec.onHomeInUse ?? (() => Effect.void))
-                  : code === DESKTOP_BACKEND_DATABASE_NEWER_EXIT_CODE
-                    ? (spec.onDatabaseNewer ?? (() => Effect.void))
-                    : undefined;
-              return onRefused === undefined
-                ? finalizeRun(exit.reason)
-                : Ref.update(state, (latest) => ({ ...latest, desiredRunning: false })).pipe(
-                    Effect.andThen(finalizeRun(exit.reason)),
-                    Effect.andThen(onRefused()),
-                  );
-            },
+            onSuccess: (exit) => finalizeRun(exit.reason, Option.getOrUndefined(exit.code)),
           }),
           Effect.ensuring(Scope.close(runScope, Exit.void).pipe(Effect.ignore)),
         );

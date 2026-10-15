@@ -10,9 +10,8 @@ import { HttpClient } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 
 import * as NodePath from "@effect/platform-node/NodePath";
-import { DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE } from "@t3tools/contracts";
+import { DESKTOP_BACKEND_DATABASE_NEWER_EXIT_CODE } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
-import * as PlatformError from "effect/PlatformError";
 import * as Sink from "effect/Sink";
 
 import * as DesktopConfig from "../app/DesktopConfig.ts";
@@ -245,31 +244,15 @@ describe("DesktopBackendPool", () => {
     ),
   );
 
-  it.effect("tells the user which server holds the data and quits when the home is in use", () =>
+  it.effect("tells the user to update and quits when a newer build migrated the database", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const labelRef = yield* Ref.make("Local");
         const shown = yield* Deferred.make<{ readonly title: string; readonly content: string }>();
         const quit = yield* Deferred.make<void>();
-        const runtimeStatePath = "/Users/alice/.t3-pivot/userdata/server-runtime.json";
 
         const poolLayer = layerPool(labelRef, {
-          fileSystem: FileSystem.layerNoop({
-            exists: () => Effect.succeed(true),
-            readFileString: (path) =>
-              path === runtimeStatePath
-                ? Effect.succeed(
-                    '{"version":1,"pid":88438,"host":"127.0.0.1","port":3773,"origin":"http://127.0.0.1:3773","startedAt":"2026-09-27T16:45:21.054Z"}',
-                  )
-                : Effect.fail(
-                    PlatformError.systemError({
-                      _tag: "NotFound",
-                      module: "FileSystem",
-                      method: "readFileString",
-                      pathOrDescriptor: path,
-                    }),
-                  ),
-          }),
+          fileSystem: FileSystem.layerNoop({ exists: () => Effect.succeed(true) }),
           spawner: Layer.succeed(
             ChildProcessSpawner.ChildProcessSpawner,
             ChildProcessSpawner.make(() =>
@@ -280,7 +263,7 @@ describe("DesktopBackendPool", () => {
                   stderr: Stream.empty,
                   all: Stream.empty,
                   exitCode: Effect.succeed(
-                    ChildProcessSpawner.ExitCode(DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE),
+                    ChildProcessSpawner.ExitCode(DESKTOP_BACKEND_DATABASE_NEWER_EXIT_CODE),
                   ),
                   isRunning: Effect.succeed(false),
                   kill: () => Effect.void,
@@ -315,8 +298,7 @@ describe("DesktopBackendPool", () => {
 
           assert.deepEqual(yield* Deferred.await(shown), {
             title: "T3 Pivot can't start",
-            content:
-              "Another server is already using this data (pid 88438, origin http://127.0.0.1:3773). Quit it and reopen T3 Pivot.",
+            content: "A newer version already upgraded this data. Update T3 Pivot, then reopen it.",
           });
           yield* Deferred.await(quit);
         }).pipe(Effect.provide(poolLayer));

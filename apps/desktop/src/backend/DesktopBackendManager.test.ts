@@ -1,6 +1,6 @@
 import {
   DESKTOP_BACKEND_DATABASE_NEWER_EXIT_CODE,
-  DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE,
+  SERVER_EXIT_CODE_STATE_DIR_OWNED,
   DesktopBackendBootstrap,
   type DesktopBackendBootstrap as DesktopBackendBootstrapValue,
   DesktopTelemetryControlMessage,
@@ -126,10 +126,10 @@ interface MakeInstanceInput {
   readonly backendOutputLog?: Partial<DesktopObservability.DesktopBackendOutputLogShape>;
   readonly onReady?: Effect.Effect<void>;
   readonly onShutdown?: Effect.Effect<void>;
+  readonly onStateDirOwned?: Effect.Effect<void>;
   readonly onPreflightFailed?: (
     failure: DesktopBackendManager.PreflightFailure,
   ) => Effect.Effect<boolean>;
-  readonly onHomeInUse?: Effect.Effect<void>;
   readonly onDatabaseNewer?: Effect.Effect<void>;
   readonly config?: DesktopBackendManager.DesktopBackendStartConfig;
   readonly configResolve?: Effect.Effect<
@@ -190,8 +190,8 @@ function makeTestInstance(input: MakeInstanceInput) {
     configResolve: input.configResolve ?? Effect.succeed(input.config ?? baseConfig),
     ...(input.onReady ? { onReady: () => input.onReady! } : {}),
     ...(input.onShutdown ? { onShutdown: () => input.onShutdown! } : {}),
+    ...(input.onStateDirOwned ? { onStateDirOwned: () => input.onStateDirOwned! } : {}),
     ...(input.onPreflightFailed ? { onPreflightFailed: input.onPreflightFailed } : {}),
-    ...(input.onHomeInUse ? { onHomeInUse: () => input.onHomeInUse! } : {}),
     ...(input.onDatabaseNewer ? { onDatabaseNewer: () => input.onDatabaseNewer! } : {}),
   });
 
@@ -270,7 +270,7 @@ describe("DesktopBackendManager", () => {
         assert.equal(spawnedCommand.options.additionalFds?.fd5?.type, "output");
         assert.equal(
           Duration.toMillis(Duration.fromInputUnsafe(spawnedCommand.options.forceKillAfter)),
-          2_000,
+          5_000,
         );
 
         assert.deepEqual(yield* decodeBootstrap(bootstrapJson), configWithObservability);
@@ -1212,44 +1212,6 @@ describe("DesktopBackendManager", () => {
     ),
   );
 
-  it.effect("stops restarting and reports when another server owns the T3 home", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const reported = yield* Deferred.make<void>();
-        let startCount = 0;
-
-        const spawnerLayer = Layer.succeed(
-          ChildProcessSpawner.ChildProcessSpawner,
-          ChildProcessSpawner.make(() =>
-            Effect.sync(() => {
-              startCount += 1;
-              return makeProcess({
-                exitCode: Effect.succeed(
-                  ChildProcessSpawner.ExitCode(DESKTOP_BACKEND_HOME_IN_USE_EXIT_CODE),
-                ),
-              });
-            }),
-          ),
-        );
-
-        const instance = yield* makeTestInstance({
-          spawnerLayer,
-          httpClientLayer: layerHttpClient(() => Effect.never),
-          onHomeInUse: Deferred.succeed(reported, undefined).pipe(Effect.asVoid),
-        });
-
-        yield* instance.start;
-        yield* Deferred.await(reported);
-        yield* TestClock.adjust(Duration.seconds(30));
-
-        const snapshot = yield* instance.snapshot;
-        assert.equal(startCount, 1);
-        assert.isFalse(snapshot.desiredRunning);
-        assert.isFalse(snapshot.restartScheduled);
-      }).pipe(Effect.provide(TestClock.layer())),
-    ),
-  );
-
   it.effect("stops restarting and reports when a newer build migrated the database", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1284,6 +1246,39 @@ describe("DesktopBackendManager", () => {
         assert.equal(startCount, 1);
         assert.isFalse(snapshot.desiredRunning);
         assert.isFalse(snapshot.restartScheduled);
+      }).pipe(Effect.provide(TestClock.layer())),
+    ),
+  );
+
+  it.effect("reports state-directory ownership once without scheduling another backend", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let startCount = 0;
+        const refused = yield* Deferred.make<void>();
+        const instance = yield* makeTestInstance({
+          spawnerLayer: Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() =>
+              Effect.sync(() => {
+                startCount += 1;
+                return makeProcess({
+                  exitCode: Effect.succeed(
+                    ChildProcessSpawner.ExitCode(SERVER_EXIT_CODE_STATE_DIR_OWNED),
+                  ),
+                });
+              }),
+            ),
+          ),
+          httpClientLayer: layerHttpClient(() => Effect.never),
+          onStateDirOwned: Deferred.succeed(refused, undefined).pipe(Effect.asVoid),
+        });
+        yield* instance.start;
+        yield* Deferred.await(refused);
+        const snapshot = yield* instance.snapshot;
+        assert.isFalse(snapshot.desiredRunning);
+        assert.isFalse(snapshot.restartScheduled);
+        yield* TestClock.adjust(Duration.minutes(1));
+        assert.equal(startCount, 1);
       }).pipe(Effect.provide(TestClock.layer())),
     ),
   );
