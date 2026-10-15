@@ -4,9 +4,9 @@
 > [Release](./release.md).
 
 T3 Pivot installs as its own Mac app next to T3 Code (Nightly) and updates itself from the
-fork's GitHub releases. The iPhone app updates itself from TestFlight. Every night Homebox
-merges upstream into `main` and redeploys, and every morning the release Mac publishes
-what `main` hasn't released yet, so the Mac, Homebox and the iPhone run the same build.
+fork's GitHub releases. The iPhone app updates itself from TestFlight. Every morning the
+release Mac merges upstream into `main` and publishes what `main` hasn't released yet, and
+Homebox then redeploys `main`, so the Mac, Homebox and the iPhone run the same build.
 GitHub Actions stays off on the fork, so upstream's release workflow never runs.
 
 ## One-time setup
@@ -26,6 +26,7 @@ GitHub Actions stays off on the fork, so upstream's release workflow never runs.
 - `gh` is logged in as `teoaliano`. It doesn't have to be the active account, because the
   commands pass that account's token to `gh` and `git`.
 - The checkout has an `upstream` remote pointing at `pingdotgg/t3code`.
+- Claude Code is installed and logged in on the release Mac, for the merge agent below.
 - For TestFlight, team `N2X3SV5FDD` has an App Store Connect app with bundle id
   `com.teoaliano.t3pivot`, and an internal testing group with automatic distribution. An
   App Store Connect API key with the Admin role is saved as
@@ -85,8 +86,9 @@ needs you logged in, because signing reads the login keychain. The agent gets th
 UTF-8 locale, which CocoaPods needs.
 
 `nightly` resets the clone to `origin/main`, discarding any local change, so it refuses to run
-anywhere but `~/.t3-pivot/app`. It shows a notification when a `sync/<tag>` PR is waiting on
-your decision. Then it publishes the desktop release and the TestFlight build `main` doesn't
+anywhere but `~/.t3-pivot/app`. It merges the newest upstream nightly into `main` and pushes it
+(see [Merge upstream every morning](#merge-upstream-every-morning)), and shows a notification
+when a `sync/<tag>` PR is waiting on your decision. Then it publishes the desktop release and the TestFlight build `main` doesn't
 have yet, and installs the release as `/Applications/T3 Pivot.app`. While T3 Pivot is open it
 leaves the app alone, since replacing it would end running turns; the sidebar update button
 offers the same release, and the next run installs it if the app is closed. With nothing new
@@ -104,31 +106,35 @@ T3 Code keeps `https://homebox.<tailnet>.ts.net/` and its own threads. Pair the 
 the Mac to `https://homebox.<tailnet>.ts.net:8444` as a second environment. A database
 T3 Code migrates never touches T3 Pivot here.
 
-The host runs a dedicated clone at `~/.t3-pivot/app`, never a working checkout, with an
-`upstream` remote and `gh` logged in as `teoaliano`. Two systemd user units drive it:
-`t3-pivot.service` runs `apps/server/dist/bin.mjs serve --base-dir ~/.t3-pivot --port 3774
---tailscale-serve --tailscale-serve-port 8444 --no-browser`, and `t3-pivot-update.timer` runs
-`node scripts/pivot.ts host-update` in the clone every night.
+The host runs a dedicated clone at `~/.t3-pivot/app`, never a working checkout, with `gh`
+logged in as `teoaliano`. Two systemd user units drive it: `t3-pivot.service` runs
+`apps/server/dist/bin.mjs serve --base-dir ~/.t3-pivot --port 3774 --tailscale-serve
+--tailscale-serve-port 8444 --no-browser`, and `t3-pivot-update.timer` runs
+`node scripts/pivot.ts host-update` in the clone at 09:00, after the Mac's morning merge.
 
-`host-update` resets the clone to `origin/main` and merges the newest upstream nightly into it.
-A conflict is settled by owner first: in a Pivot-owned file main's side wins, and in vendored
+`host-update` resets the clone to `origin/main` and, when `main` moved since its last deploy,
+rebuilds and restarts the service, which ends any running turn in T3 Pivot. If the build
+fails, the service keeps running the build it had. Run it on demand with
+`systemctl --user start t3-pivot-update.service` and read the result with
+`journalctl --user -u t3-pivot-update`. Changes merged into `main` reach the host on the next
+run, and the Mac and iPhone the next morning.
+
+## Merge upstream every morning
+
+The Mac's `nightly` merges the newest upstream nightly into `main` before it releases. A
+conflict is settled by owner first: in a Pivot-owned file main's side wins, and in vendored
 `.repos/` upstream's side wins (see `PIVOT_OWNED_PATHS` and `UPSTREAM_OWNED_PATHS` in
-`scripts/pivot.ts`). If conflicts are left, or the merged tree doesn't build, Claude Sonnet 5.5
-finishes the merge: it runs headless as `claude -p` in the clone, with every tool and no time
-limit, and may change any file, including Pivot code that has to follow an upstream change. It
-runs under the host user's Claude Code login, so `t3-pivot-update.service` needs that login (or
-`ANTHROPIC_API_KEY`) in its environment. The script commits the merge once no conflict marker
-is left and it builds, pushes it to `main` with the agent's summary in the commit message, and
+`scripts/pivot.ts`). If conflicts are left, or the merged server doesn't build, Claude Sonnet 5.5
+finishes the merge: it runs headless as `claude -p` in the clone, under the Mac user's Claude
+Code login, with every tool and no time limit, and may change any file, including Pivot code
+that has to follow an upstream change. The script commits the merge once no conflict marker is
+left and it builds, pushes it to `main` with the agent's summary in the commit message, and
 closes any `sync/<tag>` PR it settles.
 
 The agent stops only for a breaking change, upstream or in Pivot, that needs Pivot's design
 reworked. Then, or when it fails or leaves a merge that still doesn't build, the merge is
-undone, and a `sync/<tag>` PR carries the agent's explanation for you. The host still deploys
-`main` without that nightly, and the next nightly is tried again the next night. It rebuilds and
-restarts the service whenever `main` moved, which ends any running turn in T3 Pivot. Run it on
-demand with `systemctl --user start t3-pivot-update.service` and read the result with
-`journalctl --user -u t3-pivot-update`. Changes merged into `main` reach the host on the next
-run, and the Mac and iPhone the next morning.
+undone, and a `sync/<tag>` PR carries the agent's explanation for you. The Mac still releases
+`main` without that nightly, and the next nightly is tried again the next morning.
 
 ## Things that stay manual
 

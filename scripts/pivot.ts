@@ -619,12 +619,14 @@ const installApp = Effect.fn("pivot.installApp")(function* (version: string) {
 });
 
 // Runs from the release Mac's dedicated clone at login and every morning (see
-// `nightly-install`). Publishes the desktop release and the TestFlight build
-// that `main` doesn't have yet and installs the release here, so running it
-// again is a no-op.
+// `nightly-install`). Merges upstream's newest nightly into main, then publishes
+// the desktop release and the TestFlight build that `main` doesn't have yet and
+// installs the release here, so running it again is a no-op.
 const nightly = Effect.gen(function* () {
   const env = yield* forkAccountEnv;
-  const head = yield* resetDedicatedClone("publish nightly", env);
+  yield* resetDedicatedClone("publish nightly", env);
+  yield* mergeUpstream(env);
+  const head = yield* run("git", ["rev-parse", "HEAD"]);
 
   const waiting = yield* openSyncPrs(env);
   if (waiting.length > 0) {
@@ -846,9 +848,9 @@ const mergePrompt = ({ tag, conflicted, buildFailed, decisionPath }: MergeAgentR
   ].join("\n");
 
 /**
- * Finishes the merge with Claude Sonnet 5.5 at high effort, run headless from the host's
- * service with every tool and no permission prompts. It authenticates with the host
- * user's Claude Code login, so the unit needs that login (or ANTHROPIC_API_KEY).
+ * Finishes the merge with Claude Sonnet 5.5 at high effort, run headless from the release
+ * Mac's nightly with every tool and no permission prompts. It authenticates with the Mac
+ * user's Claude Code login.
  */
 export const runMergeAgent: MergeAgent = Effect.fn("pivot.runMergeAgent")(function* (
   request: MergeAgentRequest,
@@ -955,49 +957,45 @@ export const mergeUpstreamTag = Effect.fn("pivot.mergeUpstreamTag")(function* (
   }).pipe(Effect.catchTags({ PivotCommandError: (error) => fail(error.message) }));
 });
 
-// Runs nightly from the host's dedicated clone. It resets to origin/main, merges upstream's
-// newest nightly and pushes it to main, then rebuilds and restarts the host when main moved.
-// A merge that needs the maintainer becomes a `sync/<tag>` PR, and the host still deploys
-// main without it.
+/**
+ * Merges upstream's newest nightly into the dedicated clone's main and pushes it. A merge
+ * that needs the maintainer becomes a `sync/<tag>` PR instead, and main stays as it was.
+ */
+const mergeUpstream = Effect.fn("pivot.mergeUpstream")(function* (env: Record<string, string>) {
+  const next = yield* nextUpstreamTag("HEAD");
+  if (Option.isNone(next)) return;
+  const merged = yield* Effect.result(
+    mergeUpstreamTag(next.value, { build: buildServer, agent: runMergeAgent }),
+  );
+  if (Result.isFailure(merged)) {
+    if (merged.failure._tag !== "PivotMergeError") return yield* merged.failure;
+    yield* Console.log(merged.failure.message);
+    yield* openSyncPr(next.value, env, merged.failure.reason);
+    return;
+  }
+  if (merged.success.length > 0) {
+    yield* Console.log(`the agent finished the merge:\n${merged.success}`);
+  }
+  yield* run("git", ["push", "--quiet", FORK_REMOTE, "HEAD:main"], env);
+  yield* Console.log(`merged upstream ${next.value} into main`);
+  yield* closeSettledSyncPrs(env);
+});
+
+// Runs from the host's dedicated clone (see `t3-pivot-update.timer`). It resets to
+// origin/main, which the release Mac's nightly keeps level with upstream, then rebuilds
+// and restarts the host when main moved.
 const hostUpdate = Effect.gen(function* () {
   const env = yield* forkAccountEnv;
-  yield* resetDedicatedClone("update", env);
-
-  let built = false;
-  let mergeError: PivotMergeError | undefined;
-  const next = yield* nextUpstreamTag("HEAD");
-  if (Option.isSome(next)) {
-    const merged = yield* Effect.result(
-      mergeUpstreamTag(next.value, { build: buildServer, agent: runMergeAgent }),
-    );
-    if (Result.isSuccess(merged)) {
-      if (merged.success.length > 0) {
-        yield* Console.log(`the agent finished the merge:\n${merged.success}`);
-      }
-      yield* run("git", ["push", "--quiet", FORK_REMOTE, "HEAD:main"], env);
-      yield* Console.log(`merged upstream ${next.value} into main`);
-      yield* closeSettledSyncPrs(env);
-      built = true;
-    } else if (merged.failure._tag === "PivotMergeError") {
-      mergeError = merged.failure;
-      yield* Console.log(mergeError.message);
-      yield* openSyncPr(next.value, env, mergeError.reason);
-    } else {
-      return yield* merged.failure;
-    }
-  }
-
-  const head = yield* run("git", ["rev-parse", "HEAD"]);
+  const head = yield* resetDedicatedClone("update", env);
   const deployed = yield* Effect.option(
     run("git", ["rev-parse", "--verify", "--quiet", HOST_DEPLOYED_REF]),
   );
-  if (Option.contains(deployed, head) && mergeError === undefined) {
+  if (Option.contains(deployed, head)) {
     yield* Console.log(`${HOST_SERVICE} already runs ${head.slice(0, 12)}`);
     return;
   }
 
-  // A merge that fell through may have built its own tree into dist, so build main again.
-  if (!built && !(yield* succeeds(buildServer))) {
+  if (!(yield* succeeds(buildServer))) {
     // The failed build replaced dist, which the running server still reads.
     if (Option.isSome(deployed)) {
       yield* run("git", ["reset", "--hard", "--quiet", deployed.value]);
@@ -1006,13 +1004,10 @@ const hostUpdate = Effect.gen(function* () {
     return yield* new PivotBuildFailedError({ commit: head.slice(0, 12) });
   }
 
-  if (!Option.contains(deployed, head)) {
-    // Recorded first: a restart started from inside T3 Pivot ends this process.
-    yield* run("git", ["update-ref", HOST_DEPLOYED_REF, head]);
-    yield* Console.log(`restarting ${HOST_SERVICE} on ${head.slice(0, 12)}`);
-    yield* run("systemctl", ["--user", "restart", HOST_SERVICE]);
-  }
-  if (mergeError !== undefined) return yield* mergeError;
+  // Recorded first: a restart started from inside T3 Pivot ends this process.
+  yield* run("git", ["update-ref", HOST_DEPLOYED_REF, head]);
+  yield* Console.log(`restarting ${HOST_SERVICE} on ${head.slice(0, 12)}`);
+  yield* run("systemctl", ["--user", "restart", HOST_SERVICE]);
 });
 
 const pivotCli = Command.make("pivot").pipe(
@@ -1032,7 +1027,7 @@ const pivotCli = Command.make("pivot").pipe(
     ),
     Command.make("nightly").pipe(
       Command.withDescription(
-        "Publish the desktop release and TestFlight build main doesn't have yet.",
+        "Merge upstream's newest nightly, then publish the desktop release and TestFlight build main doesn't have yet.",
       ),
       Command.withHandler(() => nightly),
     ),
@@ -1042,7 +1037,7 @@ const pivotCli = Command.make("pivot").pipe(
     ),
     Command.make("host-update").pipe(
       Command.withDescription(
-        "Fast-forward to main, merge upstream's newest nightly, then rebuild and restart this host's T3 Pivot.",
+        "Fast-forward to main, then rebuild and restart this host's T3 Pivot.",
       ),
       Command.withHandler(() => hostUpdate),
     ),
