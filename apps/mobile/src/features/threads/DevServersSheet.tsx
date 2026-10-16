@@ -15,11 +15,11 @@ import { useCallback, useMemo } from "react";
 import { Alert, Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AndroidSheetHeader } from "../../components/AndroidScreenHeader";
-import { AppText as Text } from "../../components/AppText";
-import { MaterialIconButton } from "../../components/MaterialIconButton";
-import { MaterialListRow } from "../../components/MaterialListRow";
-import { MaterialScreenContent } from "../../components/MaterialScreenContent";
+import { AndroidSheetHeader } from "../../components/ui/AndroidScreenHeader";
+import { AppText as Text } from "../../components/ui/AppText";
+import { IconButton } from "../../components/ui/IconButton";
+import { NavigationRow } from "../../components/ui/NavigationRow";
+import { ScreenContent } from "../../components/ui/ScreenContent";
 import { useEnvironmentServerConfig, useProject, useThreadShell } from "../../state/entities";
 import { managedProcessEnvironment } from "../../state/managedProcesses";
 import { useEnvironmentQuery } from "../../state/query";
@@ -96,7 +96,7 @@ export function DevServersSheet(props: DevServersSheetProps) {
     const live = row.state !== "startable";
     const target = checkoutPath === null ? null : { checkoutPath, scriptId: row.scriptId };
     return (
-      <MaterialListRow
+      <NavigationRow
         key={row.scriptId}
         title={row.scriptName}
         subtitle={describeDevServerRow(row)}
@@ -105,7 +105,7 @@ export function DevServersSheet(props: DevServersSheetProps) {
         trailing={
           <View className="flex-row items-center gap-1">
             {live || row.pinned ? (
-              <MaterialIconButton
+              <IconButton
                 accessibilityLabel={
                   row.pinned ? `Unpin ${row.scriptName}` : `Keep ${row.scriptName} running`
                 }
@@ -118,7 +118,7 @@ export function DevServersSheet(props: DevServersSheetProps) {
               />
             ) : null}
             {live ? (
-              <MaterialIconButton
+              <IconButton
                 accessibilityLabel={`Stop ${row.scriptName}`}
                 icon="stop.fill"
                 onPress={() => {
@@ -127,7 +127,7 @@ export function DevServersSheet(props: DevServersSheetProps) {
                 }}
               />
             ) : (
-              <MaterialIconButton
+              <IconButton
                 accessibilityLabel={`Start ${row.scriptName}`}
                 icon="play"
                 onPress={() => void startScript(row.scriptId)}
@@ -148,7 +148,7 @@ export function DevServersSheet(props: DevServersSheetProps) {
           <Text className="text-lg font-t3-bold">Dev servers</Text>
         </View>
       )}
-      <MaterialScreenContent>
+      <ScreenContent>
         <ScrollView
           contentContainerClassName="gap-3 p-4"
           contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 8 }}
@@ -165,7 +165,7 @@ export function DevServersSheet(props: DevServersSheetProps) {
             Servers nobody has used for 30 minutes stop on their own. Pin one to keep it running.
           </Text>
         </ScrollView>
-      </MaterialScreenContent>
+      </ScreenContent>
     </View>
   );
 }

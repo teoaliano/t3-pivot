@@ -1,6 +1,6 @@
 import { View } from "react-native";
 
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text } from "../../components/ui/AppText";
 import { RequestActionButton } from "./RequestActionButton";
 
 /** Replaces the composer on a retired Pivot, which is read-only history. */

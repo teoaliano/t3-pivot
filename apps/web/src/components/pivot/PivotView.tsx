@@ -383,6 +383,8 @@ function TeammatePaneBody(props: {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const availableEditors = useAtomValue(primaryServerAvailableEditorsAtom);
   const [openFile, setOpenFile] = useState<string | null>(null);
+  // Set while crumbs walk the folder browser up; see `FilePreviewPanel`.
+  const [folderTrail, setFolderTrail] = useState<string | undefined>(undefined);
   // Panes refresh their file reads when the teammate's latest run settles.
   const workspaceMutationId = shell?.latestRun?.completedAt ?? null;
   const { teammateRef } = props;
@@ -442,7 +444,15 @@ function TeammatePaneBody(props: {
             availableEditors={availableEditors}
             revealLine={null}
             revealRequestId={0}
-            onOpenFile={setOpenFile}
+            onOpenFile={(path) => {
+              setOpenFile(path);
+              setFolderTrail(undefined);
+            }}
+            onNavigateFolder={(path, trail) => {
+              setOpenFile(path === "" ? null : path);
+              setFolderTrail(trail === path ? undefined : trail);
+            }}
+            folderTrail={folderTrail}
             onPendingChange={() => {}}
             selectedFilePending={false}
             workspaceMutationId={workspaceMutationId}
