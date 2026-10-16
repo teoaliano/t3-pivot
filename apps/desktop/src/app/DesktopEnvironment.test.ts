@@ -164,7 +164,7 @@ describe("DesktopEnvironment", () => {
 
       assert.deepEqual(packaged.branding, {
         baseName: "T3 Pivot",
-        stageLabel: "Alpha",
+        stageLabel: "Beta",
         displayName: "T3 Pivot",
       });
       assert.equal(packaged.displayName, "T3 Pivot");

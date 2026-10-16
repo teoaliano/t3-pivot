@@ -2,11 +2,18 @@ import {
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDashedIcon,
+  CircleDotDashedIcon,
   MessageCircleQuestionIcon,
   ShieldQuestionIcon,
 } from "lucide-react";
 
-export type SidebarStatusIconKind = "working" | "input" | "approval" | "failed" | "done";
+export type SidebarStatusIconKind =
+  | "working"
+  | "waiting"
+  | "input"
+  | "approval"
+  | "failed"
+  | "done";
 
 /** The icon a sidebar row shows beside its status. Colored by the parent's text color. */
 export function SidebarStatusIcon(props: { kind: SidebarStatusIconKind }) {
@@ -14,6 +21,8 @@ export function SidebarStatusIcon(props: { kind: SidebarStatusIconKind }) {
   switch (props.kind) {
     case "working":
       return <CircleDashedIcon aria-hidden className={className} />;
+    case "waiting":
+      return <CircleDotDashedIcon aria-hidden className={className} />;
     case "input":
       return <MessageCircleQuestionIcon aria-hidden className={className} />;
     case "approval":

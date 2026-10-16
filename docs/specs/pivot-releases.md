@@ -1,24 +1,24 @@
 # Pivot releases
 
 Synthesized from the 2026-09-29 conversation that followed the managed-processes effort.
-`CONTEXT.md` defines the vocabulary. "T3 Pivot" is the name of this fork; "Alpha" is the
-upstream T3 Code (Alpha) desktop app installed on the same Mac.
+`CONTEXT.md` defines the vocabulary. "T3 Pivot" is the name of this fork; "Beta" is the
+upstream T3 Code (Beta) desktop app installed on the same Mac.
 
 ## Problem statement
 
-T3 Pivot has features the Alpha app lacks, but you can't use it as your daily app. There is
+T3 Pivot has features the Beta app lacks, but you can't use it as your daily app. There is
 no installable build of it, so it only runs as a dev server from the checkout. Nothing
 tells you when upstream ships a new release, and nothing brings that release into the fork.
 The update button in the sidebar exists in the fork's code, but a local build has no
 update feed, so the button is greyed out.
 
-If you did build the fork's desktop app today, it would claim the Alpha app's bundle id,
-product name, Electron data folder and update caches. It would install over Alpha. Its
-update button, if it worked, would pull Alpha from upstream and replace the fork.
+If you did build the fork's desktop app today, it would claim the Beta app's bundle id,
+product name, Electron data folder and update caches. It would install over Beta. Its
+update button, if it worked, would pull Beta from upstream and replace the fork.
 
 ## Solution
 
-T3 Pivot installs as its own Mac app, "T3 Pivot", next to Alpha. It keeps its own T3 home
+T3 Pivot installs as its own Mac app, "T3 Pivot", next to Beta. It keeps its own T3 home
 (`~/.t3-pivot`) and its own Tailscale HTTPS port (8444), so both apps can run at the same
 time. T3 Pivot still refuses to start its server while another live server owns its data,
 and says which one.
@@ -33,22 +33,22 @@ Two commands on this Mac keep it current:
 
 The sidebar update button in T3 Pivot checks that repository's releases. When a new one is
 published, the button offers it, downloads it and restarts into it, exactly as it does for
-Alpha. The mobile app's server controls, which trigger the same desktop update remotely,
+Beta. The mobile app's server controls, which trigger the same desktop update remotely,
 follow the same feed.
 
 ## User stories
 
 1. As the user, I want T3 Pivot to install as a separate app named "T3 Pivot", so that
-   installing it never removes or overwrites Alpha.
-2. As the user, I want T3 Pivot and Alpha to show different names in the Dock, the app
+   installing it never removes or overwrites Beta.
+2. As the user, I want T3 Pivot and Beta to show different names in the Dock, the app
    switcher and the menu bar, so that I always know which one I'm in.
-3. As the user, I want T3 Pivot and Alpha to keep separate data and Tailscale ports, so
+3. As the user, I want T3 Pivot and Beta to keep separate data and Tailscale ports, so
    that I can run both at the same time.
 4. As the user, I want T3 Pivot to refuse to start while another server is running on its
    data, so that two servers can never write to the database at the same time.
 5. As the user, I want that refusal to tell me which app is holding the data and what to do,
    so that I can quit it and reopen T3 Pivot without guessing.
-6. As the user, I want T3 Pivot to start normally after Alpha crashed and left its runtime
+6. As the user, I want T3 Pivot to start normally after Beta crashed and left its runtime
    file behind, so that a stale file never locks me out.
 7. As the user, I want T3 Pivot's sidebar update button to check the fork's releases, so
    that it never offers me upstream's build.
@@ -67,7 +67,7 @@ follow the same feed.
 14. As the user, I want the sync command to reuse an open sync PR instead of opening a
     second one, so that pending merges don't pile up.
 15. As the user, I want sync to follow upstream's stable tags and ignore nightly and
-    preview tags, so that the fork stays level with what Alpha ships.
+    preview tags, so that the fork stays level with what Beta ships.
 16. As the user, I want one command that builds, signs, notarizes and publishes T3 Pivot,
     so that shipping a release doesn't need a checklist.
 17. As the user, I want the release command to refuse when `main` has uncommitted changes
@@ -97,7 +97,7 @@ follow the same feed.
 
 **App identity.** T3 Pivot has its own bundle id (`com.teoaliano.t3pivot`), product name
 ("T3 Pivot"), artifact name, Electron user-data directory and updater cache directory. The
-runtime display name drops the stage label ("T3 Pivot", not "T3 Pivot (Alpha)"). A
+runtime display name drops the stage label ("T3 Pivot", not "T3 Pivot (Beta)"). A
 development run stays distinguishable ("T3 Pivot (Dev)"). There is no legacy user-data
 directory to migrate from. These values replace upstream's at the places upstream defines
 them, in the desktop build config and the desktop environment. Nothing else in the codebase
@@ -246,7 +246,7 @@ test should have.
 
 ## Out of scope
 
-- **Guarding Alpha.** Alpha is upstream's build; only T3 Pivot checks for another server.
+- **Guarding Beta.** Beta is upstream's build; only T3 Pivot checks for another server.
 - **GitHub Actions releases.** Rejected: it needs Actions on, signing secrets in the repo,
   and upstream's release workflow disabled first.
 - **Scheduled sync.** `sync` is run by hand. A routine can call it later.
