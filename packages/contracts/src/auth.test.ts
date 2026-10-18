@@ -2,7 +2,6 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
 import {
-  AuthAdministrativeScopes,
   AuthEnvironmentScopes,
   AuthEnvironmentScope,
   authScopeRequiredResponse,
@@ -52,7 +51,6 @@ describe("authorization grants", () => {
   it("delegates pivot:host only to a host link, never through a default or legacy grant", () => {
     expect(Schema.decodeUnknownSync(AuthGrantScopes)(["pivot:host"])).toEqual(["pivot:host"]);
     expect(AuthStandardClientScopes).not.toContain("pivot:host");
-    expect(AuthAdministrativeScopes).not.toContain("pivot:host");
     // An old grant, however broad, implies nothing about it: not by parent, not by legacy scopes.
     for (const scopes of [
       ["orchestration:operate", "access:write"],

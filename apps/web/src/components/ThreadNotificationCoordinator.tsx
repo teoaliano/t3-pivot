@@ -15,7 +15,7 @@ import {
   MessageCircleQuestionIcon,
   ShieldQuestionIcon,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useRef } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 
 import { getClientSettings, useClientSettings } from "../hooks/useSettings";
 import { useEnvironmentIds } from "../state/environments";
@@ -42,18 +42,18 @@ export function ThreadNotificationCoordinator() {
   const pending = useRef(
     new Map<string, { environmentId: EnvironmentId; notification: Notification }>(),
   );
-  const onNotification = useCallback((environmentId: EnvironmentId, notification: Notification) => {
+  const onNotification = (environmentId: EnvironmentId, notification: Notification) => {
     pending.current.get(notification.tag)?.notification.close();
     pending.current.set(notification.tag, { environmentId, notification });
     setNotificationBadge(pending.current.size);
-  }, []);
+  };
 
   useEffect(() => {
     const activeIds = new Set(environmentIds);
     const count = pending.current.size;
-    for (const [tag, { environmentId, notification }] of pending.current) {
-      if (activeIds.has(environmentId)) continue;
-      notification.close();
+    for (const [tag, entry] of pending.current) {
+      if (activeIds.has(entry.environmentId)) continue;
+      entry.notification.close();
       pending.current.delete(tag);
     }
     if (count !== pending.current.size) setNotificationBadge(pending.current.size);
@@ -112,8 +112,6 @@ function EnvironmentNotifications({
   onNotification: (environmentId: EnvironmentId, notification: Notification) => void;
 }) {
   const shell = useAtomValue(environmentShell.stateValueAtom(environmentId));
-  // The shell reducer keeps the thread list and unchanged thread objects
-  // stable, so this only rescans when a thread actually changed.
   const threads =
     shell.status === "live" && Option.isSome(shell.snapshot) ? shell.snapshot.value.threads : null;
   const mode = useClientSettings((settings) => settings.notificationMode);
@@ -128,79 +126,68 @@ function EnvironmentNotifications({
   const pivotState = usePivotState(environmentId);
 
   /** Plays the sound, then shows a toast while focused elsewhere, or a desktop notification. */
-  const emit = useCallback(
-    (notice: {
-      readonly kind: "input" | "completion";
-      readonly title: string;
-      readonly threadId: ThreadId;
-      readonly description: string;
-      readonly tone: "success" | "error" | "warning";
-      readonly icon: ReactNode;
-    }) => {
-      const open = () =>
-        void navigate({
-          to: "/$environmentId/$threadId",
-          params: { environmentId, threadId: notice.threadId },
-        });
-      if (hasNotificationSound(mode)) {
-        void playNotificationSound(notice.kind, () =>
-          hasNotificationSound(getClientSettings().notificationMode),
-        );
-      }
-      if (
-        inAppNotificationsEnabled &&
-        document.visibilityState === "visible" &&
-        document.hasFocus() &&
-        (activeEnvironmentId !== environmentId || activeThreadId !== notice.threadId)
-      ) {
-        const toastId = toastManager.add({
-          type: notice.tone,
-          title: notice.title,
-          description: notice.description,
-          data: { hideCopyButton: true, leadingIcon: notice.icon },
-          actionProps: {
-            children: "Open thread",
-            onClick: () => {
-              toastManager.close(toastId);
-              open();
-            },
+  const emit = (notice: {
+    readonly kind: "input" | "completion";
+    readonly title: string;
+    readonly threadId: ThreadId;
+    readonly description: string;
+    readonly tone: "success" | "error" | "warning";
+    readonly icon: ReactNode;
+  }) => {
+    const open = () =>
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: { environmentId, threadId: notice.threadId },
+      });
+    if (hasNotificationSound(mode)) {
+      void playNotificationSound(notice.kind, () =>
+        hasNotificationSound(getClientSettings().notificationMode),
+      );
+    }
+    if (
+      inAppNotificationsEnabled &&
+      document.visibilityState === "visible" &&
+      document.hasFocus() &&
+      (activeEnvironmentId !== environmentId || activeThreadId !== notice.threadId)
+    ) {
+      const toastId = toastManager.add({
+        type: notice.tone,
+        title: notice.title,
+        description: notice.description,
+        data: { hideCopyButton: true, leadingIcon: notice.icon },
+        actionProps: {
+          children: "Open thread",
+          onClick: () => {
+            toastManager.close(toastId);
+            open();
           },
-        });
-        return;
-      }
-      if (
-        !hasDesktopNotifications(mode) ||
-        (document.visibilityState === "visible" && document.hasFocus()) ||
-        typeof Notification === "undefined" ||
-        Notification.permission !== "granted"
-      )
-        return;
-      try {
-        const notification = new Notification(notice.title, {
-          body: notice.description,
-          tag: `${environmentId}:${notice.threadId}`,
-          silent: true,
-        });
-        onNotification(environmentId, notification);
-        notification.addEventListener("click", () => {
-          notification.close();
-          window.focus();
-          open();
-        });
-      } catch {
-        // Some browsers expose Notification but reject desktop presentation.
-      }
-    },
-    [
-      activeEnvironmentId,
-      activeThreadId,
-      environmentId,
-      inAppNotificationsEnabled,
-      mode,
-      navigate,
-      onNotification,
-    ],
-  );
+        },
+      });
+      return;
+    }
+    if (
+      !hasDesktopNotifications(mode) ||
+      (document.visibilityState === "visible" && document.hasFocus()) ||
+      typeof Notification === "undefined" ||
+      Notification.permission !== "granted"
+    )
+      return;
+    try {
+      const notification = new Notification(notice.title, {
+        body: notice.description,
+        tag: `${environmentId}:${notice.threadId}`,
+        silent: true,
+      });
+      onNotification(environmentId, notification);
+      notification.addEventListener("click", () => {
+        notification.close();
+        window.focus();
+        open();
+      });
+    } catch {
+      // Some browsers expose Notification but reject desktop presentation.
+    }
+  };
 
   useEffect(() => {
     if (threads === null) {
@@ -208,13 +195,11 @@ function EnvironmentNotifications({
       return;
     }
     const next = new Map<ThreadId, NotificationState>();
-    // Subagents are skipped below, so their requests notify through the thread above them.
     const subagentRequests = pendingSubagentRequestsByThread(threads);
     for (const rawThread of threads) {
       if (rawThread.lineage.relationshipToParent === "subagent") continue;
       const prior = previous.current.get(rawThread.id);
       const subagentRequest = subagentRequests.get(rawThread.id) ?? null;
-      // The same object cannot produce a new notification.
       if (prior?.raw === rawThread && prior.subagentRequest === subagentRequest) {
         next.set(rawThread.id, prior);
         continue;
@@ -228,7 +213,6 @@ function EnvironmentNotifications({
           ? `${thread.latestRun?.runId ?? ""}:${status}`
           : null;
       const completedAt = Date.parse(thread.latestRun?.completedAt ?? "");
-      // Commands left running (a dev server) read as ready; subagents and monitors wait.
       const completion =
         status === "ready" &&
         thread.latestRun?.status === "completed" &&

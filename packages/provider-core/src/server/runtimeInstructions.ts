@@ -14,7 +14,6 @@ export interface RuntimeProject {
 
 /**
  * Shared runtime context; omit model and effort when the harness manages them dynamically.
- * `modelName` is the display name users see in the model picker; `model` is the slug.
  * `project` is set only for a Pivot, whose home is not the project it works on.
  */
 export function buildRuntimeInstructions(runtime: {
