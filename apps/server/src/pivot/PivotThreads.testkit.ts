@@ -269,7 +269,12 @@ export const layer = (fake: FakeV2) =>
           fake.failSend
             ? Effect.fail(new PivotThreadsError({ operation: "send", threadId }))
             : Effect.sync(() => {
-                found.messages.push({ senderThreadId, text, mode, attachments });
+                found.messages.push({
+                  senderThreadId,
+                  text,
+                  mode,
+                  ...(attachments === undefined ? {} : { attachments }),
+                });
               }),
         ),
       stop: (threadId) =>
