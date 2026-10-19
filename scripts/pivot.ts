@@ -434,6 +434,8 @@ const release = Effect.gen(function* () {
     [`${app}/Contents/Resources/app.asar/apps/server/dist/bin.mjs`, "--version"],
     { ELECTRON_RUN_AS_NODE: "1" },
   );
+  // A leftover copy shows up next to the installed app in Spotlight and Launchpad.
+  yield* run("rm", ["-rf", verifyDir]);
 
   const releaseUrl = yield* run(
     "gh",
