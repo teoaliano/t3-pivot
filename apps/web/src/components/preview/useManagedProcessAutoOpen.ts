@@ -1,5 +1,5 @@
 import type { ProjectScript, ScopedThreadRef } from "@t3tools/contracts";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 
 import { useDiscoveredPortsState } from "~/portDiscoveryState";
 import { selectActiveRightPanel, useRightPanelStore } from "~/rightPanelStore";
@@ -32,10 +32,7 @@ export function useManagedProcessAutoOpen(input: {
       input.scripts.some((script) => script.id === process.scriptId && script.autoOpenPreview),
   );
   const { servers } = useDiscoveredPortsState(watching ? environmentId : null);
-  const rows = useMemo(
-    () => managedPreviewRows({ processes, scripts: input.scripts, discovered: servers }),
-    [input.scripts, processes, servers],
-  );
+  const rows = managedPreviewRows({ processes, scripts: input.scripts, discovered: servers });
   const previewShowing = useRightPanelStore(
     (state) => selectActiveRightPanel(state.byThreadKey, input.threadRef) === "preview",
   );

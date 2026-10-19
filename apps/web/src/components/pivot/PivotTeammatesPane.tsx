@@ -6,7 +6,7 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import { EllipsisIcon } from "lucide-react";
-import { memo, useMemo } from "react";
+import { memo } from "react";
 
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { cn } from "../../lib/utils";
@@ -56,19 +56,17 @@ export function PivotTeammatesPane(props: {
   onOpen: (kind: TeammatePaneKind, teammate: ThreadId) => void;
 }) {
   const nowMinute = useNowMinute();
-  const nowMs = useMemo(() => Date.parse(`${nowMinute}:00.000Z`), [nowMinute]);
+  const nowMs = Date.parse(`${nowMinute}:00.000Z`);
   const shells = useThreadShells();
-  const cards = useMemo(() => {
-    const byId = new Map(
-      shells
-        .filter((shell) => shell.environmentId === props.environmentId)
-        .map((shell) => [shell.id as string, shell] as const),
-    );
-    return teammateCards(props.teammates, (threadId) => {
-      const shell = byId.get(threadId);
-      return shell === undefined ? null : teammateCardShellOf(shell.source, shell.pullRequests);
-    });
-  }, [props.environmentId, props.teammates, shells]);
+  const byId = new Map(
+    shells
+      .filter((shell) => shell.environmentId === props.environmentId)
+      .map((shell) => [shell.id as string, shell] as const),
+  );
+  const cards = teammateCards(props.teammates, (threadId) => {
+    const shell = byId.get(threadId);
+    return shell === undefined ? null : teammateCardShellOf(shell.source, shell.pullRequests);
+  });
 
   if (props.teammates.length === 0) {
     return (
@@ -229,11 +227,8 @@ function TeammateCardBody(props: TeammateCardProps) {
         avatar={
           <SubagentAvatar
             driver={provider?.driverKind}
-            provider={
-              provider === null
-                ? undefined
-                : { displayName: provider.displayName, iconUrl: provider.acpRegistryIconUrl }
-            }
+            displayName={provider?.displayName}
+            iconUrl={provider?.acpRegistryIconUrl}
             status={SUBAGENT_STATUS[card.status]}
             dotClassName={TEAMMATE_TONE_CLASSES[card.tone].dot}
           />

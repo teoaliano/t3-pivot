@@ -3,7 +3,6 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { useMemo } from "react";
 
 import { useServerConfigs } from "./entities";
 import { serverEnvironment } from "./server";
@@ -24,14 +23,10 @@ export function usePivotModeSupported(environmentId: EnvironmentId | null): bool
 /** The connected environments whose servers run Pivot mode. */
 export function usePivotModeEnvironmentIds(): ReadonlySet<EnvironmentId> {
   const configs = useServerConfigs();
-  return useMemo(
-    () =>
-      new Set(
-        [...configs]
-          .filter(([, config]) => config.environment.capabilities.pivotMode === true)
-          .map(([environmentId]) => environmentId),
-      ),
-    [configs],
+  return new Set(
+    [...configs]
+      .filter(([, config]) => config.environment.capabilities.pivotMode === true)
+      .map(([environmentId]) => environmentId),
   );
 }
 

@@ -50,7 +50,7 @@ import {
   SquareIcon,
   UnplugIcon,
 } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { cn } from "../../lib/utils";
@@ -66,10 +66,11 @@ import {
 import { sidebarPivotGroup } from "../sidebar/pivotNesting.logic";
 import {
   useProjects,
-  useServerConfigs,
   useThreadProjection,
+  useThreadRelationshipShells,
   useThreadShells,
 } from "../../state/entities";
+import { useEnvironmentProviders } from "../../state/environments";
 import { threadEnvironment } from "../../state/threads";
 import { orchestrationEnvironment } from "../../state/orchestration";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -97,7 +98,7 @@ export function resolveThreadLineageWindow<Row>(
   return { visibleRows, hiddenCount: rows.length - visibleRows.length };
 }
 
-export function ThreadLineageRowList(props: {
+function ThreadLineageRowList(props: {
   readonly hiddenCount: number;
   readonly onShowMore: () => void;
   readonly children: ReactNode;
@@ -286,73 +287,15 @@ export function ThreadRelationshipsPanel(props: {
 }) {
   const ref = scopeThreadRef(props.environmentId, props.threadId);
   const projection = useThreadProjection(ref)?.projection ?? null;
-  const providers = useServerConfigs().get(props.environmentId)?.providers;
-  const runtimeSubagents = useMemo(
-    () => projectedSubagentsToRuntime(projection?.subagents ?? []),
-    [projection?.subagents],
-  );
-  const subagentsByThreadId = useMemo(() => {
-    const byId = new Map(runtimeSubagents.map((agent) => [agent.id, agent]));
-    return new Map(
-      (projection?.subagents ?? [])
-        .filter((subagent) => subagent.childThreadId !== null)
-        .map((subagent) => [
-          subagent.childThreadId,
-          {
-            ...byId.get(subagent.id)!,
-            id: subagent.id,
-            threadId: subagent.threadId,
-            runId: subagent.runId,
-            nativeTaskRef: subagent.nativeTaskRef,
-            nativeStatus: subagent.status,
-            driver: subagent.driver,
-            providerInstanceId: subagent.providerInstanceId,
-            origin: subagent.origin,
-            modelSelection: subagent.modelSelection,
-          },
-        ]),
-    );
-  }, [projection?.subagents, runtimeSubagents]);
-  const workflowGroupsById = useMemo(
-    () =>
-      new Map(deriveWorkflowGroups(runtimeSubagents).map((group) => [group.workflow.id, group])),
-    [runtimeSubagents],
-  );
-  const threadShells = useThreadShells();
-  const projects = useProjects().filter((project) => project.environmentId === props.environmentId);
+  const providersByEnvironment = useEnvironmentProviders();
+  const relationshipShells = useThreadRelationshipShells(ref);
+  const allProjects = useProjects();
   const archived = useArchivedThreadSnapshots([props.environmentId]);
-  const archivedShells = archived.snapshots.find(
-    (entry) => entry.environmentId === props.environmentId,
-  )?.snapshot.threads;
-  const graph = useMemo(() => {
-    const shells: ReadonlyArray<OrchestrationV2ThreadShell> = [
-      ...threadShells
-        .filter((thread) => thread.environmentId === props.environmentId)
-        .map((thread) => thread.source),
-      ...(archivedShells ?? []),
-    ];
-    return deriveThreadRelationshipGraph({ threads: shells, projection });
-  }, [archivedShells, projection, props.environmentId, threadShells]);
-  const currentThread = projection?.thread ?? graph.nodes.get(props.threadId)?.thread;
-  const currentProject = projects.find((project) => project.id === currentThread?.projectId);
-  // A Pivot's teammates are its lineage too, but no edge links them: they come from the
-  // Pivot's records, not the thread graph. Settled ones leave, as in the sidebar.
+  // A Pivot's teammates are its lineage too, but no edge links them, so the relationship
+  // shells omit them: they come from the Pivot's records. Only a Pivot reads every shell.
   const pivotState = usePivotState(props.environmentId);
-  const teammates = useMemo(() => {
-    const shellByThreadId = new Map(
-      threadShells
-        .filter((thread) => thread.environmentId === props.environmentId)
-        .map((thread) => [thread.id, thread] as const),
-    );
-    return (
-      sidebarPivotGroup(pivotState, props.threadId, (threadId) => {
-        const shell = shellByThreadId.get(threadId);
-        return shell === undefined ? null : teammateCardShellOf(shell.source, shell.pullRequests);
-      })?.teammates ?? []
-    );
-  }, [pivotState, props.environmentId, props.threadId, threadShells]);
+  const environmentShells = useThreadShells(pivotState?.pivots[props.threadId] !== undefined);
   const nowMinute = useNowMinute();
-  const nowMs = useMemo(() => Date.parse(`${nowMinute}:00.000Z`), [nowMinute]);
   const navigate = useNavigate();
   const mergeBack = useAtomCommand(threadEnvironment.mergeBack);
   const stopSession = useAtomCommand(threadEnvironment.stopSession);
@@ -363,27 +306,74 @@ export function ThreadRelationshipsPanel(props: {
   );
   const [busyAction, setBusyAction] = useState<"merge" | "detach" | null>(null);
   const [stoppingId, setStoppingId] = useState<string | null>(null);
+  // These lookups and the graph walk every subagent and thread, so they sit below
+  // the panel's hooks where the compiler can cache them.
+  const providers = providersByEnvironment.get(props.environmentId);
+  const projects = allProjects.filter((project) => project.environmentId === props.environmentId);
+  const archivedShells = archived.snapshots.find(
+    (entry) => entry.environmentId === props.environmentId,
+  )?.snapshot.threads;
+  const projected = projection?.subagents ?? [];
+  const runtimeSubagents = projectedSubagentsToRuntime(projected);
+  const byId = new Map(runtimeSubagents.map((agent) => [agent.id, agent]));
+  const subagentsByThreadId = new Map(
+    projected
+      .filter((subagent) => subagent.childThreadId !== null)
+      .map((subagent) => [
+        subagent.childThreadId,
+        {
+          ...byId.get(subagent.id)!,
+          id: subagent.id,
+          threadId: subagent.threadId,
+          runId: subagent.runId,
+          nativeTaskRef: subagent.nativeTaskRef,
+          nativeStatus: subagent.status,
+          driver: subagent.driver,
+          providerInstanceId: subagent.providerInstanceId,
+          origin: subagent.origin,
+          modelSelection: subagent.modelSelection,
+        },
+      ]),
+  );
+  const workflowGroupsById = new Map(
+    deriveWorkflowGroups(runtimeSubagents).map((group) => [group.workflow.id, group]),
+  );
+  const shells: ReadonlyArray<OrchestrationV2ThreadShell> = [
+    ...relationshipShells,
+    ...(archivedShells ?? []),
+  ];
+  const graph = deriveThreadRelationshipGraph({ threads: shells, projection });
+  const currentThread = projection?.thread ?? graph.nodes.get(props.threadId)?.thread;
+  const currentProject = projects.find((project) => project.id === currentThread?.projectId);
+  // Settled teammates leave, as in the sidebar.
+  const shellByThreadId = new Map(
+    environmentShells
+      .filter((thread) => thread.environmentId === props.environmentId)
+      .map((thread) => [thread.id, thread] as const),
+  );
+  const teammates =
+    sidebarPivotGroup(pivotState, props.threadId, (threadId) => {
+      const shell = shellByThreadId.get(threadId);
+      return shell === undefined ? null : teammateCardShellOf(shell.source, shell.pullRequests);
+    })?.teammates ?? [];
+  const nowMs = Date.parse(`${nowMinute}:00.000Z`);
   const latestMergeBackRun = projection === null ? null : resolveLatestMergeBackRun(projection);
   const mergeTargetThreadId = resolveMergeBackTargetThreadId(projection);
-  const relationshipRows = useMemo(
-    () =>
-      orderWebThreadLineageRows({
-        graph,
-        rows: immediateThreadRelationships(graph, props.threadId),
-        currentThreadId: props.threadId,
-        mergeTargetThreadId,
-      }).map((row) => {
-        const agent =
-          row.edge.kind === "subagent" && !isParentThreadRelationship(row.edge, props.threadId)
-            ? subagentsByThreadId.get(row.threadId)
-            : undefined;
-        const workflowGroup = agent === undefined ? undefined : workflowGroupsById.get(agent.id);
-        return workflowGroup === undefined
-          ? row
-          : { ...row, edge: { ...row.edge, status: workflowGroup.workflow.status } };
-      }),
-    [graph, mergeTargetThreadId, props.threadId, subagentsByThreadId, workflowGroupsById],
-  );
+  const relationshipRows = orderWebThreadLineageRows({
+    graph,
+    rows: immediateThreadRelationships(graph, props.threadId),
+    currentThreadId: props.threadId,
+    mergeTargetThreadId,
+  }).map((row) => {
+    const agent =
+      row.edge.kind === "subagent" && !isParentThreadRelationship(row.edge, props.threadId)
+        ? subagentsByThreadId.get(row.threadId)
+        : undefined;
+    const workflowGroup = agent === undefined ? undefined : workflowGroupsById.get(agent.id);
+    return workflowGroup === undefined
+      ? row
+      : { ...row, edge: { ...row.edge, status: workflowGroup.workflow.status } };
+  });
   const canMerge = mergeTargetThreadId !== null && latestMergeBackRun !== null;
   const canDetach = projection ? canDetachThreadProviderSession(projection) : false;
 

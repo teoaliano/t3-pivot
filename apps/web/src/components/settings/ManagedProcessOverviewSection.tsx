@@ -1,5 +1,4 @@
 import type { EnvironmentId, ManagedProcess } from "@t3tools/contracts";
-import { useMemo } from "react";
 
 import { managedProcessEnvironment } from "~/state/managedProcesses";
 import { useProjects, useThreadShells } from "~/state/entities";
@@ -24,14 +23,10 @@ export function ManagedProcessOverviewSection({
   const setPinned = useAtomCommand(managedProcessEnvironment.setPinned);
   const projects = useProjects();
   const threads = useThreadShells();
-  const rows = useMemo(
-    () =>
-      managedProcessOverviewRows(data?.processes ?? [], {
-        projects: projects.filter((project) => project.environmentId === environmentId),
-        threads: threads.filter((thread) => thread.environmentId === environmentId),
-      }),
-    [data, environmentId, projects, threads],
-  );
+  const rows = managedProcessOverviewRows(data?.processes ?? [], {
+    projects: projects.filter((project) => project.environmentId === environmentId),
+    threads: threads.filter((thread) => thread.environmentId === environmentId),
+  });
   if (environmentId === null) return null;
 
   return (

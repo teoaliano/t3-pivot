@@ -1,5 +1,5 @@
 import type { PivotDecision } from "@t3tools/contracts";
-import { useCallback, useEffect } from "react";
+import { useEffect } from "react";
 
 import { DraftId, useComposerDraftStore, useComposerThreadDraft } from "~/composerDraftStore";
 
@@ -16,10 +16,7 @@ export function pivotDecisionDraftTarget(decision: PivotDecision): DraftId {
 export function usePivotDecisionDraft(decision: PivotDecision) {
   const target = pivotDecisionDraftTarget(decision);
   const text = useComposerThreadDraft(target).prompt;
-  const setText = useCallback(
-    (next: string) => useComposerDraftStore.getState().setPrompt(target, next),
-    [target],
-  );
+  const setText = (next: string) => useComposerDraftStore.getState().setPrompt(target, next);
   return [text, setText] as const;
 }
 

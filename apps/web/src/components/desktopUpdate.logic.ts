@@ -5,10 +5,25 @@ import { APP_BASE_NAME } from "../branding";
 export type DesktopUpdateButtonAction = "download" | "install" | "none";
 
 // T3 Pivot publishes its desktop releases here, tagged `pivot-vX.Y.Z`.
-const DESKTOP_RELEASE_REPOSITORY = "teoaliano/t3-pivot";
+const DEFAULT_DESKTOP_RELEASE_REPOSITORY = "teoaliano/t3-pivot";
 const DESKTOP_RELEASE_TAG_PREFIX = "pivot-v";
-const DESKTOP_RELEASE_HISTORY_URL = `https://github.com/${DESKTOP_RELEASE_REPOSITORY}/releases`;
-const DESKTOP_RELEASE_TAG_URL = `${DESKTOP_RELEASE_HISTORY_URL}/tag`;
+const GITHUB_REPOSITORY_SEGMENT = /^[A-Za-z0-9._-]+$/u;
+
+function isValidRepositorySegment(value: string | undefined): value is string {
+  return (
+    value !== undefined && value !== "." && value !== ".." && GITHUB_REPOSITORY_SEGMENT.test(value)
+  );
+}
+
+function desktopReleaseRepositoryUrl(repository: string | undefined): string {
+  const configuredRepository = repository?.trim() ?? "";
+  const [owner, name, ...extra] = configuredRepository.split("/");
+  const releaseRepository =
+    isValidRepositorySegment(owner) && isValidRepositorySegment(name) && extra.length === 0
+      ? configuredRepository
+      : DEFAULT_DESKTOP_RELEASE_REPOSITORY;
+  return `https://github.com/${releaseRepository}/releases`;
+}
 
 /**
  * The main process fills `downloadedVersion` from the updater's `update-downloaded`
@@ -19,14 +34,19 @@ export function getDesktopUpdateDownloadedVersion(state: DesktopUpdateState): st
   return state.downloadedVersion ?? state.availableVersion;
 }
 
-export function getDesktopUpdateReleaseUrl(version: string | null): string | null {
+export function getDesktopUpdateReleaseUrl(
+  version: string | null,
+  repository: string | undefined = import.meta.env.T3CODE_DESKTOP_UPDATE_REPOSITORY,
+): string | null {
   const normalizedVersion = version?.trim();
   if (!normalizedVersion) return null;
-  return `${DESKTOP_RELEASE_TAG_URL}/${DESKTOP_RELEASE_TAG_PREFIX}${encodeURIComponent(normalizedVersion)}`;
+  return `${desktopReleaseRepositoryUrl(repository)}/tag/${DESKTOP_RELEASE_TAG_PREFIX}${encodeURIComponent(normalizedVersion)}`;
 }
 
-export function getDesktopUpdateReleaseHistoryUrl(): string {
-  return DESKTOP_RELEASE_HISTORY_URL;
+export function getDesktopUpdateReleaseHistoryUrl(
+  repository: string | undefined = import.meta.env.T3CODE_DESKTOP_UPDATE_REPOSITORY,
+): string {
+  return desktopReleaseRepositoryUrl(repository);
 }
 
 export function resolveDesktopUpdateButtonAction(

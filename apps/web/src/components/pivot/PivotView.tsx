@@ -8,7 +8,6 @@ import {
   lazy,
   type ReactNode,
   Suspense,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -21,6 +20,7 @@ import {
   type ProviderInstanceEntry,
 } from "../../providerInstances";
 import { useProject, useServerConfigs, useThreadShell } from "../../state/entities";
+import { useEnvironmentProviders } from "../../state/environments";
 import { usePivotState } from "../../state/pivot";
 import { useEnvironmentQuery } from "../../state/query";
 import {
@@ -124,10 +124,7 @@ export function PivotView(props: { pivot: ScopedThreadRef }) {
   );
   const state = usePivotState(pivot.environmentId);
   const record = state?.pivots[pivot.threadId] ?? null;
-  const teammates = useMemo(
-    () => (state === null ? [] : teammatesOfPivot(state, pivot.threadId)),
-    [pivot.threadId, state],
-  );
+  const teammates = state === null ? [] : teammatesOfPivot(state, pivot.threadId);
   const layout = usePivotLayout(pivot);
   const setStoredLayout = usePivotViewStore((store) => store.setLayout);
   const setLayout = (next: LayoutNode) => {
@@ -137,15 +134,13 @@ export function PivotView(props: { pivot: ScopedThreadRef }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const configs = useServerConfigs();
   const config = configs.get(pivot.environmentId);
-  const providerEntries = useMemo(
-    () =>
-      config === undefined
-        ? new Map<string, ProviderInstanceEntry>()
-        : (deriveProviderEntriesByEnvironment([
-            [pivot.environmentId, config.providers, config.settings],
-          ]).get(pivot.environmentId) ?? new Map<string, ProviderInstanceEntry>()),
-    [config, pivot.environmentId],
-  );
+  const providers = useEnvironmentProviders().get(pivot.environmentId);
+  const providerEntries =
+    config === undefined
+      ? new Map<string, ProviderInstanceEntry>()
+      : (deriveProviderEntriesByEnvironment([
+          [pivot.environmentId, providers ?? [], config.settings],
+        ]).get(pivot.environmentId) ?? new Map<string, ProviderInstanceEntry>());
   const openPane = (kind: TeammatePaneKind, teammate: ThreadId) =>
     setLayout(openTeammatePane(layout, kind, teammate));
   const panes = new Set(listPanes(layout));

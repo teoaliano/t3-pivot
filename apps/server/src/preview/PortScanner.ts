@@ -826,15 +826,13 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
   const scanUnlocked = Effect.fn("PortDiscovery.scanUnlocked")(function* (
     configuredUrls: ReadonlyArray<string>,
   ) {
-    if (hostPlatform === "win32") {
-      // Nothing to attribute or probe, so skip the netstat queries.
-      const { terminalProcesses, managedPorts } = yield* Ref.get(stateRef);
-      const hasTerminalProcess = [...terminalProcesses.values()].some(
-        (registration) => registration.processIds.size > 0,
-      );
-      if (!hasTerminalProcess && configuredUrls.length === 0 && managedPorts.length === 0) {
-        return { discovered: [], configured: new Map() } satisfies WebProbeSnapshot;
-      }
+    // Nothing to attribute or probe, so skip the listener query.
+    const { terminalProcesses, managedPorts } = yield* Ref.get(stateRef);
+    const hasTerminalProcess = [...terminalProcesses.values()].some(
+      (registration) => registration.processIds.size > 0,
+    );
+    if (!hasTerminalProcess && configuredUrls.length === 0 && managedPorts.length === 0) {
+      return { discovered: [], configured: new Map() } satisfies WebProbeSnapshot;
     }
     const listeners = yield* listProcessListeners();
     const snapshot = yield* probeWebServers(

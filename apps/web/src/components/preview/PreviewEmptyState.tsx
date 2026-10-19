@@ -10,7 +10,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import * as Schema from "effect/Schema";
 import { Globe, History, RadioTower, SquareTerminal } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 
 import type { BrowserHistoryEntry } from "~/browserHistoryStore";
 import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "~/components/ui/empty";
@@ -60,10 +60,7 @@ export function PreviewEmptyState({
     configuredUrls,
   });
   const { processes, detectedScript } = useManagedProcesses(environmentId, checkoutPath);
-  const rows = useMemo(
-    () => managedPreviewRows({ processes, scripts, detectedScript, discovered: servers }),
-    [detectedScript, processes, scripts, servers],
-  );
+  const rows = managedPreviewRows({ processes, scripts, detectedScript, discovered: servers });
   const recents = recentEntries.filter((entry) => URL.canParse(entry.url)).slice(0, 8);
   const sections = previewEmptyStateSections({ rows, servers, recents });
 
@@ -79,44 +76,41 @@ export function PreviewEmptyState({
     if (!target) return;
     pendingScriptId.current = null;
     onOpenUrl(target.requestedUrl);
-  }, [onOpenUrl, rows]);
+  }, [onOpenUrl, pendingScriptId, rows]);
 
-  const handleStart = useCallback(
-    async function startScript(scriptId: string, reallocate = false): Promise<void> {
-      pendingScriptId.current = scriptId;
-      const result = await start({
-        environmentId,
-        input: { threadId: threadRef.threadId, scriptId, ...(reallocate ? { reallocate } : {}) },
-      });
-      if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
-      pendingScriptId.current = null;
-      const error = squashAtomCommandFailure(result);
-      if (isPortOccupied(error)) {
-        const occupied = error;
-        const toastId = toastManager.add(
-          stackedThreadToast({
-            type: "warning",
-            title: `Port ${occupied.port} is taken`,
-            description: `${describeOccupant(occupied)} holds this checkout's port. It was left running.`,
-            actionProps: {
-              children: "Use a new port",
-              onClick: () => {
-                toastManager.close(toastId);
-                void startScript(scriptId, true);
-              },
+  const handleStart = async (scriptId: string, reallocate = false): Promise<void> => {
+    pendingScriptId.current = scriptId;
+    const result = await start({
+      environmentId,
+      input: { threadId: threadRef.threadId, scriptId, ...(reallocate ? { reallocate } : {}) },
+    });
+    if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
+    pendingScriptId.current = null;
+    const error = squashAtomCommandFailure(result);
+    if (isPortOccupied(error)) {
+      const occupied = error;
+      const toastId = toastManager.add(
+        stackedThreadToast({
+          type: "warning",
+          title: `Port ${occupied.port} is taken`,
+          description: `${describeOccupant(occupied)} holds this checkout's port. It was left running.`,
+          actionProps: {
+            children: "Use a new port",
+            onClick: () => {
+              toastManager.close(toastId);
+              void handleStart(scriptId, true);
             },
-          }),
-        );
-        return;
-      }
-      toastManager.add({
-        type: "error",
-        title: "Could not start the dev server",
-        description: error instanceof Error ? error.message : String(error),
-      });
-    },
-    [environmentId, start, threadRef.threadId],
-  );
+          },
+        }),
+      );
+      return;
+    }
+    toastManager.add({
+      type: "error",
+      title: "Could not start the dev server",
+      description: error instanceof Error ? error.message : String(error),
+    });
+  };
 
   if (sections.length === 0) {
     return (
