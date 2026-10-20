@@ -437,6 +437,7 @@ function TeammatePaneBody(props: {
             composerDraftTarget={teammateRef}
             keybindings={keybindings}
             availableEditors={availableEditors}
+            openInShortcutEnabled
             revealLine={null}
             revealRequestId={0}
             onOpenFile={(path) => {

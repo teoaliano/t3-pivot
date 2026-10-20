@@ -25,6 +25,7 @@ import {
   hasNotificationSound,
   playNotificationSound,
   setNotificationBadge,
+  threadNotificationTag,
   unlockNotificationAudio,
 } from "../threadNotifications";
 import { usePivotState } from "../state/pivot";
@@ -175,13 +176,14 @@ function EnvironmentNotifications({
     try {
       const notification = new Notification(notice.title, {
         body: notice.description,
-        tag: `${environmentId}:${notice.threadId}`,
+        tag: threadNotificationTag(environmentId, notice.threadId),
         silent: true,
       });
       onNotification(environmentId, notification);
       notification.addEventListener("click", () => {
         notification.close();
         window.focus();
+        void window.desktopBridge?.revealWindow?.().catch(() => undefined);
         open();
       });
     } catch {

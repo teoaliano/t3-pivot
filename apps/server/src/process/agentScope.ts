@@ -189,6 +189,8 @@ function parseCgroupCounter(text: string, key: string): number | undefined {
 // A stop sends SIGTERM, then SIGKILL after this long. systemd's 90 s default
 // would outlast the wait for a previous server's agents below.
 const STOP_TIMEOUT_OPTION = "--property=TimeoutStopSec=10s";
+const OOM_STOP_OPTION = "--property=OOMPolicy=stop";
+const OOM_CONTINUE_OPTION = "--property=OOMPolicy=continue";
 const STOPPING_POLL_INTERVAL = "100 millis";
 const STOPPING_POLL_ATTEMPTS = 20;
 const CLEAR_FAILED_INTERVAL = "1 second";
@@ -301,7 +303,7 @@ export const make = Effect.gen(function* () {
       // Each option set is proven before use, so a user manager without the memory
       // controller still gets scopes, just without per-scope limits.
       const stopOptions = [STOP_TIMEOUT_OPTION];
-      const oomOptions = ["--property=OOMPolicy=stop"];
+      const oomOptions = [OOM_STOP_OPTION];
       const memoryOptions = [
         `--property=MemoryHigh=${scopeLimits.high}`,
         `--property=MemoryMax=${scopeLimits.max}`,
@@ -344,7 +346,7 @@ export const make = Effect.gen(function* () {
         slice: AGENT_SLICE,
         ...limits,
         scope: scopeLimits,
-        oomPolicy: scopeOptions.includes(oomOptions[0]!),
+        oomPolicy: scopeOptions.includes(OOM_STOP_OPTION),
         scopeMemoryLimits: scopeOptions.includes(memoryOptions[0]!),
       });
       return {
@@ -557,6 +559,7 @@ export const make = Effect.gen(function* () {
       threadId,
       env,
       survivesRestart,
+      shared,
     }) {
       const resolved = yield* resolve(command, env ?? hostEnvironment);
       if (resolved === null) return { command, args };
@@ -565,15 +568,26 @@ export const make = Effect.gen(function* () {
       const id = NodeCrypto.randomUUID().slice(0, 8);
       const unit =
         owner.length === 0 ? `t3code-${name}-${id}.scope` : `t3code-${name}-${owner}-${id}.scope`;
-      if (threadId !== undefined) yield* track(scope.systemctl, threadId, unit);
+      // A continuing shared scope cannot attribute a tool's OOM to one thread.
+      // Clear the launch thread's previous scope instead.
+      const continuing = shared === true && scope.scopeOptions.includes(OOM_STOP_OPTION);
+      const owned = threadId !== undefined && !continuing;
+      if (threadId !== undefined) yield* track(scope.systemctl, threadId, owned ? unit : undefined);
       const systemdScope: AgentSystemdScope = {
         systemdRun: scope.systemdRun,
         runtimeDir: scope.runtimeDir,
         slice: survivesRestart === true ? AGENT_SLICE : ownedSlice,
         unit,
-        // Without a thread nothing reads the result, so let systemd unload
-        // the unit even when it fails.
-        options: threadId === undefined ? [...scope.scopeOptions, "--collect"] : scope.scopeOptions,
+        // Without an owning thread nothing reads the result, so let systemd
+        // unload the unit even when it fails.
+        options: [
+          ...(continuing
+            ? scope.scopeOptions.map((option) =>
+                option === OOM_STOP_OPTION ? OOM_CONTINUE_OPTION : option,
+              )
+            : scope.scopeOptions),
+          ...(owned ? [] : ["--collect"]),
+        ],
       };
       return agentScopeCommand({ command: resolved, args, scope: systemdScope });
     }),

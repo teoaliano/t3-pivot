@@ -1,7 +1,7 @@
 import { View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
-import { RequestActionButton } from "./RequestActionButton";
+import { Button } from "../../components/ui/Button";
 
 /** Replaces the composer on a retired Pivot, which is read-only history. */
 export function RetiredPivotBar(props: { readonly onOpenSuccessor: (() => void) | null }) {
@@ -11,7 +11,7 @@ export function RetiredPivotBar(props: { readonly onOpenSuccessor: (() => void) 
         This Pivot is retired. Its live work moved to the Pivot that took over.
       </Text>
       {props.onOpenSuccessor ? (
-        <RequestActionButton
+        <Button
           label="Open the active Pivot"
           tone="secondary"
           onPress={props.onOpenSuccessor}
