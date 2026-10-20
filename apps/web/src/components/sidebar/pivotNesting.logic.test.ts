@@ -143,12 +143,12 @@ describe("Pivot nesting in the sidebar", () => {
     expect(group?.teammates.map((card) => card.threadId)).toEqual(["first", "second", "third"]);
     // Two teammates need the user, plus the Pivot's own held decision.
     expect(group?.needYou).toBe(3);
-    // The running one is working; the torn-down and the settled one are finished.
+    // The running one is working; the torn-down and the settled one are retired, not done.
     expect(group?.working).toBe(1);
-    expect(group?.done).toBe(2);
+    expect(group?.done).toBe(0);
     expect(group?.retired).toBe(false);
     // A takeover moves every live teammate and tears them down: the retired Pivot has
-    // nothing to ask of the user, only its finished teammates to count.
+    // nothing left to count.
     const afterTakeover: PivotState = {
       ...state,
       teammates: {
@@ -162,7 +162,7 @@ describe("Pivot nesting in the sidebar", () => {
       teammates: [],
       needYou: 0,
       working: 0,
-      done: 1,
+      done: 0,
     });
     const nothing = { retired: false, teammates: [], needYou: 0, working: 0, done: 0 };
     expect(pivotGroupHasTeammates(nothing)).toBe(false);
@@ -219,16 +219,18 @@ describe("Pivot nesting in the sidebar", () => {
       ),
     ).toMatchObject({ needYou: 2, working: 0, done: 0 });
 
-    // A torn-down teammate and a settled one are finished, and both count as done.
+    // A finished teammate still in view is done; torn-down and settled ones are retired.
     expect(
       counted(
         {
           t: { ...teammate("t", "active", T), tornDownAt: "2026-10-05T01:00:00.000Z" },
           s: teammate("s", "active", T),
+          d: { ...teammate("d", "active", T), report: { status: "done", runId: "run" } as never },
         },
-        () => shell({ status: "idle", settled: true }),
+        (threadId) =>
+          shell({ status: "idle", latestRunId: "run" as never, settled: threadId !== "d" }),
       ),
-    ).toMatchObject({ done: 2, working: 0, needYou: 0, teammates: [] });
+    ).toMatchObject({ done: 1, working: 0, needYou: 0 });
 
     // Only the Pivot's own decisions count toward its own need; a teammate's do not.
     const decision = (decisionId: string, teammateThreadId: string | null) =>
