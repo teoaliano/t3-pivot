@@ -74,7 +74,10 @@ export interface SidebarPivotGroup {
   readonly needYou: number;
   /** Teammates still working. */
   readonly working: number;
-  /** Teammates finished, settled or not, so the count reads as the Pivot's record. */
+  /**
+   * Teammates finished but still in view: waiting on the user's feedback or on another
+   * teammate's work. Torn-down and settled teammates are retired and leave the count.
+   */
   readonly done: number;
 }
 
@@ -101,8 +104,7 @@ export function sidebarPivotGroup(
       teammates.filter((card) => card.tone === "attention" || card.tone === "failed").length +
       ownDecisions,
     working: teammates.filter((card) => card.tone === "working").length,
-    // Settled cards are finished for good, whatever their last report said.
-    done: cards.filter((card) => card.settled || card.tone === "resting").length,
+    done: teammates.filter((card) => card.tone === "resting").length,
   };
 }
 
