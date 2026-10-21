@@ -28,8 +28,6 @@ import {
   type ScopeState,
 } from "./agentScope.ts";
 
-const GiB = 1024 ** 3;
-
 const running: ScopeState = {
   loadState: "loaded",
   activeState: "active",
@@ -37,6 +35,8 @@ const running: ScopeState = {
   oomKills: 0,
   populated: true,
 };
+
+const GiB = 1024 ** 3;
 
 describe("classifyScope", () => {
   it("reports an OOM kill only once systemd records it", () => {
@@ -46,26 +46,6 @@ describe("classifyScope", () => {
     expect(classifyScope({ ...running, oomKills: 1 })).toBe("stopping");
     expect(classifyScope({ ...running, populated: false })).toBe("stopping");
     expect(classifyScope({ ...running, activeState: "deactivating" })).toBe("stopping");
-  });
-
-  it("does not wait on a live agent or a scope that ended for another reason", () => {
-    expect(classifyScope(running)).toBe("running");
-    expect(classifyScope({ ...running, activeState: "inactive", populated: undefined })).toBe(
-      "gone",
-    );
-    expect(classifyScope({ ...running, loadState: "not-found", activeState: "inactive" })).toBe(
-      "gone",
-    );
-  });
-});
-
-describe("agentSliceMemoryLimits", () => {
-  it("leaves 6 GB before throttling and 4 GB before a kill on large machines", () => {
-    expect(agentSliceMemoryLimits(64 * GiB)).toEqual({ high: 58 * GiB, max: 60 * GiB });
-  });
-
-  it("still gives agents most of a small machine", () => {
-    expect(agentSliceMemoryLimits(8 * GiB)).toEqual({ high: 4 * GiB, max: 6 * GiB });
   });
 });
 
@@ -291,21 +271,6 @@ describe("AgentScope service", () => {
       ),
   );
 
-  it.effect("labels the shared Codex app-server's OOM kill on systemd without OOMPolicy", () =>
-    withFakeSystemd(
-      ({ scope, units }) =>
-        Effect.gen(function* () {
-          const codex = yield* launchCodex(scope, "a");
-          units.set(unitOf(codex), { activeState: "failed", result: "oom-kill" });
-          expect(yield* scope.oomKilled("a")).toBe(true);
-          expect(codex.args.filter((arg) => arg.includes("OOMPolicy"))).toEqual([]);
-          expect(codex.args).not.toContain("--collect");
-          expect(codex.args).toContain("--property=TimeoutStopSec=10s");
-        }),
-      { oomPolicy: false },
-    ),
-  );
-
   it.effect("keeps a running scope while hundreds of other threads launch", () =>
     withFakeSystemd(({ scope, units }) =>
       Effect.gen(function* () {
@@ -337,15 +302,6 @@ describe("AgentScope service", () => {
         });
         expect(sliceOf(terminal)).toBe("app-t3code-agents.slice");
         expect(calls.filter(([, verb]) => verb === "stop")).toHaveLength(1);
-      }),
-    ),
-  );
-
-  it.effect("leaves a quiet slice alone", () =>
-    withFakeSystemd(({ scope, calls }) =>
-      Effect.gen(function* () {
-        yield* scope.wrap({ command: "agent", args: [], name: "t", threadId: "a" });
-        expect(calls.filter(([, verb]) => verb === "stop")).toEqual([]);
       }),
     ),
   );

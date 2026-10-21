@@ -36,33 +36,32 @@ const pointsAtLinkedWorktree = (gitFileContents: string, path: Path.Path): boole
   return segments.length >= 3 && segments.at(-2) === "worktrees";
 };
 
-export const resolveGitWorktreePath = (
+export const resolveGitWorktreePath = Effect.fn("devHome.resolveGitWorktreePath")(function* (
   cwd: string,
-): Effect.Effect<string | undefined, never, FileSystem.FileSystem | Path.Path> =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
+): Effect.fn.Return<string | undefined, never, FileSystem.FileSystem | Path.Path> {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
 
-    let directory = path.resolve(cwd);
-    for (;;) {
-      const gitPath = path.join(directory, ".git");
-      const info = yield* fileSystem.stat(gitPath).pipe(Effect.option);
-      if (Option.isSome(info)) {
-        if (info.value.type !== "File") {
-          return undefined;
-        }
-        const contents = yield* fileSystem
-          .readFileString(gitPath)
-          .pipe(Effect.orElseSucceed(() => ""));
-        return pointsAtLinkedWorktree(contents, path) ? directory : undefined;
-      }
-      const parent = path.dirname(directory);
-      if (parent === directory) {
+  let directory = path.resolve(cwd);
+  for (;;) {
+    const gitPath = path.join(directory, ".git");
+    const info = yield* fileSystem.stat(gitPath).pipe(Effect.option);
+    if (Option.isSome(info)) {
+      if (info.value.type !== "File") {
         return undefined;
       }
-      directory = parent;
+      const contents = yield* fileSystem
+        .readFileString(gitPath)
+        .pipe(Effect.orElseSucceed(() => ""));
+      return pointsAtLinkedWorktree(contents, path) ? directory : undefined;
     }
-  });
+    const parent = path.dirname(directory);
+    if (parent === directory) {
+      return undefined;
+    }
+    directory = parent;
+  }
+});
 
 /**
  * The checkout-local data directory for `cwd`: `<root>/.t3` in a linked
@@ -70,34 +69,32 @@ export const resolveGitWorktreePath = (
  * submodule. Deliberately does not require the directory to exist yet: falling
  * back because it is missing would send callers at the shared home.
  */
-export const resolveWorktreeT3Home = (
+export const resolveWorktreeT3Home = Effect.fn("devHome.resolveWorktreeT3Home")(function* (
   cwd: string,
-): Effect.Effect<string | undefined, never, FileSystem.FileSystem | Path.Path> =>
-  Effect.gen(function* () {
-    const path = yield* Path.Path;
-    const worktreePath = yield* resolveGitWorktreePath(cwd);
-    const checkoutPath = worktreePath ?? (yield* resolveMainCheckoutPath(cwd));
-    return checkoutPath === undefined ? undefined : path.join(checkoutPath, ".t3");
-  });
+): Effect.fn.Return<string | undefined, never, FileSystem.FileSystem | Path.Path> {
+  const path = yield* Path.Path;
+  const worktreePath = yield* resolveGitWorktreePath(cwd);
+  const checkoutPath = worktreePath ?? (yield* resolveMainCheckoutPath(cwd));
+  return checkoutPath === undefined ? undefined : path.join(checkoutPath, ".t3");
+});
 
 /** The main checkout containing `cwd`: the nearest directory whose `.git` is a directory. */
-const resolveMainCheckoutPath = (
+const resolveMainCheckoutPath = Effect.fn("devHome.resolveMainCheckoutPath")(function* (
   cwd: string,
-): Effect.Effect<string | undefined, never, FileSystem.FileSystem | Path.Path> =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
+): Effect.fn.Return<string | undefined, never, FileSystem.FileSystem | Path.Path> {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
 
-    let directory = path.resolve(cwd);
-    for (;;) {
-      const info = yield* fileSystem.stat(path.join(directory, ".git")).pipe(Effect.option);
-      if (Option.isSome(info)) {
-        return info.value.type === "Directory" ? directory : undefined;
-      }
-      const parent = path.dirname(directory);
-      if (parent === directory) {
-        return undefined;
-      }
-      directory = parent;
+  let directory = path.resolve(cwd);
+  for (;;) {
+    const info = yield* fileSystem.stat(path.join(directory, ".git")).pipe(Effect.option);
+    if (Option.isSome(info)) {
+      return info.value.type === "Directory" ? directory : undefined;
     }
-  });
+    const parent = path.dirname(directory);
+    if (parent === directory) {
+      return undefined;
+    }
+    directory = parent;
+  }
+});
