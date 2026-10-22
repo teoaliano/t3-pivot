@@ -227,8 +227,6 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             provider={entry.driverKind}
             models={entry.models}
             model={value.model}
-            prompt=""
-            onPromptChange={() => {}}
             modelOptions={value.options ?? []}
             allowPromptInjectedEffort={false}
             planModeEnabled={settings.planModeEnabled}
@@ -295,8 +293,6 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
                 provider={activeEntry.driverKind}
                 models={activeEntry.models}
                 model={selection.model}
-                prompt=""
-                onPromptChange={() => {}}
                 modelOptions={selection.options ?? []}
                 allowPromptInjectedEffort={false}
                 planModeEnabled={settings.planModeEnabled}
