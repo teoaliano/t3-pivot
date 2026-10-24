@@ -23,6 +23,11 @@ export interface AgentScopeShape {
   }) => Effect.Effect<AgentScopeCommand>;
   readonly oomKilled: (threadId: string) => Effect.Effect<boolean>;
   /**
+   * Reaps processes left after the owning agent exits, including setsid
+   * descendants outside its process group. Preserves systemd OOM diagnosis.
+   */
+  readonly stop: (unit: string) => Effect.Effect<void>;
+  /**
    * Forgets the thread's scope. The session manager calls it before it opens
    * a provider session, so a scope only answers for the session that launched
    * it, even when the next session runs without one (Cursor, OpenCode).
@@ -32,7 +37,7 @@ export interface AgentScopeShape {
    * Stops every process still running in the thread's latest agent scope:
    * SIGTERM first, then SIGKILL for what survives the grace period.
    */
-  readonly stop: (threadId: string) => Effect.Effect<void>;
+  readonly stopThread: (threadId: string) => Effect.Effect<void>;
   /**
    * One admission attempt for an agent about to start; it never waits. Agents start in
    * the order they asked, across every T3 server of this user. A ticket that is not
@@ -102,14 +107,17 @@ export class AgentMemoryDeferral extends Schema.TaggedError<AgentMemoryDeferral>
 export interface AgentScopeCommand {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
+  /** The systemd scope the command runs in, for `stop`. */
+  readonly unit?: string | undefined;
 }
 
 export const AgentScope = Context.Reference<AgentScopeShape>("@t3tools/shared/AgentScope", {
   defaultValue: () => ({
     wrap: ({ command, args }) => Effect.succeed({ command, args }),
     oomKilled: () => Effect.succeed(false),
-    clear: () => Effect.void,
     stop: () => Effect.void,
+    clear: () => Effect.void,
+    stopThread: () => Effect.void,
     admit: () => Effect.succeed({ _tag: "admitted" }),
     memory: () => Effect.succeed(undefined),
     queuedThreadIds: () => Effect.succeed(new Set<string>()),
