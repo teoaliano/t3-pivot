@@ -152,11 +152,7 @@ export interface ScopeState {
   readonly populated: boolean | undefined;
 }
 
-/**
- * Our pipe can close before systemd handles the kill, so a scope that is
- * still stopping, is empty, or already counted an OOM kill is "stopping":
- * systemd records `Result=oom-kill` for it in a moment.
- */
+/** Pipes can close before systemd records oom-kill; stopping, empty or OOM-counted scopes remain pending. */
 export function classifyScope(state: ScopeState): "oom-killed" | "gone" | "running" | "stopping" {
   if (state.result === "oom-kill") return "oom-killed";
   if (
@@ -190,8 +186,7 @@ function parseCgroupCounter(text: string, key: string): number | undefined {
   return match === null ? undefined : Number(match[1]);
 }
 
-// A stop sends SIGTERM, then SIGKILL after this long. systemd's 90 s default
-// would outlast the wait for a previous server's agents below.
+// systemd's default 90 s stop timeout would outlast our leftover-agent wait.
 const STOP_TIMEOUT_OPTION = "--property=TimeoutStopSec=10s";
 const OOM_STOP_OPTION = "--property=OOMPolicy=stop";
 const OOM_CONTINUE_OPTION = "--property=OOMPolicy=continue";

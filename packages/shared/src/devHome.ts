@@ -1,11 +1,7 @@
 /**
- * A linked git worktree gets its own (gitignored) `.t3`: feature work in a
- * throwaway branch must not share a database with the real app. T3 Pivot gives
- * the main checkout one too: its developers run T3 Code from the same `~/.t3`,
- * where `~/.t3/dev` would sit beside the live install and `t3 pair` would find
- * the live server first. An ambient
- * `T3CODE_HOME` counts as an explicit base dir — flipping the state directory
- * from `<base>/dev` to `<base>/userdata`, the live production database.
+ * Worktrees use isolated .t3 state; ambient T3CODE_HOME could otherwise select the live userdata database.
+ * T3 Pivot gives the main checkout one too: its developers run T3 Code from the same `~/.t3`,
+ * where `~/.t3/dev` would sit beside the live install and `t3 pair` would find the live server first.
  */
 
 import * as Effect from "effect/Effect";
@@ -13,12 +9,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
-/**
- * The common dir is not necessarily named `.git`: a worktree of a bare repo
- * points at `<repo>.git/worktrees/<name>`, and `$GIT_COMMON_DIR` can be
- * anything. So match on the `worktrees/<name>` tail, which git always uses,
- * rather than on the name of the directory containing it.
- */
+// Match worktrees/<name>; bare repos and GIT_COMMON_DIR need not use a directory named .git.
 const pointsAtLinkedWorktree = (gitFileContents: string, path: Path.Path): boolean => {
   const gitdir = gitFileContents
     .split(/\r?\n/)
