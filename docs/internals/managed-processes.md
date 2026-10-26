@@ -299,13 +299,15 @@ one server would stop the other's running processes.
 ## When a managed process is stopped for you
 
 A sweep runs every five minutes and stops any managed process that nobody has wanted for
-thirty minutes. Both numbers match the server's existing session reaper, and the sweep is
-built the same way: it runs on a fixed schedule whether or not anyone is connected, it
-filters on a cheap timestamp before doing expensive work, and it records why it skipped
-anything it left alone.
+twenty minutes. The sweep is built like the server's session reaper: it runs on a fixed
+schedule whether or not anyone is connected, it filters on a cheap timestamp before doing
+expensive work, and it records why it skipped anything it left alone.
 
-Thirty minutes is deliberately long. An agent that starts a process for one turn must
-still find it running at the start of the next, or every turn pays a full rebuild.
+Twenty minutes is a balance. An agent that starts a process for one turn must still find it
+running at the start of the next, or every turn pays a full rebuild, but a dev server holds
+hundreds of megabytes while it waits. Upstream uses thirty; this fork shortened it because
+Pivot teammates leave servers behind, and agents can now stop a server themselves with
+`preview_stop_server` once they have what they needed from it.
 
 The numbers are constants, not a setting. The existing session reaper has no setting
 either, and the retention controls that are user-configurable work in days, so minutes

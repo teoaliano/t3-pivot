@@ -37,7 +37,7 @@ you write yourself, pass it in the command, for example `vite --port $T3CODE_MAN
 
 ## When a dev server stops
 
-A dev server nobody has used for 30 minutes stops. A visible preview and an agent working in
+A dev server nobody has used for 20 minutes stops. A visible preview and an agent working in
 the checkout both count as use. Pin a server to keep it running. A stopped server stays listed so
 you can start it again. Nothing restarts it for you, including a pinned server that exits on its
 own.

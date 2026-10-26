@@ -6,7 +6,7 @@
  * reserves a block of ports for its lifetime (see PortReservations.ts), and
  * each (checkout, script) pair runs at most one process, in a T3 terminal.
  * Threads only borrow: nothing here stops a process because a thread went
- * away. The sweep stops what nobody has wanted for thirty minutes.
+ * away. The sweep stops what nobody has wanted for twenty minutes.
  *
  * The live process table is memory only. Port reservations, pins, and the
  * identity of each running listener live in one global sidecar file beside
@@ -133,7 +133,7 @@ export class ManagedProcesses extends Context.Service<
   }
 >()("t3/managedProcess/ManagedProcesses") {}
 
-const DEFAULT_IDLE_THRESHOLD_MS = 30 * 60 * 1000;
+const DEFAULT_IDLE_THRESHOLD_MS = 20 * 60 * 1000;
 const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 const RESERVATION_RECONCILE_INTERVAL = Duration.hours(1);
 /** Matches the port scanner's poll, which is where readiness comes from. */
