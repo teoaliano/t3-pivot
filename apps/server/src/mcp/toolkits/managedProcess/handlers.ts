@@ -8,7 +8,7 @@ import * as ManagedProcesses from "../../../managedProcess/ManagedProcesses.ts";
 import { resolveManagedScriptTarget } from "../../../managedProcess/resolveScriptTarget.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
-import { ManagedProcessToolkit, type StartServerResult } from "./tools.ts";
+import { ManagedProcessToolkit, type StartServerResult, type StopServerResult } from "./tools.ts";
 
 /**
  * Shorter than the 60 seconds after which agent harnesses such as Claude Code
@@ -70,6 +70,31 @@ const handlers = {
         status: current?.status ?? started.status,
         reallocated,
       } satisfies StartServerResult;
+    }),
+  ),
+  preview_stop_server: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.requireThreadMcpCapability("preview");
+      const processes = yield* ManagedProcesses.ManagedProcesses;
+      const target = yield* resolveManagedScriptTarget(scope.thread.threadId, input.script);
+      const current = yield* processes
+        .stream(target.checkoutPath)
+        .pipe(
+          Stream.runHead,
+          Effect.map(
+            Option.flatMap((snapshot) =>
+              Option.fromNullishOr(
+                snapshot.processes.find((process) => process.scriptId === target.script.id),
+              ),
+            ),
+          ),
+        );
+      const running = Option.isSome(current) && current.value.status !== "stopped";
+      // Stopping one script keeps the checkout's port block, unlike removing the checkout.
+      if (running) {
+        yield* processes.stop({ checkoutPath: target.checkoutPath, scriptId: target.script.id });
+      }
+      return { stopped: running } satisfies StopServerResult;
     }),
   ),
 } satisfies McpToolAccess.Handlers<typeof ManagedProcessToolkit.tools>;

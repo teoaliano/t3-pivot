@@ -60,7 +60,8 @@ to a fresh block.
 Agents can start the checkout's dev server with the `preview_start_server` tool. They get the same
 port and the same idle rule. The tool waits up to 30 seconds for the server to serve a page, and
 tells the agent if the server exited instead, so an agent does not report a server that never
-came up.
+came up. An agent stops the server with `preview_stop_server` once it has what it needed, and the
+checkout keeps its port for the next start.
 
 ## Open the preview automatically
 
