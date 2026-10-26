@@ -58,6 +58,7 @@ const teammateOf = (grantId: string, threadId: string, projectId: ProjectId) => 
   worktreePath: `/worktrees/${threadId}`,
   deliveryMode: "local-only" as const,
   firstRunId: null,
+  shipDirectly: false,
 });
 
 describe("PivotHostAuthorization", () => {

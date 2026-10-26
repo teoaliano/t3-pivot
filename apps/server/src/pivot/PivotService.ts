@@ -250,6 +250,10 @@ export const historyLine = (event: PivotEvent): string => {
       return `Dispatched as a ${event.kind} on ${event.branch} from ${event.baseBranch}${event.modelEntry ? `, on teammate model ${event.modelEntry}` : ""}.`;
     case "teammate.promoted":
       return "Promoted from scout to ship.";
+    case "teammate.ship-ordered":
+      return event.decisionId === null
+        ? "Told to ship directly: push and open its PR at done."
+        : `Told to ship by the approved batch ${event.decisionId}.`;
     case "teammate.intent-added":
       return clip(`The user added: ${event.text}`);
     case "teammate.reported":
@@ -660,6 +664,7 @@ export const make = Effect.gen(function* () {
             spec: input.spec,
             baseBranch: input.baseBranch,
             modelSelection,
+            shipDirectly: input.shipDirectly,
           });
           // Recorded before the first run gets going, so its first report finds it.
           yield* store
@@ -677,6 +682,7 @@ export const make = Effect.gen(function* () {
               intent: input.intent,
               spec: input.spec,
               modelEntry: choice.entry,
+              shipDirectly: input.shipDirectly === true,
             })
             .pipe(Effect.tapError(() => host.discard(launched.threadId).pipe(Effect.ignore)));
           const start =
@@ -1383,11 +1389,19 @@ export const make = Effect.gen(function* () {
             `\`done\` needs all work committed. Uncommitted: ${unsaved.join(", ")}. Commit it, then report again.`,
           );
         }
+        if (input.evidence === undefined) {
+          return yield* refuse(
+            command,
+            "`done` needs the evidence your brief asks for: what you ran and what it showed, and any screenshots. Report again with evidence.",
+          );
+        }
       }
+      // Until it is told to ship, `done` is committed work waiting for review: no push, no PR.
       if (
         input.status === "done" &&
         teammate.kind === "ship" &&
-        teammate.deliveryMode === "direct-pr"
+        teammate.deliveryMode === "direct-pr" &&
+        teammate.shipOrderedAt != null
       ) {
         const link = shell?.pullRequests?.find(
           (candidate) => candidate.source !== "stack-dismissed",
@@ -1429,6 +1443,7 @@ export const make = Effect.gen(function* () {
             status: input.status,
             summary: input.summary,
             until: input.until ?? null,
+            ...(input.evidence === undefined ? {} : { evidence: input.evidence }),
             runId: shell?.latestRunId ?? null,
             decisionKey: input.decisionKey ?? null,
             clearedDecision:
@@ -1449,6 +1464,7 @@ export const make = Effect.gen(function* () {
         status: input.status,
         summary: input.summary,
         until: input.until ?? null,
+        evidence: input.evidence ?? null,
         runId: shell?.latestRunId ?? null,
         decisionKey: input.decisionKey ?? null,
         clearedDecision:

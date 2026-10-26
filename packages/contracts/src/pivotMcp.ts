@@ -13,6 +13,7 @@ import {
   PivotDecisionEscalation,
   PivotDecisionId,
   PivotDeliveryMode,
+  TeammateEvidence,
   TeammateKind,
   TeammateReportedStatus,
   TeammateStatus,
@@ -29,6 +30,11 @@ export const PivotMcpDispatchTeammateInput = Schema.Struct({
   spec: TrimmedNonEmptyString,
   /** Stack on another branch instead of the origin's default branch. */
   baseBranch: Schema.optional(TrimmedNonEmptyString),
+  /**
+   * Only when the user said to ship this task directly: the ship pushes and opens its PR at
+   * `done` instead of waiting for review and a ship batch.
+   */
+  shipDirectly: Schema.optional(Schema.Boolean),
   /** A teammate model from Settings, by name. Without one, the default entry runs it. */
   modelEntry: Schema.optional(TrimmedNonEmptyString),
   /**
@@ -226,6 +232,8 @@ export const PivotMcpReportStatusInput = Schema.Struct({
   summary: TrimmedNonEmptyString,
   /** Only for `paused`: when the wait should clear. */
   until: Schema.optional(IsoDateTime),
+  /** A ship's `done` carries the evidence its brief asks for. */
+  evidence: Schema.optional(TeammateEvidence),
   /** Names the decision a `needs-decision` or `blocked` report raises. */
   decisionKey: Schema.optional(TrimmedNonEmptyString),
   /** Closes your own blocker that cleared before anyone answered it. */

@@ -108,6 +108,7 @@ const seed = Effect.gen(function* () {
   yield* store.dispatch({
     type: "teammate.dispatch",
     modelEntry: null,
+    shipDirectly: false,
     pivotThreadId,
     threadId: teammateThreadId,
     projectId,

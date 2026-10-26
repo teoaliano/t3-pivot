@@ -844,7 +844,11 @@ describe("hosted teammate tools", () => {
         const worktree = attachWorktree(fake, workspaceRoot, ship.threadId, ship.branch);
 
         NodeFS.writeFileSync(NodePath.join(worktree, "login.txt"), "fixed\n");
-        const done = { status: "done", summary: "Fixed." } as const;
+        const done = {
+          status: "done",
+          summary: "Fixed.",
+          evidence: { text: "Tests pass." },
+        } as const;
         const refused = yield* pivots.reportStatus(ship.threadId, done).pipe(Effect.flip);
         assert.include(refused.message, "needs all work committed");
         assert.include(refused.message, "login.txt");
@@ -1537,33 +1541,40 @@ describe("pull requests of a hosted teammate", () => {
 });
 
 describe("hosted `done` when the project delivers pull requests", () => {
-  it.effect("needs a linked PR on the right branch, and the branch pushed", () => {
-    const { fake, workspaceRoot, layer } = hostSetup({ remote: true });
-    return Effect.gen(function* () {
-      const pivots = yield* PivotService.PivotService;
-      const home = yield* newHome();
-      const ship = yield* launch(home);
-      assert.strictEqual(ship.deliveryMode, "direct-pr");
-      const worktree = attachWorktree(fake, workspaceRoot, ship.threadId, ship.branch);
-      const done = { status: "done", summary: "Fixed." } as const;
-      const refusal = () => pivots.reportStatus(ship.threadId, done).pipe(Effect.flip);
+  it.effect(
+    "needs a linked PR on the right branch, and the branch pushed, when shipping directly",
+    () => {
+      const { fake, workspaceRoot, layer } = hostSetup({ remote: true });
+      return Effect.gen(function* () {
+        const pivots = yield* PivotService.PivotService;
+        const home = yield* newHome();
+        const ship = yield* launch(home, { shipDirectly: true });
+        assert.strictEqual(ship.deliveryMode, "direct-pr");
+        const worktree = attachWorktree(fake, workspaceRoot, ship.threadId, ship.branch);
+        const done = {
+          status: "done",
+          summary: "Fixed.",
+          evidence: { text: "Tests pass." },
+        } as const;
+        const refusal = () => pivots.reportStatus(ship.threadId, done).pipe(Effect.flip);
 
-      assert.include((yield* refusal()).message, "`done` needs a linked PR.");
+        assert.include((yield* refusal()).message, "`done` needs a linked PR.");
 
-      const url = "https://github.com/acme/app/pull/7";
-      const thread = fake.threads.get(ship.threadId)!;
-      thread.shell = {
-        pullRequests: [{ url, snapshot: { headBranch: "pivot/somebody-else" } }],
-      } as never;
-      assert.include((yield* refusal()).message, "not your branch");
+        const url = "https://github.com/acme/app/pull/7";
+        const thread = fake.threads.get(ship.threadId)!;
+        thread.shell = {
+          pullRequests: [{ url, snapshot: { headBranch: "pivot/somebody-else" } }],
+        } as never;
+        assert.include((yield* refusal()).message, "not your branch");
 
-      thread.shell = { pullRequests: [{ url, snapshot: { headBranch: ship.branch } }] } as never;
-      assert.include((yield* refusal()).message, "is not pushed");
+        thread.shell = { pullRequests: [{ url, snapshot: { headBranch: ship.branch } }] } as never;
+        assert.include((yield* refusal()).message, "is not pushed");
 
-      sh(worktree, `git push -q origin ${ship.branch}`);
-      assert.strictEqual((yield* pivots.reportStatus(ship.threadId, done)).status, "done");
-    }).pipe(Effect.provide(layer));
-  });
+        sh(worktree, `git push -q origin ${ship.branch}`);
+        assert.strictEqual((yield* pivots.reportStatus(ship.threadId, done)).status, "done");
+      }).pipe(Effect.provide(layer));
+    },
+  );
 });
 
 describe("what a failure tells the home", () => {
@@ -1680,6 +1691,7 @@ describe("hosted teammates after a host restart", () => {
       worktreePath: `/worktrees/${threadId}`,
       deliveryMode: "local-only" as const,
       firstRunId: null,
+      shipDirectly: false,
     });
     return Effect.gen(function* () {
       yield* Effect.gen(function* () {

@@ -73,6 +73,7 @@ const finish = (
       status,
       summary: `${status} summary`,
       ...(until === undefined ? {} : { until }),
+      ...(status === "done" ? { evidence: { text: "Tests pass." } } : {}),
     });
     yield* shell(fake, teammate, { status: "idle", activeRunId: null });
   });

@@ -47,6 +47,7 @@ const dispatchTeammate = (
     return yield* store.dispatch({
       type: "teammate.dispatch",
       modelEntry: null,
+      shipDirectly: false,
       pivotThreadId: options.pivotThreadId ?? pivotA,
       threadId,
       projectId,
@@ -74,6 +75,7 @@ const report = (
       status,
       summary: `${status} summary`,
       until: null,
+      evidence: null,
       runId: run1,
       decisionKey: null,
       clearedDecision: null,
@@ -188,6 +190,7 @@ describe("PivotStore", () => {
           store.dispatch({
             type: "teammate.dispatch",
             modelEntry: null,
+            shipDirectly: false,
             pivotThreadId: pivotB,
             threadId: shipA,
             projectId: ProjectId.make("project-2"),

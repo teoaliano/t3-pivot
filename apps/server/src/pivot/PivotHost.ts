@@ -359,6 +359,7 @@ export const make = Effect.gen(function* () {
                   spec: input.spec,
                   baseBranch: input.baseBranch,
                   modelSelection: input.modelSelection,
+                  shipDirectly: input.shipDirectly,
                 });
                 const { runId } = launched;
                 const recorded = yield* Effect.gen(function* () {
@@ -379,6 +380,7 @@ export const make = Effect.gen(function* () {
                       worktreePath: launched.worktreePath,
                       deliveryMode: launched.deliveryMode,
                       firstRunId: runId,
+                      shipDirectly: input.shipDirectly === true,
                     },
                     { maxLive: PIVOT_HOST_MAX_LIVE_TEAMMATES },
                   );

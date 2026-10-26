@@ -69,6 +69,14 @@ export const PivotEvent = Schema.Union([
     modelEntry: Schema.optional(Schema.NullOr(Schema.String)),
   }),
   event("teammate.promoted", { threadId: ThreadId, spec: Schema.String }),
+  /**
+   * The teammate was told to push and open its PR: at dispatch when the user said to ship
+   * directly (no decision), or by the approved ship batch `decisionId`.
+   */
+  event("teammate.ship-ordered", {
+    threadId: ThreadId,
+    decisionId: Schema.NullOr(PivotDecisionId),
+  }),
   event("teammate.intent-added", { threadId: ThreadId, text: Schema.String }),
   event("teammate.reported", { threadId: ThreadId, report: TeammateReport }),
   event("teammate.scout-report-recorded", { threadId: ThreadId, report: Schema.String }),

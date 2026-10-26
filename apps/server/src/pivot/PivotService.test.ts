@@ -189,7 +189,11 @@ describe("PivotService.decisionLog", () => {
 });
 
 /** A ship the Pivot dispatched, on a real worktree of the project's repository. */
-const dispatchShip = (fake: FakeThreads.FakeV2, repo: string) =>
+const dispatchShip = (
+  fake: FakeThreads.FakeV2,
+  repo: string,
+  options: { shipDirectly?: boolean } = {},
+) =>
   Effect.gen(function* () {
     const pivots = yield* PivotService.PivotService;
     const pivot = (yield* pivots.create({ projectId, modelSelection, takeover: false })).threadId;
@@ -198,6 +202,7 @@ const dispatchShip = (fake: FakeThreads.FakeV2, repo: string) =>
       kind: "ship",
       intent: "Make the login button work on Safari.",
       spec: "Reproduce, fix, test.",
+      ...options,
     });
     const worktree = attachWorktree(fake, repo, dispatched.threadId, dispatched.branch);
     return { teammate: dispatched.threadId, branch: dispatched.branch, worktree };
@@ -209,6 +214,8 @@ const commitFile = (worktree: string, name: string) => {
   sh(worktree, `git add -A && git commit -q -m "${name}"`);
 };
 
+const done = { status: "done", summary: "Fixed", evidence: { text: "Tests pass." } } as const;
+
 describe("PivotService.reportStatus done", () => {
   it.effect("refuses done for a ship with uncommitted work, and names it", () => {
     const { fake, workspaceRoot, layer } = setup();
@@ -217,9 +224,7 @@ describe("PivotService.reportStatus done", () => {
       const ship = yield* dispatchShip(fake, workspaceRoot);
       NodeFS.writeFileSync(NodePath.join(ship.worktree, "login.ts"), "export {};\n");
 
-      const reason = yield* refusal(
-        pivots.reportStatus(ship.teammate, { status: "done", summary: "Fixed" }),
-      );
+      const reason = yield* refusal(pivots.reportStatus(ship.teammate, done));
       assert.include(reason, "login.ts");
       assert.include(reason, "Commit it");
     }).pipe(Effect.provide(layer));
@@ -232,45 +237,34 @@ describe("PivotService.reportStatus done", () => {
       const ship = yield* dispatchShip(fake, workspaceRoot);
       commitFile(ship.worktree, "login.ts");
 
-      const reported = yield* pivots.reportStatus(ship.teammate, {
-        status: "done",
-        summary: "Fixed",
-      });
+      const reported = yield* pivots.reportStatus(ship.teammate, done);
       assert.strictEqual(reported.status, "done");
     }).pipe(Effect.provide(layer));
   });
 
-  it.effect(
-    "refuses done for a ship on a project with a remote while its commit is unpushed",
-    () => {
-      const { fake, workspaceRoot, layer } = setup({ remote: true });
-      return Effect.gen(function* () {
-        const pivots = yield* PivotService.PivotService;
-        const ship = yield* dispatchShip(fake, workspaceRoot);
-        fake.threads.get(ship.teammate)!.shell = {
-          linkedPullRequest: {
-            projectId,
-            repository: "acme/app",
-            number: 1,
-            url: "https://github.com/acme/app/pull/1",
-          },
-        };
-        commitFile(ship.worktree, "login.ts");
+  it.effect("refuses done for a ship told to ship directly while its commit is unpushed", () => {
+    const { fake, workspaceRoot, layer } = setup({ remote: true });
+    return Effect.gen(function* () {
+      const pivots = yield* PivotService.PivotService;
+      const ship = yield* dispatchShip(fake, workspaceRoot, { shipDirectly: true });
+      fake.threads.get(ship.teammate)!.shell = {
+        linkedPullRequest: {
+          projectId,
+          repository: "acme/app",
+          number: 1,
+          url: "https://github.com/acme/app/pull/1",
+        },
+      };
+      commitFile(ship.worktree, "login.ts");
 
-        const reason = yield* refusal(
-          pivots.reportStatus(ship.teammate, { status: "done", summary: "Fixed" }),
-        );
-        assert.include(reason, "is not pushed");
+      const reason = yield* refusal(pivots.reportStatus(ship.teammate, done));
+      assert.include(reason, "is not pushed");
 
-        sh(ship.worktree, `git push -q -u origin ${ship.branch}`);
-        const reported = yield* pivots.reportStatus(ship.teammate, {
-          status: "done",
-          summary: "Fixed",
-        });
-        assert.strictEqual(reported.status, "done");
-      }).pipe(Effect.provide(layer));
-    },
-  );
+      sh(ship.worktree, `git push -q -u origin ${ship.branch}`);
+      const reported = yield* pivots.reportStatus(ship.teammate, done);
+      assert.strictEqual(reported.status, "done");
+    }).pipe(Effect.provide(layer));
+  });
 });
 
 describe("PivotService.teardownTeammate", () => {

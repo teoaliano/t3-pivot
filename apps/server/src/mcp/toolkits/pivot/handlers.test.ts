@@ -129,6 +129,7 @@ const dispatch = (
     baseBranch: string;
     modelEntry: string;
     modelSelection: typeof modelSelection;
+    shipDirectly: boolean;
   }> = {},
 ) =>
   call(pivot, "dispatch_teammate", {
@@ -215,15 +216,19 @@ describe("Pivot and teammate tools", () => {
         assert.isTrue(brief.text.startsWith("# Your role"));
         assert.include(brief.text, "The login button does nothing on Safari. Make it work.");
         assert.include(brief.text, "Reproduce in Safari, fix the handler, add a regression test.");
-        assert.include(brief.text, "This task delivers a pull request.");
+        assert.include(brief.text, "This task delivers committed work for review.");
         assert.include(brief.text, `Your worktree is \`${result.worktreePath}\``);
         assert.notInclude(brief.text, "{{");
         assert.notInclude(brief.text, "<!--");
         assert.include(brief.text, "the agent that dispatched you and supervises your work");
         assertNoHardWraps(brief.text);
 
-        const second = yield* dispatch(pivot);
+        const second = yield* dispatch(pivot, { shipDirectly: true });
         assert.strictEqual(second.branch, "pivot/fix-the-login-bug-2");
+        assert.include(
+          firstMessage(fake, second.threadId)!.text,
+          "This task delivers a pull request.",
+        );
       }).pipe(Effect.provide(layer));
     });
 
@@ -254,6 +259,11 @@ describe("Pivot and teammate tools", () => {
         assert.strictEqual(result.deliveryMode, "local-only");
         assert.include(
           firstMessage(fake, result.threadId)!.text,
+          "This task delivers committed work for review.",
+        );
+        const direct = yield* dispatch(pivot, { title: "Second", shipDirectly: true });
+        assert.include(
+          firstMessage(fake, direct.threadId)!.text,
           "This task delivers a ready branch.",
         );
       }).pipe(Effect.provide(layer));
@@ -360,7 +370,7 @@ describe("Pivot and teammate tools", () => {
       assert.isTrue(message.text.startsWith("# You are now a ship"));
       assert.include(message.text, "The login button does nothing on Safari. Make it work.");
       assert.include(message.text, "Add the index.");
-      assert.include(message.text, "This task delivers a pull request.");
+      assert.include(message.text, "This task delivers committed work for review.");
       assertNoHardWraps(message.text);
       expectRefused(
         yield* call(pivot, "promote_scout", { threadId: scout.threadId, spec: "again" }),
@@ -548,7 +558,7 @@ describe("Pivot and teammate tools", () => {
       }).pipe(Effect.provide(layer));
     });
 
-    it.effect("refuses a ship's done in PR mode until a linked PR has its pushed head", () => {
+    it.effect("accepts a ship's committed work with evidence, nothing pushed and no PR", () => {
       const { fake, workspaceRoot, layer } = setup({ remote: true });
       return Effect.gen(function* () {
         const pivot = yield* createPivot;
@@ -556,49 +566,108 @@ describe("Pivot and teammate tools", () => {
         addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
         NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "fix.txt"), "fixed\n");
         sh(ship.worktreePath, "git add -A && git commit -q -m fix");
-        const done = { status: "done", summary: "Fixed: https://github.com/o/r/pull/1" };
 
-        expectRefused(
-          yield* call(ship.threadId, "report_status", done),
-          "invalid_request",
-          "linked PR",
-        );
-
-        const thread = fake.threads.get(ship.threadId)!;
-        thread.shell = {
-          ...thread.shell,
-          pullRequests: [
-            {
-              host: "github.com",
-              repository: "o/r",
-              number: 1,
-              url: "https://github.com/o/r/pull/1",
-              source: "agent",
-              linkedAt: "2026-10-06T00:00:00.000Z",
-              snapshot: null,
-              stack: null,
+        expectOk(
+          yield* call(ship.threadId, "report_status", {
+            status: "done",
+            summary: "Fixed the Safari login",
+            evidence: {
+              text: "Clicked Log in on Safari 18: it signs in. vp test run login.test.ts passes.",
+              files: ["/tmp/login-safari.png"],
             },
-          ],
-        } as typeof thread.shell;
-        expectRefused(
-          yield* call(ship.threadId, "report_status", done),
-          "invalid_request",
-          "not pushed",
+          }),
         );
-
-        sh(ship.worktreePath, `git push -q origin ${ship.branch}`);
-        NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "more.txt"), "more\n");
-        sh(ship.worktreePath, "git add -A && git commit -q -m more");
-        expectRefused(
-          yield* call(ship.threadId, "report_status", done),
-          "invalid_request",
-          "origin has",
+        const store = yield* PivotStore.PivotStore;
+        const record = yield* store.getTeammate(ship.threadId);
+        assert.deepStrictEqual(record?.report?.evidence, {
+          text: "Clicked Log in on Safari 18: it signs in. vp test run login.test.ts passes.",
+          files: ["/tmp/login-safari.png"],
+        });
+        assert.isNull(
+          sh(ship.worktreePath, `git ls-remote origin ${ship.branch}`) || null,
+          "nothing was pushed",
         );
-
-        sh(ship.worktreePath, `git push -q origin ${ship.branch}`);
-        expectOk(yield* call(ship.threadId, "report_status", done));
+        assert.isUndefined(fake.threads.get(ship.threadId)!.shell.pullRequests);
       }).pipe(Effect.provide(layer));
     });
+
+    it.effect("refuses a ship's done without evidence", () => {
+      const { workspaceRoot, layer } = setup({ remote: true });
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const ship = yield* dispatch(pivot);
+        addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
+        NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "fix.txt"), "fixed\n");
+        sh(ship.worktreePath, "git add -A && git commit -q -m fix");
+
+        expectRefused(
+          yield* call(ship.threadId, "report_status", { status: "done", summary: "Fixed" }),
+          "invalid_request",
+          "evidence",
+        );
+        const store = yield* PivotStore.PivotStore;
+        assert.isNull((yield* store.getTeammate(ship.threadId))?.report ?? null);
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect(
+      "still needs a linked PR with its pushed head from a ship told to ship directly",
+      () => {
+        const { fake, workspaceRoot, layer } = setup({ remote: true });
+        return Effect.gen(function* () {
+          const pivot = yield* createPivot;
+          const ship = yield* dispatch(pivot, { shipDirectly: true });
+          addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
+          NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "fix.txt"), "fixed\n");
+          sh(ship.worktreePath, "git add -A && git commit -q -m fix");
+          const done = {
+            status: "done",
+            summary: "Fixed: https://github.com/o/r/pull/1",
+            evidence: { text: "Tests pass." },
+          };
+
+          expectRefused(
+            yield* call(ship.threadId, "report_status", done),
+            "invalid_request",
+            "linked PR",
+          );
+
+          const thread = fake.threads.get(ship.threadId)!;
+          thread.shell = {
+            ...thread.shell,
+            pullRequests: [
+              {
+                host: "github.com",
+                repository: "o/r",
+                number: 1,
+                url: "https://github.com/o/r/pull/1",
+                source: "agent",
+                linkedAt: "2026-10-06T00:00:00.000Z",
+                snapshot: null,
+                stack: null,
+              },
+            ],
+          } as typeof thread.shell;
+          expectRefused(
+            yield* call(ship.threadId, "report_status", done),
+            "invalid_request",
+            "not pushed",
+          );
+
+          sh(ship.worktreePath, `git push -q origin ${ship.branch}`);
+          NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "more.txt"), "more\n");
+          sh(ship.worktreePath, "git add -A && git commit -q -m more");
+          expectRefused(
+            yield* call(ship.threadId, "report_status", done),
+            "invalid_request",
+            "origin has",
+          );
+
+          sh(ship.worktreePath, `git push -q origin ${ship.branch}`);
+          expectOk(yield* call(ship.threadId, "report_status", done));
+        }).pipe(Effect.provide(layer));
+      },
+    );
 
     it.effect("stops the ship's dev servers once its done is accepted, keeping its port", () => {
       const { fake, workspaceRoot, layer } = setup();
@@ -615,7 +684,13 @@ describe("Pivot and teammate tools", () => {
         assert.deepStrictEqual(fake.stoppedServers, []);
 
         sh(ship.worktreePath, "git add -A && git commit -q -m wip");
-        expectOk(yield* call(ship.threadId, "report_status", { status: "done", summary: "Ready" }));
+        expectOk(
+          yield* call(ship.threadId, "report_status", {
+            status: "done",
+            summary: "Ready",
+            evidence: { text: "Tests pass." },
+          }),
+        );
         assert.deepStrictEqual(fake.stoppedServers, [ship.worktreePath]);
         // The checkout stays, so its port block is kept for the next start.
         assert.deepStrictEqual(fake.stoppedCheckouts, []);
@@ -632,6 +707,7 @@ describe("Pivot and teammate tools", () => {
           yield* call(ship.threadId, "report_status", {
             status: "done",
             summary: `Ready on ${ship.branch}`,
+            evidence: { text: "Tests pass." },
           }),
         );
       }).pipe(Effect.provide(layer));

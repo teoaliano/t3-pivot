@@ -183,7 +183,9 @@ export const make = Effect.gen(function* () {
           branch,
           baseBranch,
           worktreePath,
-          definitionOfDone: yield* text(definitionOfDoneText(input.kind, deliveryMode)),
+          definitionOfDone: yield* text(
+            definitionOfDoneText(input.kind, deliveryMode, input.shipDirectly === true),
+          ),
         });
         const launched = yield* threads.launchTeammate({
           projectId: input.projectId,

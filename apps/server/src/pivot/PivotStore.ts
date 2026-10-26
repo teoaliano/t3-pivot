@@ -25,6 +25,7 @@ import {
   type PivotStreamEvent,
   type ProjectId,
   type RunId,
+  type TeammateEvidence,
   type TeammateKind,
   TeammateReport,
   type TeammateReportedStatus,
@@ -110,6 +111,8 @@ export type PivotCommand =
       readonly intent: string;
       readonly spec: string;
       readonly modelEntry: string | null;
+      /** The user said to ship it directly, so it is told to ship from the start. */
+      readonly shipDirectly: boolean;
     }
   | {
       readonly type: "teammate.promote";
@@ -129,6 +132,8 @@ export type PivotCommand =
       readonly status: TeammateReportedStatus;
       readonly summary: string;
       readonly until: IsoDateTime | null;
+      /** Only for `done`. */
+      readonly evidence: TeammateEvidence | null;
       readonly runId: RunId | null;
       /** Opens or names the decision a `needs-decision` or `blocked` report raises. */
       readonly decisionKey: string | null;
@@ -350,6 +355,7 @@ interface TeammateSqlRow {
   readonly resume: string | null;
   readonly scout_report: string | null;
   readonly dispatched_at: string;
+  readonly ship_ordered_at: string | null;
   readonly torn_down_at: string | null;
   readonly observed_status: string | null;
   readonly observed_run_id: string | null;
@@ -431,6 +437,7 @@ const toTeammate = (row: TeammateSqlRow): TeammateRow => ({
   hasEscalatedDecision: row.escalated_decisions > 0,
   hasScoutReport: row.scout_report !== null,
   dispatchedAt: row.dispatched_at,
+  shipOrderedAt: row.ship_ordered_at,
   tornDownAt: row.torn_down_at,
   memoryWait: row.memory_wait,
   baseBranch: row.base_branch,
@@ -496,6 +503,7 @@ export const teammateRecord = (row: TeammateRow): TeammateRecord => ({
   hasEscalatedDecision: row.hasEscalatedDecision,
   hasScoutReport: row.hasScoutReport,
   dispatchedAt: row.dispatchedAt,
+  shipOrderedAt: row.shipOrderedAt ?? null,
   tornDownAt: row.tornDownAt,
   memoryWait: row.memoryWait,
 });
@@ -697,6 +705,10 @@ export const make = Effect.gen(function* () {
           spec: command.spec,
           modelEntry: command.modelEntry,
         });
+        if (command.shipDirectly) {
+          if (command.kind !== "ship") return yield* refuse("Only a ship ships directly.");
+          emit({ type: "teammate.ship-ordered", threadId: command.threadId, decisionId: null });
+        }
         break;
       }
       case "teammate.promote": {
@@ -718,6 +730,9 @@ export const make = Effect.gen(function* () {
         if (command.until !== null && command.status !== "paused") {
           return yield* refuse("Only a `paused` report takes `until`.");
         }
+        if (command.evidence !== null && command.status !== "done") {
+          return yield* refuse("Only a `done` report takes evidence.");
+        }
         emit({
           type: "teammate.reported",
           threadId: command.threadId,
@@ -726,6 +741,7 @@ export const make = Effect.gen(function* () {
             runId: command.runId,
             summary: command.summary,
             until: command.until,
+            ...(command.evidence === null ? {} : { evidence: command.evidence }),
             reportedAt: now,
           },
         });
@@ -1082,6 +1098,11 @@ export const make = Effect.gen(function* () {
             ${event.deliveryMode}, ${encodeIntent([event.intent])}, ${event.spec},
             ${event.modelEntry ?? null}, ${at}
           )
+        `;
+        return;
+      case "teammate.ship-ordered":
+        yield* sql`
+          UPDATE pivot_teammates SET ship_ordered_at = ${at} WHERE thread_id = ${event.threadId}
         `;
         return;
       case "teammate.promoted":

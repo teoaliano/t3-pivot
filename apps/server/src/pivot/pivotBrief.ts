@@ -12,18 +12,26 @@ export const BRIEF_TEXTS = {
   scout: "definition-of-done.scout",
   shipPr: "definition-of-done.ship-pr",
   shipLocal: "definition-of-done.ship-local",
+  shipReview: "definition-of-done.ship-review",
   inline: "inline-task",
 } as const;
 
 /** The Pivot's workspace for inline tasks: `<worktrees>/<repo>/pivot-inline`. */
 export const PIVOT_WORKSPACE_DIRNAME = "pivot-inline";
 
-export const definitionOfDoneText = (kind: TeammateKind, deliveryMode: PivotDeliveryMode) =>
+/** A ship waits for review unless it was told to ship, at dispatch or by a ship batch. */
+export const definitionOfDoneText = (
+  kind: TeammateKind,
+  deliveryMode: PivotDeliveryMode,
+  shipOrdered = false,
+) =>
   kind === "scout"
     ? BRIEF_TEXTS.scout
-    : deliveryMode === "direct-pr"
-      ? BRIEF_TEXTS.shipPr
-      : BRIEF_TEXTS.shipLocal;
+    : !shipOrdered
+      ? BRIEF_TEXTS.shipReview
+      : deliveryMode === "direct-pr"
+        ? BRIEF_TEXTS.shipPr
+        : BRIEF_TEXTS.shipLocal;
 
 /** Drops the leading `<!-- ... -->` note a template carries for maintainers. */
 const stripTemplateNote = (template: string) => template.replace(/^\s*<!--[\s\S]*?-->\s*/, "");

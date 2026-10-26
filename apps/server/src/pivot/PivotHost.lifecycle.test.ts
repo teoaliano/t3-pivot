@@ -78,6 +78,7 @@ describe("revoking a link that has teammates", () => {
           worktreePath: late.worktreePath,
           deliveryMode: late.deliveryMode,
           firstRunId: late.runId,
+          shipDirectly: false,
         });
       }).pipe(Effect.orDie);
 

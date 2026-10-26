@@ -57,6 +57,17 @@ export const TeammateStatus = Schema.Literals([
 ]);
 export type TeammateStatus = typeof TeammateStatus.Type;
 
+/** What a ship brings to its `done` so the user and the Pivot can check the work. */
+export const TeammateEvidence = Schema.Struct({
+  /** Steps run and their results, test output, and how to try the change. */
+  text: TrimmedNonEmptyString,
+  /** Absolute paths of screenshots and other files the teammate captured. */
+  files: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  /** Trying it in a dev server is part of the agreed evidence, so clients offer to start one. */
+  devServer: Schema.optional(Schema.Boolean),
+});
+export type TeammateEvidence = typeof TeammateEvidence.Type;
+
 /** A report is scoped to the run it was made in, so a later silent run never reads stale. */
 export const TeammateReport = Schema.Struct({
   status: TeammateReportedStatus,
@@ -65,6 +76,8 @@ export const TeammateReport = Schema.Struct({
   summary: Schema.NullOr(TrimmedNonEmptyString),
   /** Only for `paused`: when the external wait should clear. */
   until: Schema.optional(Schema.NullOr(IsoDateTime)),
+  /** Only for a ship's `done`. */
+  evidence: Schema.optional(Schema.NullOr(TeammateEvidence)),
   reportedAt: IsoDateTime,
 });
 export type TeammateReport = typeof TeammateReport.Type;
@@ -169,6 +182,12 @@ export const TeammateRecord = Schema.Struct({
   hasScoutReport: Schema.Boolean,
   /** Order among the Pivot's teammates, so cards keep dispatch order. */
   dispatchedAt: IsoDateTime,
+  /**
+   * When the teammate was told to push and open its PR: at dispatch for a task the user
+   * said to ship directly, else when the user approved a ship batch leading with it. Until
+   * then its `done` is committed work waiting for review. Null or absent when not told.
+   */
+  shipOrderedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   tornDownAt: Schema.NullOr(IsoDateTime),
   /**
    * Why its agent has not started yet while the machine is short of memory, such as
@@ -343,6 +362,7 @@ export const PivotHostLaunchInput = Schema.Struct({
   spec: TrimmedNonEmptyString.check(Schema.isMaxLength(PIVOT_HOST_TEXT_MAX_LENGTH)),
   baseBranch: Schema.optional(PivotHostBranchName),
   modelSelection: ModelSelection,
+  shipDirectly: Schema.optional(Schema.Boolean),
 });
 export type PivotHostLaunchInput = typeof PivotHostLaunchInput.Type;
 
@@ -423,6 +443,7 @@ export const PivotHostEventBody = Schema.Union([
     status: TeammateReportedStatus,
     summary: TrimmedNonEmptyString,
     until: Schema.NullOr(IsoDateTime),
+    evidence: Schema.optional(Schema.NullOr(TeammateEvidence)),
     runId: Schema.NullOr(RunId),
     decisionKey: Schema.NullOr(TrimmedNonEmptyString),
     clearedDecision: Schema.NullOr(
