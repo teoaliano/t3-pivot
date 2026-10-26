@@ -123,6 +123,8 @@ export const PivotEvent = Schema.Union([
   event("teammate.merge-requested", { threadId: ThreadId, url: Schema.NullOr(Schema.String) }),
   event("teammate.landed", { threadId: ThreadId, head: Schema.String }),
   event("teammate.torn-down", { threadId: ThreadId }),
+  /** Another teammate attached to its worktree and branch, which it ended on and left behind. */
+  event("teammate.handed-over", { threadId: ThreadId, successorThreadId: ThreadId }),
   event("decision.opened", {
     decisionId: PivotDecisionId,
     pivotThreadId: ThreadId,

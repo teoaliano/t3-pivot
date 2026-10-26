@@ -130,6 +130,7 @@ const dispatch = (
     modelEntry: string;
     modelSelection: typeof modelSelection;
     shipDirectly: boolean;
+    attachTo: ThreadId;
   }> = {},
 ) =>
   call(pivot, "dispatch_teammate", {
@@ -818,6 +819,118 @@ describe("Pivot and teammate tools", () => {
         const line = (yield* lineOf(pivot, ship.threadId)) as Record<string, unknown>;
         assert.isNull(line.verdict);
         assert.isNull(line.evidence);
+      }).pipe(Effect.provide(layer));
+    });
+  });
+
+  describe("attaching to a teammate's worktree", () => {
+    /** A ship whose commit sits on its branch in a real worktree, its turn over. */
+    const committedShip = (fake: FakeV2, workspaceRoot: string, pivot: ThreadId) =>
+      Effect.gen(function* () {
+        const ship = yield* dispatch(pivot, { title: "Add the API" });
+        addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
+        fake.threads.get(ship.threadId)!.worktreePath = ship.worktreePath;
+        NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "api.txt"), "api\n");
+        sh(ship.worktreePath, "git add -A && git commit -q -m api");
+        return ship;
+      });
+
+    it.effect("starts the new teammate in that worktree and branch, without setup", () => {
+      const { fake, workspaceRoot, layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const first = yield* committedShip(fake, workspaceRoot, pivot);
+
+        const next = yield* dispatch(pivot, { title: "Add the UI", attachTo: first.threadId });
+        assert.strictEqual(next.worktreePath, first.worktreePath);
+        assert.strictEqual(next.branch, first.branch);
+        assert.strictEqual(next.baseBranch, first.baseBranch);
+        assert.strictEqual(next.setupScript, "none");
+        assert.strictEqual(next.firstRun, "started");
+        const thread = fake.threads.get(next.threadId)!;
+        // Bound to the worktree from the start: nothing was created or set up for it.
+        assert.strictEqual(thread.worktreePath, first.worktreePath);
+        assert.strictEqual(thread.branch, first.branch);
+        const brief = firstMessage(fake, next.threadId)!;
+        assert.strictEqual(brief.senderThreadId, pivot);
+        assert.include(brief.text, `Your worktree is \`${first.worktreePath}\``);
+        assertNoHardWraps(brief.text);
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("refuses to attach while that teammate's turn is running", () => {
+      const { fake, workspaceRoot, layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const first = yield* committedShip(fake, workspaceRoot, pivot);
+        const thread = fake.threads.get(first.threadId)!;
+        thread.shell = { ...thread.shell, status: "running", activeRunId: RunId.make("run-9") };
+        const before = fake.threads.size;
+
+        expectRefused(
+          yield* call(pivot, "dispatch_teammate", {
+            title: "Add the UI",
+            kind: "ship",
+            intent: "Add the UI.",
+            spec: "Build it on the API.",
+            attachTo: first.threadId,
+          }),
+          "invalid_request",
+          "still working",
+        );
+        assert.strictEqual(fake.threads.size, before);
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("ends the teammate it takes over from, keeping the worktree and branch", () => {
+      const { fake, workspaceRoot, layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const first = yield* committedShip(fake, workspaceRoot, pivot);
+        const head = sh(first.worktreePath, "git rev-parse HEAD");
+
+        const next = yield* dispatch(pivot, { title: "Add the UI", attachTo: first.threadId });
+        const live = expectOk(yield* call(pivot, "list_teammates", {})).teammates as Array<{
+          threadId: ThreadId;
+        }>;
+        assert.deepStrictEqual(
+          live.map((line) => line.threadId),
+          [next.threadId],
+        );
+        const ended = (
+          expectOk(yield* call(pivot, "list_teammates", { includeTornDown: true }))
+            .teammates as Array<{ threadId: ThreadId; tornDown: boolean }>
+        ).find((line) => line.threadId === first.threadId);
+        assert.isTrue(ended?.tornDown);
+        assert.isTrue(fake.threads.get(first.threadId)!.archived);
+        assert.deepStrictEqual(fake.removedWorktrees, []);
+        assert.isTrue(NodeFS.existsSync(first.worktreePath));
+        assert.strictEqual(sh(workspaceRoot, `git rev-parse ${first.branch}`), head);
+        expectRefused(
+          yield* call(pivot, "add_intent", { threadId: first.threadId, intent: "More." }),
+          "invalid_request",
+          "torn down",
+        );
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("refuses a base branch when attaching", () => {
+      const { fake, workspaceRoot, layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const first = yield* committedShip(fake, workspaceRoot, pivot);
+        expectRefused(
+          yield* call(pivot, "dispatch_teammate", {
+            title: "Add the UI",
+            kind: "ship",
+            intent: "Add the UI.",
+            spec: "Build it on the API.",
+            attachTo: first.threadId,
+            baseBranch: "main",
+          }),
+          "invalid_request",
+          "baseBranch",
+        );
       }).pipe(Effect.provide(layer));
     });
   });

@@ -31,6 +31,11 @@ export const PivotMcpDispatchTeammateInput = Schema.Struct({
   /** Stack on another branch instead of the origin's default branch. */
   baseBranch: Schema.optional(TrimmedNonEmptyString),
   /**
+   * A teammate of yours whose worktree and branch this one takes over, to build the next
+   * piece of the same PR there. That teammate ends; its worktree and branch stay.
+   */
+  attachTo: Schema.optional(ThreadId),
+  /**
    * Only when the user said to ship this task directly: the ship pushes and opens its PR at
    * `done` instead of waiting for review and a ship batch.
    */

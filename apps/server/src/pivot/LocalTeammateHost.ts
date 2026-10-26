@@ -159,6 +159,31 @@ export const make = Effect.gen(function* () {
         if (input.kind === "inline") {
           return yield* launchInline(command, input, project.workspaceRoot, deliveryMode);
         }
+        if (input.attach !== undefined) {
+          const { worktreePath, branch, baseBranch } = input.attach;
+          const brief = renderBrief(yield* text(BRIEF_TEXTS.brief), {
+            title: input.title,
+            kind: input.kind,
+            intent: input.intent,
+            spec: input.spec,
+            branch,
+            baseBranch,
+            worktreePath,
+            definitionOfDone: yield* text(
+              definitionOfDoneText(input.kind, deliveryMode, input.shipDirectly === true),
+            ),
+          });
+          const attached = yield* threads.attachTeammate({
+            projectId: input.projectId,
+            pivotThreadId: input.pivotThreadId,
+            title: input.title,
+            branch,
+            worktreePath,
+            modelSelection: input.modelSelection,
+            text: brief,
+          });
+          return { ...attached, branch, baseBranch, worktreePath, deliveryMode };
+        }
         const baseBranch = input.baseBranch ?? (yield* git.defaultBranch(project.workspaceRoot));
         const taken = new Set<string>(yield* git.listBranches(project.workspaceRoot, "pivot/"));
         for (const teammate of yield* store.listTeammates({ includeTornDown: true })) {

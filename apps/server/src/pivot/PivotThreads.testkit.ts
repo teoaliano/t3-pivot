@@ -210,6 +210,29 @@ export const layer = (fake: FakeV2) =>
           fake.starts.set(threadId, outcome.start);
           return { threadId, runId: outcome.start.runId };
         }),
+      attachTeammate: (input) =>
+        Effect.sync(() => {
+          const threadId = allocate(fake, "teammate");
+          const start: RunStart = { type: "started", runId: RunId.make(`run-${threadId}`) };
+          fake.threads.set(threadId, {
+            threadId,
+            projectId: input.projectId,
+            kind: "teammate",
+            worktreePath: input.worktreePath,
+            branch: input.branch,
+            baseBranch: null,
+            title: input.title,
+            modelSelection: input.modelSelection,
+            archived: false,
+            settled: false,
+            stops: 0,
+            relaunches: 0,
+            messages: [{ senderThreadId: input.pivotThreadId, text: input.text, mode: "launch" }],
+            shell: { latestRunId: start.runId },
+          });
+          fake.starts.set(threadId, start);
+          return { threadId, runId: start.runId };
+        }),
       // The workspace is real (PivotGit made it); the fake only records the thread.
       launchInline: (input) =>
         Effect.sync(() => {

@@ -314,6 +314,8 @@ export const historyLine = (event: PivotEvent): string => {
       return `Landed by fast-forward at ${event.head.slice(0, 12)}.`;
     case "teammate.torn-down":
       return "Torn down.";
+    case "teammate.handed-over":
+      return `Ended: ${event.successorThreadId} took over its worktree and branch.`;
     case "decision.opened":
       return clip(`Decision "${event.key}" opened by the ${event.openedBy}: ${event.summary}`);
     case "decision.escalated":
@@ -614,6 +616,47 @@ export const make = Effect.gen(function* () {
 
   // --- Dispatch ---
 
+  /**
+   * The teammate whose worktree and branch a dispatch takes over: one of the Pivot's ships,
+   * between turns, its worktree still there. Two agents never write in one worktree.
+   */
+  const attachTarget = (
+    command: string,
+    pivot: PivotStore.PivotRow,
+    host: TeammateHost["Service"],
+    input: PivotMcpDispatchTeammateInput,
+    attachTo: ThreadId,
+  ) =>
+    Effect.gen(function* () {
+      if (input.baseBranch !== undefined) {
+        return yield* refuse(
+          command,
+          "An attached teammate works on the branch it takes over; baseBranch is only for a fresh worktree.",
+        );
+      }
+      if (input.kind !== "ship") {
+        return yield* refuse(command, "Only a ship attaches to another teammate's worktree.");
+      }
+      const previous = yield* ownTeammate(command, pivot, attachTo);
+      if (previous.kind !== "ship") {
+        return yield* refuse(command, "Only a ship's worktree can be taken over.");
+      }
+      const shell = yield* threads.shell(previous.threadId);
+      if (shell?.activeRunId != null) {
+        return yield* refuse(
+          command,
+          `"${previous.title}" is still working in that worktree. Wait for its turn to end, or stop it first.`,
+        );
+      }
+      if (!(yield* host.worktreeExists(previous.worktreePath))) {
+        return yield* refuse(
+          command,
+          `"${previous.title}"'s worktree was reclaimed. Relaunch it to recreate the worktree from its branch first.`,
+        );
+      }
+      return previous;
+    });
+
   const dispatchTeammate: PivotService["Service"]["dispatchTeammate"] = (caller, input) =>
     Effect.gen(function* () {
       const command = "dispatch_teammate";
@@ -632,6 +675,10 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const host = yield* hostFor(command, null);
           const project = yield* host.project(command, pivot.projectId);
+          const previous =
+            input.attachTo === undefined
+              ? null
+              : yield* attachTarget(command, pivot, host, input, input.attachTo);
           const choice = chooseTeammateModel(
             yield* teammateModels(pivot.projectId),
             yield* teammateKindModels(pivot.projectId),
@@ -674,6 +721,15 @@ export const make = Effect.gen(function* () {
             baseBranch: input.baseBranch,
             modelSelection,
             shipDirectly: input.shipDirectly,
+            ...(previous === null
+              ? {}
+              : {
+                  attach: {
+                    worktreePath: previous.worktreePath,
+                    branch: previous.branch,
+                    baseBranch: previous.baseBranch,
+                  },
+                }),
           });
           // Recorded before the first run gets going, so its first report finds it.
           yield* store
@@ -692,8 +748,20 @@ export const make = Effect.gen(function* () {
               spec: input.spec,
               modelEntry: choice.entry,
               shipDirectly: input.shipDirectly === true,
+              attachedFrom: previous?.threadId ?? null,
             })
             .pipe(Effect.tapError(() => host.discard(launched.threadId).pipe(Effect.ignore)));
+          // The predecessor's record ended with the handover; its thread goes too, idle.
+          if (previous !== null) {
+            yield* host.discard(previous.threadId).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("The teammate that handed over did not archive", {
+                  threadId: previous.threadId,
+                  cause,
+                }),
+              ),
+            );
+          }
           const start =
             launched.runId === null
               ? ({ type: "failed", runId: null, detail: "The launch created no run." } as const)

@@ -114,6 +114,8 @@ export type PivotCommand =
       readonly modelEntry: string | null;
       /** The user said to ship it directly, so it is told to ship from the start. */
       readonly shipDirectly: boolean;
+      /** The teammate whose worktree and branch it took over; that one ends. */
+      readonly attachedFrom?: ThreadId | null | undefined;
     }
   | {
       readonly type: "teammate.record-verdict";
@@ -722,6 +724,22 @@ export const make = Effect.gen(function* () {
           if (command.kind !== "ship") return yield* refuse("Only a ship ships directly.");
           emit({ type: "teammate.ship-ordered", threadId: command.threadId, decisionId: null });
         }
+        if (command.attachedFrom != null) {
+          const previous = yield* ownLiveTeammate(command.pivotThreadId, command.attachedFrom);
+          if (
+            previous.worktreePath !== command.worktreePath ||
+            previous.branch !== command.branch
+          ) {
+            return yield* refuse(
+              "An attached teammate takes over its predecessor's worktree and branch.",
+            );
+          }
+          emit({
+            type: "teammate.handed-over",
+            threadId: previous.threadId,
+            successorThreadId: command.threadId,
+          });
+        }
         break;
       }
       case "teammate.record-verdict": {
@@ -1226,6 +1244,7 @@ export const make = Effect.gen(function* () {
         return;
       case "teammate.landed":
         return;
+      case "teammate.handed-over":
       case "teammate.torn-down":
         yield* sql`
           UPDATE pivot_teammates SET torn_down_at = ${at}, recheck_at = NULL

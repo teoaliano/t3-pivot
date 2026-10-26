@@ -48,6 +48,14 @@ export interface LaunchTeammateInput {
   readonly modelSelection: ModelSelection;
   /** The user said to ship it directly: push and open the PR at `done`, without review. */
   readonly shipDirectly?: boolean | undefined;
+  /** Start in this existing worktree and branch instead of a fresh one, with no setup. */
+  readonly attach?:
+    | {
+        readonly worktreePath: string;
+        readonly branch: string;
+        readonly baseBranch: string;
+      }
+    | undefined;
 }
 
 /** A launched teammate: V2 accepted it, and the worktree is still being prepared. */
