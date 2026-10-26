@@ -5,8 +5,6 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
 
-import * as Option from "effect/Option";
-
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import { RestartCarryOn } from "../orchestration-v2/RestartCarryOn.ts";
 import { ThreadToolRestrictions } from "../orchestration-v2/ThreadToolRestrictions.ts";
@@ -757,7 +755,7 @@ describe("PivotSupervisor", () => {
               Layer.provideMerge(withSupervisor(fake)),
               Layer.provideMerge(
                 Layer.mock(ProjectStore.ProjectStoreV2)({
-                  get: () => Effect.succeed(Option.none()),
+                  get: () => Effect.succeedNone,
                 }),
               ),
             ),

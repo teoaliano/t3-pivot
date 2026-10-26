@@ -191,12 +191,16 @@ const openSyncPrs = Effect.fn("pivot.openSyncPrs")(function* (env: Record<string
   const output = yield* run(
     "gh",
     [
-      ...["pr", "list", "--repo", FORK_REPOSITORY, "--state", "open"],
-      ...["--json", "headRefName,url"],
-      ...[
-        "--jq",
-        '.[] | select(.headRefName | startswith("sync/")) | "\\(.headRefName)\\t\\(.url)"',
-      ],
+      "pr",
+      "list",
+      "--repo",
+      FORK_REPOSITORY,
+      "--state",
+      "open",
+      "--json",
+      "headRefName,url",
+      "--jq",
+      '.[] | select(.headRefName | startswith("sync/")) | "\\(.headRefName)\\t\\(.url)"',
     ],
     env,
   );
@@ -226,19 +230,25 @@ const openSyncPr = Effect.fn("pivot.openSyncPr")(function* (
   const prUrl = yield* run(
     "gh",
     [
-      ...["pr", "create", "--repo", FORK_REPOSITORY, "--base", "main", "--head", branch],
-      ...["--title", `chore: merge upstream ${tag}`],
-      ...[
-        "--body",
-        [
-          `Merges upstream's nightly build ${tag} into T3 Pivot, so it matches the T3 Code (Nightly) app.`,
-          "",
-          ...(reason === undefined
-            ? []
-            : ["The nightly update could not merge it on its own:", "", reason, ""]),
-          "Resolve any conflicts on this branch, review upstream's changes, then merge.",
-        ].join("\n"),
-      ],
+      "pr",
+      "create",
+      "--repo",
+      FORK_REPOSITORY,
+      "--base",
+      "main",
+      "--head",
+      branch,
+      "--title",
+      `chore: merge upstream ${tag}`,
+      "--body",
+      [
+        `Merges upstream's nightly build ${tag} into T3 Pivot, so it matches the T3 Code (Nightly) app.`,
+        "",
+        ...(reason === undefined
+          ? []
+          : ["The nightly update could not merge it on its own:", "", reason, ""]),
+        "Resolve any conflicts on this branch, review upstream's changes, then merge.",
+      ].join("\n"),
     ],
     env,
   );
@@ -257,8 +267,12 @@ const closeSettledSyncPrs = Effect.fn("pivot.closeSettledSyncPrs")(function* (
     yield* run(
       "gh",
       [
-        ...["pr", "close", pr.url, "--delete-branch"],
-        ...["--comment", "Main now contains this nightly, merged by the nightly update."],
+        "pr",
+        "close",
+        pr.url,
+        "--delete-branch",
+        "--comment",
+        "Main now contains this nightly, merged by the nightly update.",
       ],
       env,
     );
@@ -396,8 +410,17 @@ const release = Effect.gen(function* () {
     "node",
     [
       "scripts/build-desktop-artifact.ts",
-      ...["--platform", "mac", "--target", "dmg", "--arch", "arm64", "--signed"],
-      ...["--build-version", version, "--output-dir", outputDir],
+      "--platform",
+      "mac",
+      "--target",
+      "dmg",
+      "--arch",
+      "arm64",
+      "--signed",
+      "--build-version",
+      version,
+      "--output-dir",
+      outputDir,
     ],
     {
       T3CODE_DESKTOP_UPDATE_REPOSITORY: FORK_REPOSITORY,
@@ -440,9 +463,19 @@ const release = Effect.gen(function* () {
   const releaseUrl = yield* run(
     "gh",
     [
-      ...["release", "create", tag, "--repo", FORK_REPOSITORY, "--target", head],
-      ...["--title", `T3 Pivot ${version}`, "--latest", "--generate-notes"],
-      ...["--notes", `Built on upstream ${upstreamBaseTag.value}.`],
+      "release",
+      "create",
+      tag,
+      "--repo",
+      FORK_REPOSITORY,
+      "--target",
+      head,
+      "--title",
+      `T3 Pivot ${version}`,
+      "--latest",
+      "--generate-notes",
+      "--notes",
+      `Built on upstream ${upstreamBaseTag.value}.`,
       ...assets,
     ],
     env,
@@ -512,9 +545,12 @@ const uploadIos = Effect.fn("pivot.uploadIos")(function* (
   };
   const authArgs = [
     "-allowProvisioningUpdates",
-    ...["-authenticationKeyPath", key.keyPath],
-    ...["-authenticationKeyID", key.keyId],
-    ...["-authenticationKeyIssuerID", key.issuerId],
+    "-authenticationKeyPath",
+    key.keyPath,
+    "-authenticationKeyID",
+    key.keyId,
+    "-authenticationKeyIssuerID",
+    key.issuerId,
   ];
 
   yield* Console.log(`Uploading the T3 Pivot iPhone app ${version} (${build}) to TestFlight...`);
@@ -528,9 +564,16 @@ const uploadIos = Effect.fn("pivot.uploadIos")(function* (
     "xcodebuild",
     [
       "archive",
-      ...["-workspace", `apps/mobile/ios/${IOS_PROJECT}.xcworkspace`],
-      ...["-scheme", IOS_PROJECT, "-configuration", "Release"],
-      ...["-destination", "generic/platform=iOS", "-archivePath", archivePath],
+      "-workspace",
+      `apps/mobile/ios/${IOS_PROJECT}.xcworkspace`,
+      "-scheme",
+      IOS_PROJECT,
+      "-configuration",
+      "Release",
+      "-destination",
+      "generic/platform=iOS",
+      "-archivePath",
+      archivePath,
       ...authArgs,
       `DEVELOPMENT_TEAM=${APPLE_TEAM_ID}`,
       "CODE_SIGN_STYLE=Automatic",
@@ -543,8 +586,12 @@ const uploadIos = Effect.fn("pivot.uploadIos")(function* (
   yield* fileSystem.writeFileString(exportOptionsPath, EXPORT_OPTIONS);
   yield* runVisible("xcodebuild", [
     "-exportArchive",
-    ...["-archivePath", archivePath, "-exportOptionsPlist", exportOptionsPath],
-    ...["-exportPath", `${outputDir}/export`],
+    "-archivePath",
+    archivePath,
+    "-exportOptionsPlist",
+    exportOptionsPath,
+    "-exportPath",
+    `${outputDir}/export`,
     ...authArgs,
   ]);
   yield* Console.log(`uploaded ${version} (${build}); TestFlight installs it once processed`);
@@ -596,7 +643,9 @@ const installApp = Effect.fn("pivot.installApp")(function* (version: string) {
   const fileSystem = yield* FileSystem.FileSystem;
   const installed = yield* Effect.option(
     run("plutil", [
-      ...["-extract", "CFBundleShortVersionString", "raw"],
+      "-extract",
+      "CFBundleShortVersionString",
+      "raw",
       `${INSTALLED_APP}/Contents/Info.plist`,
     ]),
   );
@@ -863,7 +912,10 @@ export const runMergeAgent: MergeAgent = Effect.fn("pivot.runMergeAgent")(functi
     [
       "-p",
       mergePrompt(request),
-      ...["--model", MERGE_AGENT_MODEL, "--effort", MERGE_AGENT_EFFORT],
+      "--model",
+      MERGE_AGENT_MODEL,
+      "--effort",
+      MERGE_AGENT_EFFORT,
       "--dangerously-skip-permissions",
       "--no-session-persistence",
     ],

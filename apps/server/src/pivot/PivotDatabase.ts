@@ -52,12 +52,7 @@ const setup = Layer.effectDiscard(
   }),
 );
 
-const fromClient = Layer.effect(
-  PivotSql,
-  Effect.gen(function* () {
-    return yield* SqlClient.SqlClient;
-  }),
-);
+const fromClient = Layer.effect(PivotSql, SqlClient.SqlClient);
 
 const clientLayer = (filename: string) =>
   fromClient.pipe(

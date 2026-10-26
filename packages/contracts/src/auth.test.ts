@@ -14,9 +14,7 @@ import {
 
 describe("authorization grants", () => {
   it("decodes legacy review credentials without offering them in new grants", () => {
-    expect(Schema.decodeUnknownSync(AuthEnvironmentScopes)(["review:write"])).toEqual([
-      "review:write",
-    ]);
+    expect(Schema.decodeSync(AuthEnvironmentScopes)(["review:write"])).toEqual(["review:write"]);
     expect(() => Schema.decodeUnknownSync(AuthGrantScopes)(["review:write"])).toThrow();
     expect(AuthStandardClientScopes).not.toContain("review:write");
   });
@@ -47,7 +45,7 @@ describe("authorization grants", () => {
   );
 
   it("delegates pivot:host only to a host link, never through a default or legacy grant", () => {
-    expect(Schema.decodeUnknownSync(AuthGrantScopes)(["pivot:host"])).toEqual(["pivot:host"]);
+    expect(Schema.decodeSync(AuthGrantScopes)(["pivot:host"])).toEqual(["pivot:host"]);
     expect(AuthStandardClientScopes).not.toContain("pivot:host");
     // An old grant, however broad, implies nothing about it: not by parent, not by legacy scopes.
     for (const scopes of [

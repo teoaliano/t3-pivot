@@ -75,7 +75,7 @@ describe("what a host link's session may send", () => {
     expect(accepted({ intent: "i".repeat(PIVOT_HOST_TEXT_MAX_LENGTH + 1) })).toBe(false);
     expect(accepted({ spec: "s".repeat(PIVOT_HOST_TEXT_MAX_LENGTH + 1) })).toBe(false);
     expect(
-      Schema.decodeUnknownExit(PivotHostSendInput)({
+      Schema.decodeExit(PivotHostSendInput)({
         homeEnvironmentId: "environment-home",
         threadId: "thread-1",
         text: "x".repeat(PIVOT_HOST_TEXT_MAX_LENGTH + 1),

@@ -115,7 +115,7 @@ export const AgentScope = Context.Reference<AgentScopeShape>("@t3tools/shared/Ag
     clear: () => Effect.void,
     stopThread: () => Effect.void,
     admit: () => Effect.succeed({ _tag: "admitted" }),
-    memory: () => Effect.succeed(undefined),
+    memory: () => Effect.undefined,
     queuedThreadIds: () => Effect.succeed(new Set<string>()),
   }),
 });

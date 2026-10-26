@@ -14,7 +14,6 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import type { Tool } from "effect/ai";
@@ -106,7 +105,7 @@ const makeHarness = (
       }),
       Layer.mock(ProjectStoreV2)({
         getShell: () =>
-          Effect.succeed(Option.some({ ...project, scripts: options.scripts ?? project.scripts })),
+          Effect.succeedSome({ ...project, scripts: options.scripts ?? project.scripts }),
       }),
       Layer.mock(ManagedProcesses.ManagedProcesses)({
         start: (target, startOptions) =>

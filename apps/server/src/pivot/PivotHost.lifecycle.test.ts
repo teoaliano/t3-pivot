@@ -245,8 +245,9 @@ describe("the live cap under concurrent launches", () => {
         yield* launch(home, { dispatchId: `dispatch-${index}` });
       }
       armed = true;
-      const outcomes = yield* Effect.all(
-        [projectId, docsProjectId].map((id) =>
+      const outcomes = yield* Effect.forEach(
+        [projectId, docsProjectId],
+        (id) =>
           launch(home, { projectId: id, dispatchId: `last-${id}` }).pipe(
             Effect.map(() => "launched" as const),
             Effect.catchTags({
@@ -254,7 +255,6 @@ describe("the live cap under concurrent launches", () => {
               PivotHostRefusedError: (error) => Effect.succeed(error.message),
             }),
           ),
-        ),
         { concurrency: "unbounded" },
       );
       assert.deepStrictEqual(outcomes.toSorted(), [

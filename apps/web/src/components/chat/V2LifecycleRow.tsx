@@ -425,25 +425,13 @@ export function SubagentRowContent(props: {
     <>
       {props.avatar}
       <span className="min-w-0 flex-1">
-        <span className="flex items-baseline gap-2">
-          <span
-            className={cn(
-              "min-w-0 text-xs font-medium text-foreground",
-              props.wrapTitle ? "line-clamp-2 break-words" : "truncate",
-            )}
-          >
-            {props.title}
-          </span>
-          {detail !== null && props.showStatus ? (
-            <span
-              className={cn(
-                "shrink-0 text-3xs",
-                failed ? "text-destructive" : "text-muted-foreground",
-              )}
-            >
-              {props.statusLabel}
-            </span>
-          ) : null}
+        <span
+          className={cn(
+            "block text-xs font-medium text-foreground",
+            props.wrapTitle ? "line-clamp-2 break-words" : "truncate",
+          )}
+        >
+          {props.title}
         </span>
         <span
           className={cn(
@@ -463,6 +451,13 @@ export function SubagentRowContent(props: {
           )}
         </span>
       </span>
+      {detail !== null && props.showStatus ? (
+        <span
+          className={cn("shrink-0 text-xs", failed ? "text-destructive" : "text-muted-foreground")}
+        >
+          {props.statusLabel}
+        </span>
+      ) : null}
       {props.trailing != null ? (
         <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
           {props.trailing}

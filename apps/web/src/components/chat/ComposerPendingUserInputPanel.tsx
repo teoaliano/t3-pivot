@@ -1,5 +1,6 @@
 import { type RuntimeRequestId, type ScopedThreadRef } from "@t3tools/contracts";
-import { memo, useEffect, useEffectEvent, useRef, useState } from "react";
+import { memo, use, useEffect, useEffectEvent, useRef, useState } from "react";
+import { BackgroundThreadContext } from "./backgroundThread";
 import { useStableCallback } from "~/hooks/useStableCallback";
 import { type PendingUserInput } from "../../session-logic";
 import {
@@ -141,9 +142,10 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   };
 
   const selectOptionFromShortcut = useEffectEvent(handleOptionSelection);
+  const backgroundThread = use(BackgroundThreadContext);
 
   useEffect(() => {
-    if (!activeQuestion || responseDisabled || isCollapsed) return;
+    if (!activeQuestion || responseDisabled || isCollapsed || backgroundThread) return;
     const handler = (event: globalThis.KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target;
@@ -167,7 +169,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [activeQuestion, isCollapsed, responseDisabled]);
+  }, [activeQuestion, backgroundThread, isCollapsed, responseDisabled]);
 
   if (!activeQuestion) {
     return null;
@@ -186,23 +188,24 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
           isCollapsed ? "Show the question and its options" : "Hide the question and its options"
         }
         data-pending-user-input-toggle={isCollapsed ? "collapsed" : "expanded"}
+        className="px-4 pt-1.5"
       >
-        <ComposerBanner.Icon />
         <ComposerBanner.Content>
-          <span className="shrink-0 font-medium text-muted-foreground">
-            {activeQuestion.header}
-          </span>
+          <span className="shrink-0 text-muted-foreground">{activeQuestion.header}</span>
           {isCollapsed ? (
-            <span className="min-w-0 flex-1 truncate text-secondary-label">
-              {activeQuestion.question}
-            </span>
+            <>
+              <ComposerBanner.Separator />
+              <span className="min-w-0 flex-1 truncate text-secondary-label">
+                {activeQuestion.question}
+              </span>
+            </>
           ) : null}
         </ComposerBanner.Content>
-        <ComposerBanner.Actions>
+        <ComposerBanner.Actions className="gap-0">
           {prompt.questions.length > 1 ? (
-            <span className="text-3xs font-medium text-muted-foreground tabular-nums">
+            <ComposerBanner.Count>
               {questionIndex + 1}/{prompt.questions.length}
-            </span>
+            </ComposerBanner.Count>
           ) : null}
           <ComposerBanner.ToggleIcon expanded={!isCollapsed} />
           {prompt.dismissible ? (
@@ -229,17 +232,15 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       </CollapsibleTrigger>
       <CollapsiblePanel>
         <ComposerBanner.Scroll>
-          <ComposerBanner.Body className="pe-1 pb-1 wrap-anywhere">
+          <ComposerBanner.Body className="ps-6 pe-4 pb-1 wrap-anywhere sm:ps-5.5">
             <ChatMarkdown
               text={activeQuestion.question}
               cwd={cwd}
               threadRef={threadRef}
-              className="text-foreground/85"
+              className="pt-2 text-foreground/85"
             />
-            {activeQuestion.multiSelect ? (
-              <p className="mt-1 text-secondary-label text-xs">Select one or more options.</p>
-            ) : null}
-            <div className="mt-2 space-y-0.5">
+            {/* Rows span the header row's width so the radios align with the question text and the shortcut column sits under the dismiss button. */}
+            <div className="-ms-2 mt-1.5 sm:-ms-1.5">
               {activeQuestion.options.map((option, index) => {
                 const optionValue = option.value ?? option.label;
                 const isOptimisticallySelected =
@@ -252,6 +253,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                     description={option.description}
                     selected={isOptimisticallySelected || draftSelectedOptions?.[index] === true}
                     shortcutKey={index < 9 ? index + 1 : null}
+                    multiSelect={activeQuestion.multiSelect}
                     disabled={disabled || isResponding}
                     onSelect={() => {
                       handleOptionSelection(activeQuestion.id, optionValue);
