@@ -118,18 +118,14 @@ export type PivotCommand =
       readonly attachedFrom?: ThreadId | null | undefined;
       /** For a scout: the project checkout's changed files as it started. */
       readonly checkoutSnapshot?: Readonly<Record<string, string>> | null | undefined;
+      /** The scout whose report it ships; that one ends. */
+      readonly promotedFrom?: ThreadId | null | undefined;
     }
   | {
       readonly type: "teammate.record-verdict";
       readonly pivotThreadId: ThreadId;
       readonly threadId: ThreadId;
       readonly text: string;
-    }
-  | {
-      readonly type: "teammate.promote";
-      readonly pivotThreadId: ThreadId;
-      readonly threadId: ThreadId;
-      readonly spec: string;
     }
   | {
       readonly type: "teammate.add-intent";
@@ -755,6 +751,17 @@ export const make = Effect.gen(function* () {
             successorThreadId: command.threadId,
           });
         }
+        if (command.promotedFrom != null) {
+          const scout = yield* ownLiveTeammate(command.pivotThreadId, command.promotedFrom);
+          if (scout.kind !== "scout" || command.kind !== "ship") {
+            return yield* refuse("A ship is promoted from a scout.");
+          }
+          emit({
+            type: "teammate.scout-promoted",
+            threadId: scout.threadId,
+            shipThreadId: command.threadId,
+          });
+        }
         break;
       }
       case "teammate.record-verdict": {
@@ -769,13 +776,6 @@ export const make = Effect.gen(function* () {
           threadId: command.threadId,
           text: yield* nonEmpty(command.text, "The verdict"),
         });
-        break;
-      }
-      case "teammate.promote": {
-        const teammate = yield* ownLiveTeammate(command.pivotThreadId, command.threadId);
-        if (teammate.kind !== "scout") return yield* refuse("Only a scout can be promoted.");
-        yield* nonEmpty(command.spec, "The spec");
-        emit({ type: "teammate.promoted", threadId: command.threadId, spec: command.spec });
         break;
       }
       case "teammate.add-intent": {
@@ -1267,6 +1267,7 @@ export const make = Effect.gen(function* () {
       case "teammate.landed":
         return;
       case "teammate.handed-over":
+      case "teammate.scout-promoted":
       case "teammate.torn-down":
         yield* sql`
           UPDATE pivot_teammates SET torn_down_at = ${at}, recheck_at = NULL

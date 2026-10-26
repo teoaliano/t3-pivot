@@ -64,12 +64,7 @@ import * as Stream from "effect/Stream";
 
 import * as ServerSettings from "../serverSettings.ts";
 import { defaultPivotTeammateCap } from "../process/agentScope.ts";
-import {
-  BRIEF_TEXTS,
-  definitionOfDoneText,
-  opensWithSpeakerLabel,
-  renderPromotion,
-} from "./pivotBrief.ts";
+import { BRIEF_TEXTS, definitionOfDoneText, opensWithSpeakerLabel } from "./pivotBrief.ts";
 import { mergeRefusals, PIVOT_MERGE_PROVIDERS } from "./pivotDelivery.ts";
 import type { PivotEvent, StoredPivotEvent } from "./PivotEvents.ts";
 import * as PivotGit from "./PivotGit.ts";
@@ -157,10 +152,14 @@ export class PivotService extends Context.Service<
       caller: ThreadId,
       input: PivotMcpDispatchTeammateInput,
     ) => Result<PivotMcpDispatchTeammateResult>;
+    /**
+     * Dispatches a ship in a fresh worktree with the scout's report in its brief, and ends
+     * the scout.
+     */
     readonly promoteScout: (
       caller: ThreadId,
       input: PivotMcpPromoteScoutInput,
-    ) => Result<PivotMcpTeammateResult>;
+    ) => Result<PivotMcpDispatchTeammateResult>;
     /** Appends the user's words to the intent and sends them with the Pivot's text. */
     readonly addIntent: (
       caller: ThreadId,
@@ -266,6 +265,8 @@ export const historyLine = (event: PivotEvent): string => {
       return `Dispatched as a ${event.kind} on ${event.branch} from ${event.baseBranch}${event.modelEntry ? `, on teammate model ${event.modelEntry}` : ""}.`;
     case "teammate.promoted":
       return "Promoted from scout to ship.";
+    case "teammate.scout-promoted":
+      return `Ended: ${event.shipThreadId} ships the work its report found.`;
     case "teammate.verdict-recorded":
       return clip(`The Pivot's verdict: ${event.text}`);
     case "teammate.ship-ordered":
@@ -666,10 +667,17 @@ export const make = Effect.gen(function* () {
       return previous;
     });
 
-  const dispatchTeammate: PivotService["Service"]["dispatchTeammate"] = (caller, input) =>
+  /**
+   * Launches a teammate and records it, under the project lock. `promotedFrom` is the scout
+   * whose report it builds on, which ends with it.
+   */
+  const launchTeammate = (
+    command: string,
+    pivot: PivotStore.PivotRow,
+    input: PivotMcpDispatchTeammateInput,
+    promotedFrom: PivotStore.TeammateRow | null,
+  ) =>
     Effect.gen(function* () {
-      const command = "dispatch_teammate";
-      const pivot = yield* activePivot(command, caller);
       yield* nonEmpty(command, input.title, "The title");
       yield* nonEmpty(command, input.intent, "The intent");
       yield* nonEmpty(command, input.spec, "The spec");
@@ -684,7 +692,7 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const host = yield* hostFor(command, null);
           const project = yield* host.project(command, pivot.projectId);
-          const previous =
+          const attachedFrom =
             input.attachTo === undefined
               ? null
               : yield* attachTarget(command, pivot, host, input, input.attachTo);
@@ -729,13 +737,13 @@ export const make = Effect.gen(function* () {
             baseBranch: input.baseBranch,
             modelSelection,
             shipDirectly: input.shipDirectly,
-            ...(previous === null
+            ...(attachedFrom === null
               ? {}
               : {
                   attach: {
-                    worktreePath: previous.worktreePath,
-                    branch: previous.branch,
-                    baseBranch: previous.baseBranch,
+                    worktreePath: attachedFrom.worktreePath,
+                    branch: attachedFrom.branch,
+                    baseBranch: attachedFrom.baseBranch,
                   },
                 }),
           });
@@ -756,16 +764,18 @@ export const make = Effect.gen(function* () {
               spec: input.spec,
               modelEntry: choice.entry,
               shipDirectly: input.shipDirectly === true,
-              attachedFrom: previous?.threadId ?? null,
+              attachedFrom: attachedFrom?.threadId ?? null,
+              promotedFrom: promotedFrom?.threadId ?? null,
               checkoutSnapshot,
             })
             .pipe(Effect.tapError(() => host.discard(launched.threadId).pipe(Effect.ignore)));
-          // The predecessor's record ended with the handover; its thread goes too, idle.
-          if (previous !== null) {
-            yield* host.discard(previous.threadId).pipe(
+          // The predecessor's record ended with it; its thread goes too, between turns.
+          const predecessor = attachedFrom ?? promotedFrom;
+          if (predecessor !== null) {
+            yield* host.discard(predecessor.threadId).pipe(
               Effect.catchCause((cause) =>
                 Effect.logWarning("The teammate that handed over did not archive", {
-                  threadId: previous.threadId,
+                  threadId: predecessor.threadId,
                   cause,
                 }),
               ),
@@ -795,30 +805,37 @@ export const make = Effect.gen(function* () {
       );
     });
 
+  const dispatchTeammate: PivotService["Service"]["dispatchTeammate"] = (caller, input) =>
+    Effect.gen(function* () {
+      const command = "dispatch_teammate";
+      const pivot = yield* activePivot(command, caller);
+      return yield* launchTeammate(command, pivot, input, null);
+    });
+
   const promoteScout: PivotService["Service"]["promoteScout"] = (caller, input) =>
     Effect.gen(function* () {
       const command = "promote_scout";
       const pivot = yield* activePivot(command, caller);
-      const teammate = yield* ownTeammate(command, pivot, input.threadId);
-      if (teammate.kind !== "scout") return yield* refuse(command, "Only a scout can be promoted.");
+      const scout = yield* ownTeammate(command, pivot, input.threadId);
+      if (scout.kind !== "scout") return yield* refuse(command, "Only a scout can be promoted.");
+      if (scout.scoutReport === null) {
+        return yield* refuse(command, "Promote a scout once its report is recorded.");
+      }
       yield* nonEmpty(command, input.spec, "The spec");
-      const message = renderPromotion(yield* text(BRIEF_TEXTS.promotion), {
-        intent: teammate.intent.join("\n\n"),
-        spec: input.spec,
-        definitionOfDone: yield* text(definitionOfDoneText("ship", teammate.deliveryMode)),
-      });
-      yield* store.dispatch({
-        type: "teammate.promote",
-        pivotThreadId: pivot.threadId,
-        threadId: teammate.threadId,
-        spec: input.spec,
-      });
-      yield* (yield* hostOf(command, teammate)).send({
-        threadId: teammate.threadId,
-        senderThreadId: pivot.threadId,
-        text: message,
-      });
-      return { threadId: teammate.threadId, kind: "ship" as const, intent: teammate.intent };
+      // The scout's checkout is the user's, so the work starts over in a fresh worktree.
+      return yield* launchTeammate(
+        command,
+        pivot,
+        {
+          title: input.title ?? scout.title,
+          kind: "ship",
+          intent: scout.intent.join("\n\n"),
+          spec: `${input.spec.trim()}\n\n## The scout's report\n\n${scout.scoutReport.trim()}`,
+          ...(input.baseBranch === undefined ? {} : { baseBranch: input.baseBranch }),
+          ...(input.modelEntry === undefined ? {} : { modelEntry: input.modelEntry }),
+        },
+        scout,
+      );
     });
 
   const addIntent: PivotService["Service"]["addIntent"] = (caller, input) =>

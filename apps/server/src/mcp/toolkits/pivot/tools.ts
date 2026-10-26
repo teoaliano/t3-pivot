@@ -57,9 +57,9 @@ const DispatchTeammateTool = Tool.make("dispatch_teammate", {
 
 const PromoteScoutTool = Tool.make("promote_scout", {
   ...pivotTool,
-  description: `${PIVOT_ONLY} Turn a scout into a ship in place, keeping its worktree and context, with a new spec. The original intent carries over.`,
+  description: `${PIVOT_ONLY} Turn a scout's findings into work: dispatch a ship in a fresh worktree with your spec and the scout's recorded report as its brief, and end the scout. The scout's intent carries over; title, baseBranch and modelEntry work as in dispatch_teammate. Refused until the report is recorded.`,
   parameters: PivotMcpPromoteScoutInput,
-  success: PivotMcpTeammateResult,
+  success: PivotMcpDispatchTeammateResult,
 }).annotate(Tool.Title, "Promote a scout");
 
 const AddIntentTool = Tool.make("add_intent", {

@@ -8,7 +8,6 @@ import type { PivotDeliveryMode, TeammateKind } from "@t3tools/contracts";
 /** Names of the `text/*.md` files these renderers read. */
 export const BRIEF_TEXTS = {
   brief: "teammate-brief",
-  promotion: "promotion",
   scout: "definition-of-done.scout",
   shipPr: "definition-of-done.ship-pr",
   shipLocal: "definition-of-done.ship-local",
@@ -62,16 +61,6 @@ export const renderBrief = (template: string, values: BriefValues) =>
     branch: values.branch,
     baseBranch: values.baseBranch,
     worktreePath: values.worktreePath,
-    definitionOfDone: stripTemplateNote(values.definitionOfDone),
-  });
-
-export const renderPromotion = (
-  template: string,
-  values: { readonly intent: string; readonly spec: string; readonly definitionOfDone: string },
-) =>
-  fill(template, {
-    intent: values.intent.trim(),
-    spec: values.spec.trim(),
     definitionOfDone: stripTemplateNote(values.definitionOfDone),
   });
 

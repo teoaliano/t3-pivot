@@ -70,7 +70,10 @@ export const PivotEvent = Schema.Union([
     /** For a scout: the project checkout's changed files with fingerprints, as it started. */
     checkoutSnapshot: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   }),
+  /** An older release promoted the scout in place. */
   event("teammate.promoted", { threadId: ThreadId, spec: Schema.String }),
+  /** A ship was dispatched from the scout's report, and the scout ended. */
+  event("teammate.scout-promoted", { threadId: ThreadId, shipThreadId: ThreadId }),
   /**
    * The teammate was told to push and open its PR: at dispatch when the user said to ship
    * directly (no decision), or by the approved ship batch `decisionId`.

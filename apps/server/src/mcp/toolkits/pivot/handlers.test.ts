@@ -489,44 +489,63 @@ describe("Pivot and teammate tools", () => {
     }).pipe(Effect.provide(layer));
   });
 
-  it.effect("a scout reports, then is promoted in place with a superseding contract", () => {
+  it.effect("promotes a scout into a new ship in a fresh worktree, its report in the brief", () => {
     const { fake, layer } = setup({ remote: true });
     return Effect.gen(function* () {
       const pivot = yield* createPivot;
       const scout = yield* dispatch(pivot, { title: "Why is login slow", kind: "scout" });
       assert.include(firstMessage(fake, scout.threadId)!.text, "This task delivers a report");
       assertNoHardWraps(firstMessage(fake, scout.threadId)!.text);
+      expectRefused(
+        yield* call(pivot, "promote_scout", { threadId: scout.threadId, spec: "Add the index." }),
+        "invalid_request",
+        "report",
+      );
 
       expectOk(
         yield* call(scout.threadId, "record_scout_report", {
           report: "The session lookup does a full table scan; see db.ts:42.",
         }),
       );
-      const pivots = yield* PivotService.PivotService;
-      const detail = yield* pivots.teammateDetail(scout.threadId);
-      assert.strictEqual(
-        detail.scoutReport,
-        "The session lookup does a full table scan; see db.ts:42.",
-      );
-
       const promoted = expectOk(
         yield* call(pivot, "promote_scout", { threadId: scout.threadId, spec: "Add the index." }),
-      );
+      ) as PivotMcpDispatchTeammateResult;
+      assert.notStrictEqual(promoted.threadId, scout.threadId);
       assert.strictEqual(promoted.kind, "ship");
-      const message = lastMessage(fake, scout.threadId)!;
-      assert.strictEqual(message.senderThreadId, pivot);
-      assert.isTrue(message.text.startsWith("# You are now a ship"));
-      assert.include(message.text, "The login button does nothing on Safari. Make it work.");
-      assert.include(message.text, "Add the index.");
-      assert.include(message.text, "This task delivers committed work for review.");
-      assertNoHardWraps(message.text);
+      assert.strictEqual(promoted.branch, "pivot/why-is-login-slow");
+      assert.strictEqual(promoted.baseBranch, "main");
+      assert.isTrue(
+        promoted.worktreePath.endsWith(NodePath.join("work", "pivot-why-is-login-slow")),
+      );
+      // A fresh worktree from the default branch, as V2 launches any ship.
+      const ship = fake.threads.get(promoted.threadId)!;
+      assert.strictEqual(ship.branch, "pivot/why-is-login-slow");
+      assert.strictEqual(ship.baseBranch, "main");
+      const brief = firstMessage(fake, promoted.threadId)!;
+      assert.strictEqual(brief.senderThreadId, pivot);
+      assert.isTrue(brief.text.startsWith("# Your role"));
+      assert.include(brief.text, "The login button does nothing on Safari. Make it work.");
+      assert.include(brief.text, "Add the index.");
+      assert.include(brief.text, "The session lookup does a full table scan; see db.ts:42.");
+      assert.include(brief.text, "This task delivers committed work for review.");
+      assertNoHardWraps(brief.text);
+
+      // The scout ended; its report stays readable.
+      assert.isTrue(fake.threads.get(scout.threadId)!.archived);
+      const lines = expectOk(yield* call(pivot, "list_teammates", { includeTornDown: true }))
+        .teammates as Array<{ threadId: ThreadId; tornDown: boolean }>;
+      assert.isTrue(lines.find((line) => line.threadId === scout.threadId)?.tornDown);
+      const pivots = yield* PivotService.PivotService;
+      assert.include(
+        (yield* pivots.teammateDetail(scout.threadId)).scoutReport ?? "",
+        "full table scan",
+      );
       expectRefused(
         yield* call(pivot, "promote_scout", { threadId: scout.threadId, spec: "again" }),
         "invalid_request",
-        "Only a scout",
       );
       expectRefused(
-        yield* call(scout.threadId, "record_scout_report", { report: "more" }),
+        yield* call(promoted.threadId, "record_scout_report", { report: "more" }),
         "invalid_request",
         "Only a scout",
       );

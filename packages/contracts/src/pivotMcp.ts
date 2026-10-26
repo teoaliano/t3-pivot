@@ -77,7 +77,12 @@ export type PivotMcpTeammateTarget = typeof PivotMcpTeammateTarget.Type;
 
 export const PivotMcpPromoteScoutInput = Schema.Struct({
   threadId: ThreadId,
+  /** The ship's spec; the scout's report is added to it. */
   spec: TrimmedNonEmptyString,
+  /** The ship's title, its branch's name; the scout's when omitted. */
+  title: Schema.optional(TrimmedNonEmptyString),
+  baseBranch: Schema.optional(TrimmedNonEmptyString),
+  modelEntry: Schema.optional(TrimmedNonEmptyString),
 });
 export type PivotMcpPromoteScoutInput = typeof PivotMcpPromoteScoutInput.Type;
 

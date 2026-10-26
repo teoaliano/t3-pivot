@@ -753,26 +753,6 @@ describe("PivotStore", () => {
           }),
         );
         assert.include(stranger, "Only a Pivot");
-        assert.include(
-          yield* refusal(
-            store.dispatch({
-              type: "teammate.promote",
-              pivotThreadId: pivotA,
-              threadId: shipA,
-              spec: "s",
-            }),
-          ),
-          "Only a scout",
-        );
-        yield* store.dispatch({
-          type: "teammate.promote",
-          pivotThreadId: pivotA,
-          threadId: scoutA,
-          spec: "Now fix it",
-        });
-        const promoted = yield* store.getTeammate(scoutA);
-        assert.strictEqual(promoted?.kind, "ship");
-        assert.strictEqual(promoted?.spec, "Now fix it");
         yield* store.dispatch({
           type: "teammate.add-intent",
           pivotThreadId: pivotA,
