@@ -232,6 +232,8 @@ export class PivotThreads extends Context.Service<
     ) => Effect.Effect<void, PivotThreadsError>;
     /** Stops every managed process the worktree runs and frees its port block. */
     readonly stopProcesses: (worktreePath: string) => Effect.Effect<void>;
+    /** Stops the worktree's managed processes and keeps its port block for the next start. */
+    readonly stopServers: (worktreePath: string) => Effect.Effect<void>;
     /** Removes the worktree; without `force`, T3's clean-tree check refuses a dirty one. */
     readonly removeWorktree: (input: {
       readonly projectRoot: string;
@@ -631,6 +633,8 @@ export const make = Effect.gen(function* () {
             stopWorktreeProcesses(procHost, { worktreePath, owner: scopeOwner, self: process.pid }),
           ),
         ),
+
+    stopServers: (worktreePath) => processes.stopAllForCheckout(worktreePath),
 
     removeWorktree: ({ projectRoot, worktreePath, force }) =>
       git

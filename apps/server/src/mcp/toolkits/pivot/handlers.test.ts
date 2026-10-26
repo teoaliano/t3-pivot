@@ -600,6 +600,28 @@ describe("Pivot and teammate tools", () => {
       }).pipe(Effect.provide(layer));
     });
 
+    it.effect("stops the ship's dev servers once its done is accepted, keeping its port", () => {
+      const { fake, workspaceRoot, layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const ship = yield* dispatch(pivot);
+        addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
+        NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "wip.txt"), "wip\n");
+        expectRefused(
+          yield* call(ship.threadId, "report_status", { status: "done", summary: "Ready" }),
+          "invalid_request",
+          "committed",
+        );
+        assert.deepStrictEqual(fake.stoppedServers, []);
+
+        sh(ship.worktreePath, "git add -A && git commit -q -m wip");
+        expectOk(yield* call(ship.threadId, "report_status", { status: "done", summary: "Ready" }));
+        assert.deepStrictEqual(fake.stoppedServers, [ship.worktreePath]);
+        // The checkout stays, so its port block is kept for the next start.
+        assert.deepStrictEqual(fake.stoppedCheckouts, []);
+      }).pipe(Effect.provide(layer));
+    });
+
     it.effect("accepts a local-only ship's done naming its branch", () => {
       const { workspaceRoot, layer } = setup();
       return Effect.gen(function* () {

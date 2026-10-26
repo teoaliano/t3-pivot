@@ -73,7 +73,10 @@ export interface FakeV2 {
   readonly pullRequests: Map<string, Partial<PullRequestDetail>>;
   /** Merges asked of the forge, with the head they were pinned to. */
   readonly merges: Array<{ readonly url: string; readonly expectedHeadSha: string }>;
+  /** Checkouts whose processes stopped with the checkout going away: port block released. */
   readonly stoppedCheckouts: Array<string>;
+  /** Checkouts whose dev servers stopped while the checkout stays: port block kept. */
+  readonly stoppedServers: Array<string>;
   /** Setup script outcomes by thread; none when unset. */
   readonly setupOutcomes: Map<string, SetupScriptOutcome>;
   /** Threads whose held queue was released. */
@@ -106,6 +109,7 @@ export const makeFakeV2 = (): FakeV2 => ({
   pullRequests: new Map(),
   merges: [],
   stoppedCheckouts: [],
+  stoppedServers: [],
   releasedQueues: [],
   setupOutcomes: new Map(),
   removedWorktrees: [],
@@ -337,6 +341,10 @@ export const layer = (fake: FakeV2) =>
       stopProcesses: (worktreePath) =>
         Effect.sync(() => {
           fake.stoppedCheckouts.push(worktreePath);
+        }),
+      stopServers: (worktreePath) =>
+        Effect.sync(() => {
+          fake.stoppedServers.push(worktreePath);
         }),
       removeWorktree: ({ projectRoot, worktreePath, force }) =>
         Effect.sync(() => {

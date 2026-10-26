@@ -96,6 +96,11 @@ export class TeammateHost extends Context.Service<
       readonly attachments?: ReadonlyArray<ChatImageAttachment> | undefined;
     }) => Result<void>;
     readonly stop: (threadId: ThreadId) => Result<void>;
+    /**
+     * Stops the dev servers the teammate's checkout runs, keeping its port block. Its
+     * agent's own processes are untouched, so it can run while the agent is mid-turn.
+     */
+    readonly stopServers: (worktreePath: string) => Effect.Effect<void>;
     /** Stops what the teammate's agent scope still runs, once its work is landed or merged. */
     readonly stopScope: (threadId: ThreadId) => Effect.Effect<void>;
     readonly retryLaunch: (threadId: ThreadId) => Result<PivotThreads.RunStart>;

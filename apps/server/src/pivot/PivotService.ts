@@ -1359,6 +1359,16 @@ export const make = Effect.gen(function* () {
 
   // --- Teammate tools ---
 
+  // A ship waiting on review holds no dev server; "start it" brings one back on the same port.
+  // A scout's checkout is the user's own, so its servers are not the scout's to stop.
+  const stopServersAtDone = (
+    status: PivotMcpReportStatusInput["status"],
+    teammate: { readonly kind: string; readonly worktreePath: string },
+  ) =>
+    status === "done" && teammate.kind === "ship"
+      ? localHost.stopServers(teammate.worktreePath)
+      : Effect.void;
+
   const reportStatus: PivotService["Service"]["reportStatus"] = (caller, input) =>
     Effect.gen(function* () {
       const command = "report_status";
@@ -1430,6 +1440,7 @@ export const make = Effect.gen(function* () {
                   },
           },
         });
+        yield* stopServersAtDone(input.status, teammate);
         return { status: input.status, openDecisions: 0 };
       }
       yield* store.dispatch({
@@ -1445,6 +1456,7 @@ export const make = Effect.gen(function* () {
             ? null
             : { key: input.clearDecision.key ?? null, resolution: input.clearDecision.resolution },
       });
+      yield* stopServersAtDone(input.status, teammate);
       const decisions = yield* store.listDecisions({
         pivotThreadId: calling.teammate.pivotThreadId,
         openOnly: true,
