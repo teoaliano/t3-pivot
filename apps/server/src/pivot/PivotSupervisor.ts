@@ -144,7 +144,7 @@ export const make = Effect.gen(function* () {
     const teammates = yield* store.listTeammates({ includeTornDown: false });
     const now = yield* Clock.currentTimeMillis;
     const current = new Set(teammates.map((teammate) => teammate.threadId as string));
-    for (const id of [...liveTeammates.keys()]) if (!current.has(id)) liveTeammates.delete(id);
+    for (const id of liveTeammates.keys()) if (!current.has(id)) liveTeammates.delete(id);
     for (const teammate of teammates) {
       const reportedAt = teammate.report?.reportedAt ?? null;
       if (seenReports.get(teammate.threadId) !== reportedAt) {
@@ -421,6 +421,8 @@ export const make = Effect.gen(function* () {
       if (teammate.resume === "pending") dirty.add(teammate.threadId);
     }
     yield* notePivots(pivots);
+    // A snapshot: `observe` yields, and other fibers mark threads dirty meanwhile.
+    // oxlint-disable-next-line unicorn/no-useless-spread
     for (const threadId of [...dirty]) {
       dirty.delete(threadId);
       yield* observe(threadId as ThreadId);
@@ -479,7 +481,9 @@ export const make = Effect.gen(function* () {
         return yield* Effect.forever(
           Effect.gen(function* () {
             yield* tick;
-            yield* Effect.raceFirst(Queue.take(signal), Effect.sleep(SWEEP_INTERVAL));
+            yield* Queue.take(signal).pipe(
+              Effect.timeoutOrElse({ duration: SWEEP_INTERVAL, orElse: () => Effect.void }),
+            );
             // Streaming turns emit many events; at most one tick a second.
             yield* Effect.sleep(MIN_TICK_SPACING);
           }),

@@ -58,9 +58,11 @@ export interface ProjectThreadAwarenessV2Input {
     | "latestRunRequestedAt"
     | "latestUserAuthoredMessageAt"
     | "lineage"
+    | "latestRunStopRequested"
     | "modelSelection"
     | "pendingBackgroundTasks"
     | "pendingRuntimeRequest"
+    | "settledOverride"
     | "status"
     | "title"
     | "updatedAt"
@@ -89,6 +91,15 @@ export function projectThreadAwarenessV2(
   // A Pivot reports finishing only a turn that answered the user, not one spent on
   // teammate news: in Pivot mode the user hears what needs them, not every wake.
   if (phase === "completed" && input.pivotRole?.kind === "pivot" && !pivotTurnAnswersUser(thread)) {
+    return null;
+  }
+  if (phase === "completed" && thread.latestRunStopRequested === true) return null;
+  // Resolve the phase first so live or waiting work stays visible after settlement.
+  if (
+    thread.settledOverride === "settled" &&
+    (phase === "completed" || phase === "failed") &&
+    !backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks ?? [])
+  ) {
     return null;
   }
   const detail =

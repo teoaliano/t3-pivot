@@ -5,12 +5,14 @@ import {
   CircleDotDashedIcon,
   MessageCircleQuestionIcon,
   ShieldQuestionIcon,
+  UserRoundIcon,
 } from "lucide-react";
 
 export type SidebarStatusIconKind =
   | "working"
   | "waiting"
   | "input"
+  | "request"
   | "approval"
   | "failed"
   | "done";
@@ -25,6 +27,8 @@ export function SidebarStatusIcon(props: { kind: SidebarStatusIconKind }) {
       return <CircleDotDashedIcon aria-hidden className={className} />;
     case "input":
       return <MessageCircleQuestionIcon aria-hidden className={className} />;
+    case "request":
+      return <UserRoundIcon aria-hidden className={className} />;
     case "approval":
       return <ShieldQuestionIcon aria-hidden className={className} />;
     case "failed":

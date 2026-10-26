@@ -1,5 +1,5 @@
 import { useNowSecond } from "../../hooks/useNowSecond";
-import { formatWorkingDurationLabel } from "../Sidebar.logic";
+import { formatWorkingDurationLabel } from "@t3tools/client-runtime/state/models";
 
 export function WorkingDuration(props: { startedAt: string | null }) {
   const startedMs = props.startedAt !== null ? Date.parse(props.startedAt) : Number.NaN;

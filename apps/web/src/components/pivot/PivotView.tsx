@@ -419,6 +419,7 @@ function TeammatePaneBody(props: {
             threadRef={teammateRef}
             composerDraftTarget={teammateRef}
             workspaceMutationId={workspaceMutationId}
+            visible
           />
         </Suspense>
       );

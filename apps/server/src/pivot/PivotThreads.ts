@@ -525,7 +525,7 @@ export const make = Effect.gen(function* () {
           reason: "Stopped by the Pivot.",
         });
         yield* detachSessions(threadId, "stop");
-        yield* agentScope.stop(threadId);
+        yield* agentScope.stopThread(threadId);
       }).pipe(Effect.mapError(fail("stop", threadId))),
 
     relaunch: ({ threadId, senderThreadId, text }) =>

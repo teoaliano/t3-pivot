@@ -1282,8 +1282,9 @@ describe("a launch that waits its turn", () => {
     addDocsProject(fake);
     return Effect.gen(function* () {
       const home = yield* newHome([projectId, docsProjectId]);
-      const outcomes = yield* Effect.all(
-        [projectId, docsProjectId].map((id) =>
+      const outcomes = yield* Effect.forEach(
+        [projectId, docsProjectId],
+        (id) =>
           launch(home, { projectId: id, dispatchId: "same" }).pipe(
             Effect.map(() => "launched" as const),
             Effect.catchTags({
@@ -1291,7 +1292,6 @@ describe("a launch that waits its turn", () => {
               PivotHostRefusedError: (error) => Effect.succeed(error.message),
             }),
           ),
-        ),
         { concurrency: "unbounded" },
       );
       assert.deepStrictEqual(outcomes.toSorted(), [

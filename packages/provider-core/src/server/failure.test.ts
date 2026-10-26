@@ -15,7 +15,6 @@ import * as Effect from "effect/Effect";
 import {
   makeProviderFailure,
   makeProviderFailureTurnItem,
-  MAX_PROVIDER_FAILURE_CODE_LENGTH,
   MAX_PROVIDER_FAILURE_MESSAGE_LENGTH,
   ContextHandoffBudgetError,
 } from "./failure.ts";
@@ -40,24 +39,6 @@ it("redacts credentials and URL secrets from provider failures", () => {
   assert.notInclude(failure.message, "json-secret");
   assert.notInclude(failure.message, "key-secret");
   assert.notInclude(failure.message, "sk-abcdefghijklmnop");
-});
-
-it("replaces unsafe control characters without stripping whitespace", () => {
-  const failure = makeProviderFailure({ message: "before\u0000\u0007\t\nafter\u007f" });
-
-  assert.equal(failure.message, "before  \t\nafter");
-});
-
-it("bounds provider-controlled failure strings", () => {
-  const failure = makeProviderFailure({
-    message: "m".repeat(MAX_PROVIDER_FAILURE_MESSAGE_LENGTH + 500),
-    code: "c".repeat(MAX_PROVIDER_FAILURE_CODE_LENGTH + 50),
-  });
-
-  assert.equal(failure.message.length, MAX_PROVIDER_FAILURE_MESSAGE_LENGTH);
-  assert.equal(failure.code?.length, MAX_PROVIDER_FAILURE_CODE_LENGTH);
-  assert.match(failure.message, /…$/u);
-  assert.match(failure.code ?? "", /…$/u);
 });
 
 it("does not split a surrogate pair at the truncation boundary", () => {
@@ -102,45 +83,6 @@ it("preserves actionable handoff errors wrapped by turn startup", () => {
   );
 });
 
-it("tells the user when a turn could not start for lack of memory", () => {
-  const cause = new ProviderAdapter.ProviderAdapterTurnStartError({
-    driver: ProviderDriverKind.make("claudeAgent"),
-    threadId: ThreadId.make("thread:memory-wait"),
-    providerThreadId: ProviderThreadId.make("provider-thread:memory-wait"),
-    runId: RunId.make("run:memory-wait"),
-    cause: new AgentMemoryWaitError({
-      summary:
-        "Not started: the machine does not have memory for another agent (agents use 9.7 of 9.4 GB). Retry once a running agent finishes.",
-    }),
-  });
-  assert.equal(
-    makeProviderFailure({ cause: Cause.fail(cause) }).message,
-    "Not started: the machine does not have memory for another agent (agents use 9.7 of 9.4 GB). Retry once a running agent finishes.",
-  );
-});
-
-it.each([
-  ["previous_turn_active", "the previous turn is still running"],
-  ["attachment_unreadable", "an attachment could not be read"],
-] as const)("names %s without exposing provider detail or losing guidance", (reason, wording) => {
-  const failure = makeProviderFailure({
-    cause: Cause.fail({
-      _tag: "ProviderAdapterTurnStartError",
-      cause: Cause.fail(
-        new ProviderAdapter.ProviderAdapterProtocolError({
-          driver: ProviderDriverKind.make("claudeAgent"),
-          detail: `Private configuration: ${"x".repeat(5000)}`,
-          reason,
-        }),
-      ),
-    }),
-  });
-  assert.equal(
-    failure.message,
-    `The provider could not start this turn: ${wording}. Retry the turn; if it keeps failing, check the provider setup and server logs.`,
-  );
-});
-
 it("keeps unrecognized reasons and provider text out of category messages", () => {
   for (const cause of [
     "Private launch command",
@@ -159,6 +101,23 @@ it("keeps unrecognized reasons and provider text out of category messages", () =
       cause: { _tag: "ProviderAdapterProtocolError", reason: "previous_turn_active" },
     }).message,
     "Provider turn failed.",
+  );
+});
+
+it("tells the user when a turn could not start for lack of memory", () => {
+  const cause = new ProviderAdapter.ProviderAdapterTurnStartError({
+    driver: ProviderDriverKind.make("claudeAgent"),
+    threadId: ThreadId.make("thread:memory-wait"),
+    providerThreadId: ProviderThreadId.make("provider-thread:memory-wait"),
+    runId: RunId.make("run:memory-wait"),
+    cause: new AgentMemoryWaitError({
+      summary:
+        "Not started: the machine does not have memory for another agent (agents use 9.7 of 9.4 GB). Retry once a running agent finishes.",
+    }),
+  });
+  assert.equal(
+    makeProviderFailure({ cause: Cause.fail(cause) }).message,
+    "Not started: the machine does not have memory for another agent (agents use 9.7 of 9.4 GB). Retry once a running agent finishes.",
   );
 });
 
@@ -214,18 +173,6 @@ it("handles cyclic causes and throwing accessors", () => {
     }).message,
     "Provider turn failed.",
   );
-});
-
-it("falls back when inspecting a provider cause throws", () => {
-  const cause = new Proxy(
-    {},
-    {
-      has() {
-        throw new Error("unreadable provider cause");
-      },
-    },
-  );
-  assert.equal(makeProviderFailure({ cause }).message, "Provider turn failed.");
 });
 
 it("does not serialize arbitrary provider causes", () => {

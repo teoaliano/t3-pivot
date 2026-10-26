@@ -1,27 +1,6 @@
 /**
- * In-process PortScanner implementation.
- *
- * macOS/Linux: parses `lsof -iTCP -sTCP:LISTEN -P -n -F pcn` (-F output is a
- * stable line-prefixed field format; this is the only `lsof` flag set we rely
- * on).
- *
- * Linux without lsof: reads listening sockets from `/proc/net/tcp{,6}` and
- * finds their processes through `/proc/<pid>/fd`.
- *
- * Only listeners owned by T3 terminal processes and explicitly configured
- * URLs receive probes. Without listener ownership, only configured URLs do.
- *
- * Listening ports are published only after a bounded HTTP(S) probe finds a
- * successful HTML document or a redirect to one.
- * Positive and negative results are cached briefly by candidate URL and listener identity,
- * limiting repeated requests without leaving stale classifications around.
- *
- * Polling is reference-counted via scoped `retain`. A single layer-scoped fiber
- * polls forever, but each tick is a no-op when the retain count is zero.
- *
- * Managed processes run in T3 terminals, so their listeners count as owned.
- * The managed process service also registers their ports, which receive probes
- * when the platform cannot report listener ownership.
+ * Only listeners owned by T3 terminal processes and configured URLs receive probes; managed
+ * process ports count as owned when the platform cannot report listener ownership.
  */
 import {
   CONFIGURED_LOCAL_SERVER_URLS_MAX_ITEMS,
@@ -415,7 +394,7 @@ const serversEqual = (
 const isCommandNotFound = (error: ProcessRunner.ProcessSpawnError): boolean =>
   PlatformError.isPlatformError(error.cause) && error.cause.reason._tag === "NotFound";
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* PortDiscoveryMake() {
   const net = yield* Net.NetService;
   const processRunner = yield* ProcessRunner.ProcessRunner;
@@ -488,9 +467,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
     const known = yield* Ref.get(socketOwnersRef);
     const knownMisses = yield* Ref.get(socketOwnerMissesRef);
     const inodes = new Set(listeners.map((listener) => listener.inode));
-    // Listeners rarely change, so the fd walk runs only for sockets without a
-    // confirmed owner, and gives up on one after a few walks miss it (another
-    // user's process, or one that exited mid-walk).
+    // Walk fds only for unowned sockets; stop after repeated misses for inaccessible or exited processes.
     const unseen = new Set(
       [...inodes].filter(
         (inode) => !known.has(inode) && (knownMisses.get(inode) ?? 0) < SOCKET_OWNER_ATTEMPTS,
@@ -605,8 +582,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
     }
 
     for (const server of servers) {
-      // A listener alone does not identify its protocol. Sending HTTP or TLS to
-      // another app's binary RPC listener can crash it before classification.
+      // Never probe an unidentified listener with HTTP or TLS; binary RPC servers can crash on it.
       // Ownerless managed ports come from the fallback, which only knows T3 reserved them.
       const unownedManagedPort = server.pid === null && managedPorts.includes(server.port);
       if (server.terminal === null && !unownedManagedPort) continue;
@@ -701,8 +677,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
     return { discovered, configured } satisfies WebProbeSnapshot;
   });
 
-  // `tasklist` costs ~200-300ms per PID, so look up only visible servers, a few at a time, and
-  // reuse each name until its TTL expires.
+  // tasklist costs 200-300ms per PID; query visible servers with bounded concurrency and cache names.
   const withWindowsProcessNames = Effect.fn("PortDiscovery.withWindowsProcessNames")(function* (
     snapshot: WebProbeSnapshot,
   ) {
@@ -780,8 +755,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
       return yield* Effect.all([runNetstat("tcp"), runNetstat("tcpv6")], {
         concurrency: 2,
       }).pipe(
-        // One failed query leaves a partial snapshot that could hide another process sharing a
-        // port across IPv4/IPv6, so fall back to configured URLs instead.
+        // Failed queries can hide other IPv4/IPv6 listeners on the port; fall back to configured URLs.
         Effect.map(([tcp4, tcp6]) =>
           exitedWithError(tcp4) || exitedWithError(tcp6)
             ? null

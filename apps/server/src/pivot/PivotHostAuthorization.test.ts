@@ -197,8 +197,9 @@ describe("PivotHostAuthorization", () => {
           ),
       });
 
-      const outcomes = yield* Effect.all(
-        [home, otherHome].map((homeEnvironmentId) =>
+      const outcomes = yield* Effect.forEach(
+        [home, otherHome],
+        (homeEnvironmentId) =>
           authorize(caller, { homeEnvironmentId }).pipe(
             Effect.provideService(PivotHostStore.PivotHostStore, interleaved),
             Effect.map(() => "bound" as const),
@@ -207,7 +208,6 @@ describe("PivotHostAuthorization", () => {
               PivotStoreError: Effect.die,
             }),
           ),
-        ),
         { concurrency: "unbounded" },
       );
       assert.deepStrictEqual(outcomes.toSorted(), ["bound", "home-mismatch"]);

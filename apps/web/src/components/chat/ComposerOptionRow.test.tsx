@@ -16,9 +16,10 @@ const render = (props: Partial<Parameters<typeof ComposerOptionRow>[0]> = {}) =>
   );
 
 describe("ComposerOptionRow", () => {
-  it("shows its shortcut until selected, then a check instead", () => {
+  it("shows its shortcut whether or not it is selected", () => {
     expect(render()).toContain("<kbd");
-    expect(render({ selected: true })).not.toContain("<kbd");
+    expect(render({ shortcutKey: null })).not.toContain("<kbd");
+    expect(render({ selected: true })).toContain("<kbd");
     expect(render({ selected: true })).toContain('aria-pressed="true"');
   });
 

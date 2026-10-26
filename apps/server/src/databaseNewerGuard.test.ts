@@ -8,9 +8,9 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
 import { ensureDatabaseNotNewer, ServerDatabaseNewerError } from "./databaseNewerGuard.ts";
-import { migrationEntries } from "./persistence/Migrations.ts";
+import { migrationManifest } from "./persistence/Migrations.ts";
 
-const newest = Math.max(...migrationEntries.map(([id]) => id));
+const newest = Math.max(...migrationManifest.map(([id]) => id));
 
 /** A database whose ledger recorded `migrations`, or no ledger at all when null. */
 const databaseWith = (migrations: ReadonlyArray<readonly [number, string]> | null) =>
@@ -36,7 +36,7 @@ const databaseWith = (migrations: ReadonlyArray<readonly [number, string]> | nul
 it.layer(NodeServices.layer)("ensureDatabaseNotNewer", (it) => {
   it.effect("opens a database this build has migrated", () =>
     Effect.gen(function* () {
-      const dbPath = yield* databaseWith(migrationEntries.map(([id, name]) => [id, name]));
+      const dbPath = yield* databaseWith(migrationManifest.map(([id, name]) => [id, name]));
       yield* ensureDatabaseNotNewer(dbPath);
     }).pipe(Effect.scoped),
   );
