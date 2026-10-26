@@ -21,7 +21,6 @@ import { requestCustomSnooze } from "./CustomSnoozeDialog";
 import { useAtomValue } from "@effect/atom-react";
 import * as Option from "effect/Option";
 import { Atom } from "effect/reactivity";
-import * as Schema from "effect/Schema";
 import {
   DndContext,
   useSensor,
@@ -231,6 +230,7 @@ import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { TooltipProvider } from "./ui/tooltip";
+import { SidebarTab, SidebarTabBar } from "./sidebar/SidebarTabBar";
 import { composerDraftHasUserContent, DraftId, useComposerDraftStore } from "../composerDraftStore";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 import {
@@ -242,7 +242,7 @@ import {
 import { SidebarDraftBlock } from "./sidebar/SidebarDraftBlock";
 import {
   SidebarDragBoundary,
-  SidebarSectionHeader,
+  SidebarSectionMarker,
   SidebarSectionPlaceholder,
 } from "./sidebar/SidebarListMarkers";
 
@@ -300,12 +300,7 @@ const EMPTY_THREADS: readonly EnvironmentThreadShell[] = [];
 
 const SETTLED_TAIL_INITIAL_COUNT = 10;
 const SETTLED_TAIL_PAGE_COUNT = 25;
-const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar:settled-expanded";
-const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
-const WORKING_SHELF_EXPANDED_KEY = "t3code:sidebar:working-expanded";
-// The active list splits into Pivots and Threads, both expanded by default.
-const PIVOTS_SECTION_EXPANDED_KEY = "t3code:sidebar:pivots-expanded";
-const THREADS_SECTION_EXPANDED_KEY = "t3code:sidebar:threads-expanded";
+const SIDEBAR_TAB_KEY = "t3code:sidebar:tab";
 
 const inboxReturns = createInboxReturnTracker();
 
@@ -406,31 +401,18 @@ function useSidebarThreads(input: {
   const nowMinute = useNowMinute();
   // Minute-quantized clocks would delay second-precise snooze wakes by up to a minute.
   const snoozeWakeClock = useSnoozeWakeClock(threads);
-  const [settledShelfExpanded, setSettledShelfExpanded] = useLocalStorage(
-    SETTLED_SHELF_EXPANDED_KEY,
-    false,
-    Schema.Boolean,
+  const [storedTab, setSidebarTab] = useLocalStorage<SidebarTab, SidebarTab>(
+    SIDEBAR_TAB_KEY,
+    "threads",
+    SidebarTab,
   );
-  const [snoozedShelfExpanded, setSnoozedShelfExpanded] = useLocalStorage(
-    SNOOZED_SHELF_EXPANDED_KEY,
-    false,
-    Schema.Boolean,
-  );
-  const [workingShelfExpanded, setWorkingShelfExpanded] = useLocalStorage(
-    WORKING_SHELF_EXPANDED_KEY,
-    false,
-    Schema.Boolean,
-  );
-  const [pivotsSectionExpanded, setPivotsSectionExpanded] = useLocalStorage(
-    PIVOTS_SECTION_EXPANDED_KEY,
-    true,
-    Schema.Boolean,
-  );
-  const [threadsSectionExpanded, setThreadsSectionExpanded] = useLocalStorage(
-    THREADS_SECTION_EXPANDED_KEY,
-    true,
-    Schema.Boolean,
-  );
+  // Without the Working shelf, working threads stay in Threads.
+  const sidebarTab = storedTab === "working" && !workingShelfEnabled ? "threads" : storedTab;
+  const pivotsSectionExpanded = sidebarTab === "pivots";
+  const threadsSectionExpanded = sidebarTab === "threads";
+  const workingShelfExpanded = sidebarTab === "working";
+  const snoozedShelfExpanded = sidebarTab === "snoozed";
+  const settledShelfExpanded = sidebarTab === "settled";
   const [settledTail, setSettledTail] = useState({
     scopeKey: projectScopeKey,
     count: SETTLED_TAIL_INITIAL_COUNT,
@@ -539,10 +521,8 @@ function useSidebarThreads(input: {
     activePivotThreads,
     activeNormalThreads,
     visibleActiveThreads,
-    pivotsSectionExpanded,
-    togglePivotsSection: () => setPivotsSectionExpanded((value) => !value),
-    threadsSectionExpanded,
-    toggleThreadsSection: () => setThreadsSectionExpanded((value) => !value),
+    sidebarTab,
+    setSidebarTab,
     settledVisibleCount,
     settledCount,
     olderSettledShelf,
@@ -553,11 +533,6 @@ function useSidebarThreads(input: {
         count: current.count + SETTLED_TAIL_PAGE_COUNT,
       })),
     settledShelfExpanded,
-    toggleSettledShelf: () => setSettledShelfExpanded((value) => !value),
-    snoozedShelfExpanded,
-    toggleSnoozedShelf: () => setSnoozedShelfExpanded((value) => !value),
-    workingShelfExpanded,
-    toggleWorkingShelf: () => setWorkingShelfExpanded((value) => !value),
     renderedSettledThreads,
     visibleSnoozedThreads,
     visibleWorkingThreads,
@@ -1178,10 +1153,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     activePivotThreads,
     activeNormalThreads,
     visibleActiveThreads,
-    pivotsSectionExpanded,
-    togglePivotsSection,
-    threadsSectionExpanded,
-    toggleThreadsSection,
+    sidebarTab,
+    setSidebarTab,
     workingThreads,
     snoozedThreads,
     settledThreads,
@@ -1193,11 +1166,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     hiddenSettledCount,
     showMoreSettled,
     settledShelfExpanded,
-    toggleSettledShelf,
-    snoozedShelfExpanded,
-    toggleSnoozedShelf,
-    workingShelfExpanded,
-    toggleWorkingShelf,
     renderedSettledThreads,
     visibleSnoozedThreads,
     visibleWorkingThreads,
@@ -3041,6 +3009,20 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               closeDelay={0}
               timeout={400}
             >
+              {sidebarListItems.length > 0 ? (
+                <SidebarTabBar
+                  value={sidebarTab}
+                  onValueChange={setSidebarTab}
+                  workingShelfEnabled={workingShelfEnabled}
+                  counts={{
+                    pivots: activePivotThreads.length,
+                    threads: activeNormalThreads.length,
+                    working: workingThreads.length,
+                    snoozed: snoozedThreads.length,
+                    settled: settledCount,
+                  }}
+                />
+              ) : null}
               <DndContext
                 sensors={dndSensors}
                 autoScroll={!isContextDrag}
@@ -3239,80 +3221,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             );
                             break;
                           case "pivots-header":
-                            items.push(
-                              <SidebarSectionHeader
-                                key="pivots-section-header"
-                                marker="pivots-header"
-                                label="Pivots"
-                                count={activePivotThreads.length}
-                                toggle={{
-                                  expanded: pivotsSectionExpanded,
-                                  onToggle: togglePivotsSection,
-                                }}
-                              />,
-                            );
-                            break;
                           case "threads-header":
-                            items.push(
-                              <SidebarSectionHeader
-                                key="threads-section-header"
-                                marker="threads-header"
-                                label="Threads"
-                                count={activeNormalThreads.length}
-                                toggle={{
-                                  expanded: threadsSectionExpanded,
-                                  onToggle: toggleThreadsSection,
-                                }}
-                              />,
-                            );
-                            break;
                           case "working-header":
-                            items.push(
-                              <SidebarSectionHeader
-                                key="working-shelf-header"
-                                marker="working-header"
-                                className="mt-auto"
-                                label="Working"
-                                count={workingThreads.length}
-                                toggle={{
-                                  expanded: workingShelfExpanded,
-                                  onToggle: toggleWorkingShelf,
-                                }}
-                              />,
-                            );
-                            break;
                           case "snoozed-header":
-                            items.push(
-                              <SidebarSectionHeader
-                                key="snoozed-shelf-header"
-                                marker="snoozed-header"
-                                className={cn(workingThreads.length === 0 && "mt-auto")}
-                                label="Snoozed"
-                                count={snoozedThreads.length}
-                                toggle={{
-                                  expanded: snoozedShelfExpanded,
-                                  onToggle: toggleSnoozedShelf,
-                                }}
-                              />,
-                            );
-                            break;
                           case "settled-header":
                             items.push(
-                              <SidebarSectionHeader
-                                key="settled-shelf-header"
-                                marker="settled-header"
-                                className={cn(
-                                  workingThreads.length + snoozedThreads.length === 0 && "mt-auto",
-                                )}
-                                label="Settled"
-                                count={settledCount}
-                                dragging={from !== null}
-                                isDropTarget={dragTargetSection === "settled"}
-                                toggle={{
-                                  expanded: settledShelfExpanded,
-                                  onToggle: toggleSettledShelf,
-                                }}
-                              />,
+                              <SidebarSectionMarker key={item.marker} marker={item.marker} />,
                             );
                             break;
                           case "settled-placeholder":
