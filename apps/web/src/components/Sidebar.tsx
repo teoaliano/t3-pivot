@@ -11,7 +11,6 @@ import {
   sidebarPivotGroup,
 } from "./sidebar/pivotNesting.logic";
 import { SidebarNewPivotButton } from "./pivot/SidebarNewPivotButton";
-import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
 import { ThreadTerminalStatusButton } from "./ThreadStatusIndicators";
 import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
 import {
@@ -83,10 +82,14 @@ import {
   CheckIcon,
   CircleAlertIcon,
   CircleCheckIcon,
+  CircleDashedIcon,
   ClockIcon,
   FolderIcon,
+  LayoutDashboardIcon,
   GitBranchIcon,
   ListFilterIcon,
+  type LucideIcon,
+  MessageSquareIcon,
   PinIcon,
   PinOffIcon,
   PlusIcon,
@@ -287,6 +290,7 @@ import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarT
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
 import { SidebarStatusIcon } from "./sidebar/SidebarStatusIcon";
 import { WorkingDuration } from "./sidebar/WorkingDuration";
+import { Toggle, ToggleGroup } from "./ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { MiddleTruncate } from "./ui/middle-truncate";
 import {
@@ -372,12 +376,9 @@ const EMPTY_THREADS: readonly EnvironmentThreadShell[] = [];
 
 const SETTLED_TAIL_INITIAL_COUNT = 10;
 const SETTLED_TAIL_PAGE_COUNT = 25;
-const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar:settled-expanded";
-const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
-const WORKING_SHELF_EXPANDED_KEY = "t3code:sidebar:working-expanded";
-// The active list splits into Pivots and Threads, both expanded by default.
-const PIVOTS_SECTION_EXPANDED_KEY = "t3code:sidebar:pivots-expanded";
-const THREADS_SECTION_EXPANDED_KEY = "t3code:sidebar:threads-expanded";
+const SIDEBAR_TAB_KEY = "t3code:sidebar:tab";
+const SidebarTab = Schema.Literals(["pivots", "threads", "working", "snoozed", "settled"]);
+type SidebarTab = typeof SidebarTab.Type;
 
 const inboxReturns = createInboxReturnTracker();
 
@@ -491,31 +492,18 @@ function useSidebarThreads(input: {
     () => scheduleSnoozeWake(nextSnoozeWakeAt, () => bumpSnoozeWakeTick((tick) => tick + 1)),
     [nextSnoozeWakeAt],
   );
-  const [settledShelfExpanded, setSettledShelfExpanded] = useLocalStorage(
-    SETTLED_SHELF_EXPANDED_KEY,
-    false,
-    Schema.Boolean,
+  const [storedTab, setSidebarTab] = useLocalStorage<SidebarTab, SidebarTab>(
+    SIDEBAR_TAB_KEY,
+    "threads",
+    SidebarTab,
   );
-  const [snoozedShelfExpanded, setSnoozedShelfExpanded] = useLocalStorage(
-    SNOOZED_SHELF_EXPANDED_KEY,
-    false,
-    Schema.Boolean,
-  );
-  const [workingShelfExpanded, setWorkingShelfExpanded] = useLocalStorage(
-    WORKING_SHELF_EXPANDED_KEY,
-    false,
-    Schema.Boolean,
-  );
-  const [pivotsSectionExpanded, setPivotsSectionExpanded] = useLocalStorage(
-    PIVOTS_SECTION_EXPANDED_KEY,
-    true,
-    Schema.Boolean,
-  );
-  const [threadsSectionExpanded, setThreadsSectionExpanded] = useLocalStorage(
-    THREADS_SECTION_EXPANDED_KEY,
-    true,
-    Schema.Boolean,
-  );
+  // Without the Working shelf, working threads stay in Threads.
+  const sidebarTab = storedTab === "working" && !workingShelfEnabled ? "threads" : storedTab;
+  const pivotsSectionExpanded = sidebarTab === "pivots";
+  const threadsSectionExpanded = sidebarTab === "threads";
+  const workingShelfExpanded = sidebarTab === "working";
+  const settledShelfExpanded = sidebarTab === "settled";
+  const snoozedShelfExpanded = sidebarTab === "snoozed";
   // The settled tail restarts whenever the project scope changes.
   const [settledTail, setSettledTail] = useState({
     scopeKey: projectScopeKey,
@@ -616,10 +604,8 @@ function useSidebarThreads(input: {
     activePivotThreads,
     activeNormalThreads,
     visibleActiveThreads,
-    pivotsSectionExpanded,
-    togglePivotsSection: () => setPivotsSectionExpanded((value) => !value),
-    threadsSectionExpanded,
-    toggleThreadsSection: () => setThreadsSectionExpanded((value) => !value),
+    sidebarTab,
+    setSidebarTab,
     settledVisibleCount,
     hiddenSettledCount: settledThreads.length - visibleSettledThreads.length,
     showMoreSettled: () =>
@@ -628,11 +614,6 @@ function useSidebarThreads(input: {
         count: current.count + SETTLED_TAIL_PAGE_COUNT,
       })),
     settledShelfExpanded,
-    toggleSettledShelf: () => setSettledShelfExpanded((value) => !value),
-    snoozedShelfExpanded,
-    toggleSnoozedShelf: () => setSnoozedShelfExpanded((value) => !value),
-    workingShelfExpanded,
-    toggleWorkingShelf: () => setWorkingShelfExpanded((value) => !value),
     renderedSettledThreads,
     visibleSnoozedThreads,
     visibleWorkingThreads,
@@ -1326,38 +1307,62 @@ function SidebarDragBoundary(props: {
   );
 }
 
-function SidebarSectionHeader(props: {
-  marker:
-    | "pivots-header"
-    | "threads-header"
-    | "working-header"
-    | "snoozed-header"
-    | "settled-header";
-  label: string;
-  className?: string;
-  dragging?: boolean;
-  isDropTarget?: boolean;
-  toggle: { expanded: boolean; onToggle: () => void };
+const SIDEBAR_TABS = [
+  { value: "pivots", label: "Pivots", icon: LayoutDashboardIcon },
+  { value: "threads", label: "Threads", icon: MessageSquareIcon },
+  { value: "working", label: "Working", icon: CircleDashedIcon },
+  { value: "snoozed", label: "Snoozed", icon: AlarmClockIcon },
+  { value: "settled", label: "Settled", icon: CheckIcon },
+] as const satisfies ReadonlyArray<{ value: SidebarTab; label: string; icon: LucideIcon }>;
+
+function SidebarTabBar(props: {
+  value: SidebarTab;
+  onValueChange: (tab: SidebarTab) => void;
+  counts: Record<SidebarTab, number>;
+  workingShelfEnabled: boolean;
 }) {
-  const shelf = props.marker.slice(0, -"-header".length);
-  const snoozed = shelf === "snoozed";
+  const tabs = props.workingShelfEnabled
+    ? SIDEBAR_TABS
+    : SIDEBAR_TABS.filter((tab) => tab.value !== "working");
   return (
-    <SortableSidebarMarker
-      marker={props.marker}
-      data-testid={`sidebar-${props.marker}`}
-      className={cn("mx-0.5 h-8", props.className)}
-    >
-      <CollapsibleSectionHeader
-        onClick={props.toggle.onToggle}
-        expanded={props.toggle.expanded}
-        tone={
-          props.isDropTarget ? "accent" : props.dragging ? "emphasized" : snoozed ? "info" : "muted"
-        }
-        data-testid={`sidebar-${shelf}-shelf-toggle`}
+    // Wide sidebars label every tab, medium ones only the selected tab, and
+    // narrow ones fall back to icons with tooltips.
+    <div className="@container/sidebar-tabs mx-0.5 mb-1">
+      <ToggleGroup
+        aria-label="Sidebar threads"
+        variant="segmented"
+        className="w-full"
+        value={[props.value]}
+        onValueChange={(value) => {
+          const next = SIDEBAR_TABS.find((tab) => tab.value === value[0]);
+          if (next !== undefined) props.onValueChange(next.value);
+        }}
       >
-        {props.label}
-      </CollapsibleSectionHeader>
-    </SortableSidebarMarker>
+        {tabs.map((tab) => {
+          const label = `${tab.label} (${props.counts[tab.value]})`;
+          return (
+            <Tooltip key={tab.value}>
+              <TooltipTrigger
+                render={
+                  <Toggle
+                    value={tab.value}
+                    aria-label={label}
+                    className="flex-auto"
+                    data-testid={`sidebar-tab-${tab.value}`}
+                  />
+                }
+              >
+                <tab.icon aria-hidden className="size-3.5" />
+                <span className="hidden @[17rem]/sidebar-tabs:in-data-pressed:inline @[28rem]/sidebar-tabs:inline">
+                  {tab.label}
+                </span>
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">{label}</TooltipPopup>
+            </Tooltip>
+          );
+        })}
+      </ToggleGroup>
+    </div>
   );
 }
 
@@ -3043,10 +3048,8 @@ export default function Sidebar() {
     activePivotThreads,
     activeNormalThreads,
     visibleActiveThreads,
-    pivotsSectionExpanded,
-    togglePivotsSection,
-    threadsSectionExpanded,
-    toggleThreadsSection,
+    sidebarTab,
+    setSidebarTab,
     workingThreads,
     snoozedThreads,
     settledThreads,
@@ -3056,11 +3059,6 @@ export default function Sidebar() {
     hiddenSettledCount,
     showMoreSettled,
     settledShelfExpanded,
-    toggleSettledShelf,
-    snoozedShelfExpanded,
-    toggleSnoozedShelf,
-    workingShelfExpanded,
-    toggleWorkingShelf,
     renderedSettledThreads,
     visibleSnoozedThreads,
     visibleWorkingThreads,
@@ -4875,6 +4873,20 @@ export default function Sidebar() {
               closeDelay={0}
               timeout={400}
             >
+              {sidebarListItems.length > 0 ? (
+                <SidebarTabBar
+                  value={sidebarTab}
+                  onValueChange={setSidebarTab}
+                  workingShelfEnabled={workingShelfEnabled}
+                  counts={{
+                    pivots: activePivotThreads.length,
+                    threads: activeNormalThreads.length,
+                    working: workingThreads.length,
+                    snoozed: snoozedThreads.length,
+                    settled: settledThreads.length,
+                  }}
+                />
+              ) : null}
               <DndContext
                 sensors={dndSensors}
                 autoScroll={!isContextDrag}
@@ -5073,94 +5085,18 @@ export default function Sidebar() {
                             );
                             break;
                           case "pivots-header":
-                            items.push(
-                              <SidebarSectionHeader
-                                key="pivots-section-header"
-                                marker="pivots-header"
-                                label={
-                                  pivotsSectionExpanded
-                                    ? "Pivots"
-                                    : `Pivots (${activePivotThreads.length})`
-                                }
-                                toggle={{
-                                  expanded: pivotsSectionExpanded,
-                                  onToggle: togglePivotsSection,
-                                }}
-                              />,
-                            );
-                            break;
                           case "threads-header":
-                            items.push(
-                              <SidebarSectionHeader
-                                key="threads-section-header"
-                                marker="threads-header"
-                                label={
-                                  threadsSectionExpanded
-                                    ? "Threads"
-                                    : `Threads (${activeNormalThreads.length})`
-                                }
-                                toggle={{
-                                  expanded: threadsSectionExpanded,
-                                  onToggle: toggleThreadsSection,
-                                }}
-                              />,
-                            );
-                            break;
                           case "working-header":
-                            items.push(
-                              <SidebarSectionHeader
-                                key="working-shelf-header"
-                                marker="working-header"
-                                className="mt-auto"
-                                label={
-                                  workingShelfExpanded
-                                    ? "Working"
-                                    : `Working (${workingThreads.length})`
-                                }
-                                toggle={{
-                                  expanded: workingShelfExpanded,
-                                  onToggle: toggleWorkingShelf,
-                                }}
-                              />,
-                            );
-                            break;
                           case "snoozed-header":
-                            items.push(
-                              <SidebarSectionHeader
-                                key="snoozed-shelf-header"
-                                marker="snoozed-header"
-                                className={cn(workingThreads.length === 0 && "mt-auto")}
-                                label={
-                                  snoozedShelfExpanded
-                                    ? "Snoozed"
-                                    : `Snoozed (${snoozedThreads.length})`
-                                }
-                                toggle={{
-                                  expanded: snoozedShelfExpanded,
-                                  onToggle: toggleSnoozedShelf,
-                                }}
-                              />,
-                            );
-                            break;
                           case "settled-header":
+                            // The tab bar replaces these headers; they stay as
+                            // invisible markers because they bound drag sections.
                             items.push(
-                              <SidebarSectionHeader
-                                key="settled-shelf-header"
-                                marker="settled-header"
-                                className={cn(
-                                  workingThreads.length + snoozedThreads.length === 0 && "mt-auto",
-                                )}
-                                label={
-                                  settledShelfExpanded
-                                    ? "Settled"
-                                    : `Settled (${settledThreads.length})`
-                                }
-                                dragging={from !== null}
-                                isDropTarget={dragTargetSection === "settled"}
-                                toggle={{
-                                  expanded: settledShelfExpanded,
-                                  onToggle: toggleSettledShelf,
-                                }}
+                              <SortableSidebarMarker
+                                key={item.marker}
+                                marker={item.marker}
+                                data-testid={`sidebar-${item.marker}`}
+                                className="-mb-px h-0"
                               />,
                             );
                             break;
