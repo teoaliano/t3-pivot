@@ -1242,6 +1242,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     diff === null &&
     !isRemote &&
     runningTerminalIds.length === 0;
+  // A Pivot's title restates its project, so the project name takes the title's place.
+  const isPivotRow = Boolean(props.pivotSummary);
 
   return (
     <li
@@ -1250,7 +1252,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       {...(fileDropHandlers ?? {})}
       className={cn(
         "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_78px]",
-        metaLineEmpty && "redesign:[contain-intrinsic-size:auto_58px]",
+        (metaLineEmpty || isPivotRow) && "redesign:[contain-intrinsic-size:auto_58px]",
         sortable?.isDragging && "relative z-20",
       )}
     >
@@ -1278,6 +1280,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             className={cn(
               "relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)",
               metaLineEmpty && "redesign:h-auto",
+              isPivotRow && !isRenaming && "h-auto",
             )}
           >
             <div className="flex h-5 min-w-0 items-center gap-1.5">
@@ -1291,8 +1294,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {props.projectDisplayName ? (
                 <span
                   className={cn(
-                    "min-w-0 flex-1 truncate text-secondary-label text-xs",
-                    shouldRecede ? "font-normal" : "font-medium redesign:font-normal",
+                    "min-w-0 flex-1 truncate",
+                    isPivotRow
+                      ? shouldRecede
+                        ? "text-secondary-label text-sm"
+                        : "font-medium text-foreground text-sm"
+                      : cn(
+                          "text-secondary-label text-xs",
+                          shouldRecede ? "font-normal" : "font-medium redesign:font-normal",
+                        ),
                   )}
                 >
                   {props.projectDisplayName}
@@ -1427,7 +1437,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               )}
               {props.sweepAction !== null ? dragDestination : null}
             </div>
-            <div className="mt-1 flex min-w-0 items-center gap-1.5">
+            <div
+              className={cn(
+                "mt-1 flex min-w-0 items-center gap-1.5",
+                isPivotRow && !isRenaming && "hidden",
+              )}
+            >
               {title}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">
@@ -1447,6 +1462,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               className={cn(
                 "mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs",
                 metaLineEmpty && "redesign:hidden",
+                isPivotRow && props.project && "pl-5.5",
               )}
             >
               {props.pivotSummary ? (
