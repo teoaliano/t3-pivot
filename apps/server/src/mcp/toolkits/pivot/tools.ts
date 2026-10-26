@@ -18,6 +18,8 @@ import {
   PivotMcpPromoteScoutInput,
   PivotMcpRecordScoutReportInput,
   PivotMcpRecordScoutReportResult,
+  PivotMcpRecordVerdictInput,
+  PivotMcpRecordVerdictResult,
   PivotMcpReportStatusInput,
   PivotMcpReportStatusResult,
   PivotMcpTeammateHistoryInput,
@@ -95,9 +97,16 @@ const MarkDecisionMootTool = Tool.make("mark_decision_moot", {
   success: PivotMcpDecisionResult,
 }).annotate(Tool.Title, "Close a moot decision");
 
+const RecordVerdictTool = Tool.make("record_verdict", {
+  ...pivotTool,
+  description: `${PIVOT_ONLY} Record your review of a done teammate's work, in a line or two, after reading its diff and evidence. The user sees it beside the evidence in the Pivot view. Refused unless the teammate reported done; its next report clears it. It asks nothing of the user.`,
+  parameters: PivotMcpRecordVerdictInput,
+  success: PivotMcpRecordVerdictResult,
+}).annotate(Tool.Title, "Record a verdict");
+
 const ListTeammatesTool = Tool.make("list_teammates", {
   ...pivotTool,
-  description: `${PIVOT_ONLY} One line per teammate: title, kind, status, latest summary, branch, PR, last change, worktree and teammate model.`,
+  description: `${PIVOT_ONLY} One line per teammate: title, kind, status, latest summary, branch, PR, last change, worktree, teammate model, the evidence of its latest done, your verdict on it, and whether it was told to ship.`,
   parameters: PivotMcpListTeammatesInput,
   success: PivotMcpListTeammatesResult,
 })
@@ -166,6 +175,7 @@ export const PivotToolkit = Toolkit.make(
   EscalateDecisionTool,
   AnswerDecisionTool,
   MarkDecisionMootTool,
+  RecordVerdictTool,
   ListTeammatesTool,
   TeammateHistoryTool,
   StopTeammateTool,

@@ -73,6 +73,8 @@ export const PivotEvent = Schema.Union([
    * The teammate was told to push and open its PR: at dispatch when the user said to ship
    * directly (no decision), or by the approved ship batch `decisionId`.
    */
+  /** The Pivot reviewed the teammate's `done`. */
+  event("teammate.verdict-recorded", { threadId: ThreadId, text: Schema.String }),
   event("teammate.ship-ordered", {
     threadId: ThreadId,
     decisionId: Schema.NullOr(PivotDecisionId),

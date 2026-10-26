@@ -29,6 +29,7 @@ import {
   type TeammateKind,
   TeammateReport,
   type TeammateReportedStatus,
+  TeammateVerdict,
   type TeammateRecord,
   type TeammateResumeState,
   type TeammateStatus,
@@ -113,6 +114,12 @@ export type PivotCommand =
       readonly modelEntry: string | null;
       /** The user said to ship it directly, so it is told to ship from the start. */
       readonly shipDirectly: boolean;
+    }
+  | {
+      readonly type: "teammate.record-verdict";
+      readonly pivotThreadId: ThreadId;
+      readonly threadId: ThreadId;
+      readonly text: string;
     }
   | {
       readonly type: "teammate.promote";
@@ -356,6 +363,7 @@ interface TeammateSqlRow {
   readonly scout_report: string | null;
   readonly dispatched_at: string;
   readonly ship_ordered_at: string | null;
+  readonly verdict_json: string | null;
   readonly torn_down_at: string | null;
   readonly observed_status: string | null;
   readonly observed_run_id: string | null;
@@ -392,6 +400,9 @@ interface EventSqlRow {
 }
 
 const decodeReport = Schema.decodeUnknownSync(Schema.fromJsonString(TeammateReport));
+const VerdictJson = Schema.fromJsonString(TeammateVerdict);
+const decodeVerdict = Schema.decodeUnknownSync(VerdictJson);
+const encodeVerdict = Schema.encodeSync(VerdictJson);
 const decodeEscalation = Schema.decodeUnknownSync(
   Schema.fromJsonString(PivotDecisionEscalationSchema),
 );
@@ -438,6 +449,7 @@ const toTeammate = (row: TeammateSqlRow): TeammateRow => ({
   hasScoutReport: row.scout_report !== null,
   dispatchedAt: row.dispatched_at,
   shipOrderedAt: row.ship_ordered_at,
+  verdict: row.verdict_json === null ? null : decodeVerdict(row.verdict_json),
   tornDownAt: row.torn_down_at,
   memoryWait: row.memory_wait,
   baseBranch: row.base_branch,
@@ -504,6 +516,7 @@ export const teammateRecord = (row: TeammateRow): TeammateRecord => ({
   hasScoutReport: row.hasScoutReport,
   dispatchedAt: row.dispatchedAt,
   shipOrderedAt: row.shipOrderedAt ?? null,
+  verdict: row.verdict ?? null,
   tornDownAt: row.tornDownAt,
   memoryWait: row.memoryWait,
 });
@@ -709,6 +722,20 @@ export const make = Effect.gen(function* () {
           if (command.kind !== "ship") return yield* refuse("Only a ship ships directly.");
           emit({ type: "teammate.ship-ordered", threadId: command.threadId, decisionId: null });
         }
+        break;
+      }
+      case "teammate.record-verdict": {
+        const teammate = yield* ownLiveTeammate(command.pivotThreadId, command.threadId);
+        if (teammate.report?.status !== "done") {
+          return yield* refuse(
+            "A verdict reviews a teammate's `done`; this one has not reported done.",
+          );
+        }
+        emit({
+          type: "teammate.verdict-recorded",
+          threadId: command.threadId,
+          text: yield* nonEmpty(command.text, "The verdict"),
+        });
         break;
       }
       case "teammate.promote": {
@@ -1120,8 +1147,16 @@ export const make = Effect.gen(function* () {
         return;
       }
       case "teammate.reported":
+        // A verdict reviews one `done`; whatever the teammate reports next makes it stale.
         yield* sql`
-          UPDATE pivot_teammates SET report_json = ${encodeReport(event.report)}
+          UPDATE pivot_teammates SET report_json = ${encodeReport(event.report)}, verdict_json = NULL
+          WHERE thread_id = ${event.threadId}
+        `;
+        return;
+      case "teammate.verdict-recorded":
+        yield* sql`
+          UPDATE pivot_teammates
+          SET verdict_json = ${encodeVerdict({ text: event.text, recordedAt: at })}
           WHERE thread_id = ${event.threadId}
         `;
         return;

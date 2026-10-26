@@ -714,6 +714,114 @@ describe("Pivot and teammate tools", () => {
     });
   });
 
+  describe("review", () => {
+    /** A ship in a no-remote project that committed its work and reported done with evidence. */
+    const doneShip = (fake: FakeV2, workspaceRoot: string, pivot: ThreadId) =>
+      Effect.gen(function* () {
+        const ship = yield* dispatch(pivot);
+        addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
+        NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "fix.txt"), "fixed\n");
+        sh(ship.worktreePath, "git add -A && git commit -q -m fix");
+        expectOk(
+          yield* call(ship.threadId, "report_status", {
+            status: "done",
+            summary: "Fixed",
+            evidence: {
+              text: "Signed in on Safari.",
+              files: ["/tmp/safari.png"],
+              devServer: true,
+            },
+          }),
+        );
+        return ship;
+      });
+    const lineOf = (pivot: ThreadId, threadId: ThreadId) =>
+      call(pivot, "list_teammates", {}).pipe(
+        Effect.map((outcome) =>
+          (expectOk(outcome).teammates as Array<{ threadId: ThreadId }>).find(
+            (line) => line.threadId === threadId,
+          ),
+        ),
+      );
+
+    it.effect(
+      "records the Pivot's verdict on a done teammate and lists it with the evidence",
+      () => {
+        const { fake, workspaceRoot, layer } = setup();
+        return Effect.gen(function* () {
+          const pivot = yield* createPivot;
+          const ship = yield* doneShip(fake, workspaceRoot, pivot);
+
+          expectOk(
+            yield* call(pivot, "record_verdict", {
+              threadId: ship.threadId,
+              verdict: "Diff is small and matches the spec; the screenshot shows the fix.",
+            }),
+          );
+          const line = (yield* lineOf(pivot, ship.threadId)) as Record<string, unknown>;
+          assert.deepStrictEqual(line.evidence, {
+            text: "Signed in on Safari.",
+            files: ["/tmp/safari.png"],
+            devServer: true,
+          });
+          assert.strictEqual(
+            line.verdict,
+            "Diff is small and matches the spec; the screenshot shows the fix.",
+          );
+          const store = yield* PivotStore.PivotStore;
+          const [snapshot] = Array.from(
+            yield* store.stream.pipe(Stream.take(1), Stream.runCollect),
+          );
+          const record =
+            snapshot?._tag === "snapshot"
+              ? snapshot.teammates.find((teammate) => teammate.threadId === ship.threadId)
+              : undefined;
+          assert.strictEqual(
+            record?.verdict?.text,
+            "Diff is small and matches the spec; the screenshot shows the fix.",
+          );
+        }).pipe(Effect.provide(layer));
+      },
+    );
+
+    it.effect("refuses a verdict for a teammate that has not reported done", () => {
+      const { layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const ship = yield* dispatch(pivot);
+        expectOk(
+          yield* call(ship.threadId, "report_status", { status: "working", summary: "Fixing" }),
+        );
+        expectRefused(
+          yield* call(pivot, "record_verdict", { threadId: ship.threadId, verdict: "Looks good." }),
+          "invalid_request",
+          "not reported done",
+        );
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("clears the verdict once the teammate goes back to work", () => {
+      const { fake, workspaceRoot, layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const ship = yield* doneShip(fake, workspaceRoot, pivot);
+        expectOk(
+          yield* call(pivot, "record_verdict", { threadId: ship.threadId, verdict: "Looks good." }),
+        );
+
+        expectOk(
+          yield* call(ship.threadId, "report_status", {
+            status: "working",
+            summary: "Acting on the user's feedback",
+          }),
+        );
+        const line = (yield* lineOf(pivot, ship.threadId)) as Record<string, unknown>;
+        assert.isNull(line.verdict);
+        assert.isNull(line.evidence);
+      }).pipe(Effect.provide(layer));
+    });
+  });
+
   it.effect("lists teammates and reads bounded history, scoped to the calling Pivot", () => {
     const { fake, layer } = setup();
     return Effect.gen(function* () {

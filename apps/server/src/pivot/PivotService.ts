@@ -34,6 +34,8 @@ import {
   type PivotMcpPromoteScoutInput,
   type PivotMcpRecordScoutReportInput,
   type PivotMcpRecordScoutReportResult,
+  type PivotMcpRecordVerdictInput,
+  type PivotMcpRecordVerdictResult,
   type PivotMcpReportStatusInput,
   type PivotMcpReportStatusResult,
   type PivotMcpTeammateHistoryInput,
@@ -181,6 +183,11 @@ export class PivotService extends Context.Service<
       caller: ThreadId,
       input: PivotMcpMarkDecisionMootInput,
     ) => Result<PivotMcpDecisionResult>;
+    /** Records the Pivot's review of a `done` teammate's work, beside its evidence. */
+    readonly recordVerdict: (
+      caller: ThreadId,
+      input: PivotMcpRecordVerdictInput,
+    ) => Result<PivotMcpRecordVerdictResult>;
     readonly listTeammates: (
       caller: ThreadId,
       input: PivotMcpListTeammatesInput,
@@ -250,6 +257,8 @@ export const historyLine = (event: PivotEvent): string => {
       return `Dispatched as a ${event.kind} on ${event.branch} from ${event.baseBranch}${event.modelEntry ? `, on teammate model ${event.modelEntry}` : ""}.`;
     case "teammate.promoted":
       return "Promoted from scout to ship.";
+    case "teammate.verdict-recorded":
+      return clip(`The Pivot's verdict: ${event.text}`);
     case "teammate.ship-ordered":
       return event.decisionId === null
         ? "Told to ship directly: push and open its PR at done."
@@ -885,8 +894,25 @@ export const make = Effect.gen(function* () {
         lastChangeAt: latest?.occurredAt ?? null,
         worktreePath: teammate.worktreePath,
         modelEntry: teammate.modelEntry,
+        evidence: teammate.report?.status === "done" ? (teammate.report.evidence ?? null) : null,
+        verdict: teammate.verdict?.text ?? null,
+        shipOrdered: teammate.shipOrderedAt != null,
         tornDown: teammate.tornDownAt !== null,
       } satisfies PivotMcpTeammateLine;
+    });
+
+  const recordVerdict: PivotService["Service"]["recordVerdict"] = (caller, input) =>
+    Effect.gen(function* () {
+      const command = "record_verdict";
+      const pivot = yield* activePivot(command, caller);
+      const teammate = yield* ownTeammate(command, pivot, input.threadId);
+      yield* store.dispatch({
+        type: "teammate.record-verdict",
+        pivotThreadId: pivot.threadId,
+        threadId: teammate.threadId,
+        text: input.verdict,
+      });
+      return { threadId: teammate.threadId, verdict: input.verdict };
     });
 
   const listTeammates: PivotService["Service"]["listTeammates"] = (caller, input) =>
@@ -1519,6 +1545,7 @@ export const make = Effect.gen(function* () {
     escalateDecision,
     answerDecision,
     markDecisionMoot,
+    recordVerdict,
     listTeammates,
     teammateHistory,
     stopTeammate,

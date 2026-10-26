@@ -68,6 +68,13 @@ export const TeammateEvidence = Schema.Struct({
 });
 export type TeammateEvidence = typeof TeammateEvidence.Type;
 
+/** The Pivot's short review of a `done` teammate's work, shown beside its evidence. */
+export const TeammateVerdict = Schema.Struct({
+  text: TrimmedNonEmptyString,
+  recordedAt: IsoDateTime,
+});
+export type TeammateVerdict = typeof TeammateVerdict.Type;
+
 /** A report is scoped to the run it was made in, so a later silent run never reads stale. */
 export const TeammateReport = Schema.Struct({
   status: TeammateReportedStatus,
@@ -188,6 +195,8 @@ export const TeammateRecord = Schema.Struct({
    * then its `done` is committed work waiting for review. Null or absent when not told.
    */
   shipOrderedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  /** The Pivot's review of its latest `done`; cleared by its next report. Null or absent when none. */
+  verdict: Schema.optional(Schema.NullOr(TeammateVerdict)),
   tornDownAt: Schema.NullOr(IsoDateTime),
   /**
    * Why its agent has not started yet while the machine is short of memory, such as

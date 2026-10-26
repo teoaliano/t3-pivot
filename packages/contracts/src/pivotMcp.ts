@@ -139,6 +139,12 @@ export const PivotMcpTeammateLine = Schema.Struct({
   worktreePath: Schema.String,
   /** The teammate model it was dispatched on, if any. */
   modelEntry: Schema.NullOr(Schema.String),
+  /** What its latest `done` brought; null otherwise. */
+  evidence: Schema.NullOr(TeammateEvidence),
+  /** Your review of that `done`, if you recorded one. */
+  verdict: Schema.NullOr(Schema.String),
+  /** Whether it was told to push and open its PR. */
+  shipOrdered: Schema.Boolean,
   tornDown: Schema.Boolean,
 });
 export type PivotMcpTeammateLine = typeof PivotMcpTeammateLine.Type;
@@ -174,6 +180,19 @@ export const PivotMcpControlResult = Schema.Struct({
   detail: Schema.NullOr(Schema.String),
 });
 export type PivotMcpControlResult = typeof PivotMcpControlResult.Type;
+
+export const PivotMcpRecordVerdictInput = Schema.Struct({
+  threadId: ThreadId,
+  /** Your review of the diff and the evidence, in a line or two. */
+  verdict: TrimmedNonEmptyString,
+});
+export type PivotMcpRecordVerdictInput = typeof PivotMcpRecordVerdictInput.Type;
+
+export const PivotMcpRecordVerdictResult = Schema.Struct({
+  threadId: ThreadId,
+  verdict: Schema.String,
+});
+export type PivotMcpRecordVerdictResult = typeof PivotMcpRecordVerdictResult.Type;
 
 export const PivotMcpMergeTeammateInput = Schema.Struct({
   threadId: ThreadId,
