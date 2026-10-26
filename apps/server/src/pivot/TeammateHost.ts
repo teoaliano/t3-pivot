@@ -156,6 +156,11 @@ export class TeammateHost extends Context.Service<
          * git refuse an unmerged one, `keep` leaves it.
          */
         readonly branchDisposal: { readonly tip: string } | "safe" | "keep";
+        /**
+         * A scout works in the project's own checkout, which is the user's: only its session
+         * stops and its thread archives. No process, file, worktree or branch is touched.
+         */
+        readonly inMainCheckout: boolean;
       },
     ) => Result<void>;
   }

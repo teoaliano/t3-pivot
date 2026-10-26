@@ -83,7 +83,7 @@ export const make = Effect.gen(function* () {
               definitionOfDoneText(input.kind, deliveryMode, input.shipDirectly === true),
             ),
           });
-          const attached = yield* threads.attachTeammate({
+          const attached = yield* threads.startTeammate({
             projectId: input.projectId,
             pivotThreadId: input.pivotThreadId,
             title: input.title,
@@ -93,6 +93,36 @@ export const make = Effect.gen(function* () {
             text: brief,
           });
           return { ...attached, branch, baseBranch, worktreePath, deliveryMode };
+        }
+        if (input.kind === "scout") {
+          // A scout reads the user's own checkout as it stands; it has no worktree or branch.
+          const branch = yield* git.currentBranch(project.workspaceRoot);
+          const brief = renderBrief(yield* text(BRIEF_TEXTS.brief), {
+            title: input.title,
+            kind: input.kind,
+            intent: input.intent,
+            spec: input.spec,
+            branch,
+            baseBranch: branch,
+            worktreePath: project.workspaceRoot,
+            definitionOfDone: yield* text(definitionOfDoneText(input.kind, deliveryMode)),
+          });
+          const started = yield* threads.startTeammate({
+            projectId: input.projectId,
+            pivotThreadId: input.pivotThreadId,
+            title: input.title,
+            branch: null,
+            worktreePath: null,
+            modelSelection: input.modelSelection,
+            text: brief,
+          });
+          return {
+            ...started,
+            branch,
+            baseBranch: branch,
+            worktreePath: project.workspaceRoot,
+            deliveryMode,
+          };
         }
         const baseBranch = input.baseBranch ?? (yield* git.defaultBranch(project.workspaceRoot));
         const taken = new Set<string>(yield* git.listBranches(project.workspaceRoot, "pivot/"));
@@ -213,6 +243,10 @@ export const make = Effect.gen(function* () {
         const project = yield* gitProject(command, input.projectId);
         // The session goes first; if it will not stop, nothing else is touched.
         yield* threads.stop(input.threadId);
+        if (input.inMainCheckout) {
+          yield* threads.archive(input.threadId);
+          return;
+        }
         yield* threads.stopProcesses(input.worktreePath);
         yield* removeTeammateTemp(input.worktreePath).pipe(
           Effect.provideService(FileSystem.FileSystem, fs),

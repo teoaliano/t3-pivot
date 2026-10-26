@@ -56,7 +56,8 @@ const toolRestrictions = Layer.effect(
 // A Pivot's cwd is its home (see PivotThreads.createPivotThread), so the home is the
 // thread's worktree. A subagent a Pivot delegates to is not a Pivot, but it copies the
 // Pivot's thread, home path included. It runs in the project's checkout with no write scope,
-// so it reads the project but never writes the home or the checkout. How firmly depends on
+// so it reads the project but never writes the home or the checkout. A scout, which works in
+// the user's own checkout, and its subagents get the same read-only scope. How firmly depends on
 // the provider (docs/internals/pivot-mode.md). Failing a lookup fails the run: nothing falls
 // back to full access.
 const writeAccess = Layer.effect(
@@ -74,10 +75,14 @@ const writeAccess = Layer.effect(
         if (home === null) return yield* new PivotHomeMissingError({ threadId: thread.id });
         return { writableRoots: [home], writableFiles: [path.join(home, "preferences.md")] };
       }
-      // Any depth: a subagent's own subagent is still the Pivot's.
+      // Any depth: a subagent's own subagent is still the Pivot's, or the scout's.
       const rootId = thread.lineage.rootThreadId;
-      if (thread.lineage.relationshipToParent !== "subagent" || rootId === thread.id) return null;
-      if ((yield* store.getPivot(rootId)) === null) return null;
+      const scout = (yield* store.getTeammate(thread.id))?.kind === "scout";
+      if (!scout) {
+        if (thread.lineage.relationshipToParent !== "subagent" || rootId === thread.id) return null;
+        const root = yield* store.getPivot(rootId);
+        if (root === null && (yield* store.getTeammate(rootId))?.kind !== "scout") return null;
+      }
       const project = yield* projects.get(thread.projectId);
       if (Option.isNone(project)) {
         return yield* new PivotSubagentProjectMissingError({ threadId: thread.id });

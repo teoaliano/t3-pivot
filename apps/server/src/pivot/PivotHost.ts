@@ -480,9 +480,15 @@ export const make = Effect.gen(function* () {
       yield* host.project(command, teammate.projectId);
       const worktreePath = yield* worktreeOf(teammate);
       const worktreeExists = yield* host.worktreeExists(worktreePath);
+      const inMainCheckout = teammate.kind === "scout";
       // Refused before anything stops: tearing down stops the session first, and removing a
       // dirty worktree then fails, leaving a stopped teammate behind a vague failure.
-      if (!input.force && worktreeExists && !(yield* host.worktreeClean(worktreePath))) {
+      if (
+        !inMainCheckout &&
+        !input.force &&
+        worktreeExists &&
+        !(yield* host.worktreeClean(worktreePath))
+      ) {
         return yield* new PivotHostRefusedError({
           code: "worktree-not-clean",
           reason:
@@ -499,6 +505,7 @@ export const make = Effect.gen(function* () {
         // The host cannot tell whether the home merged the work, so git decides: an unmerged
         // branch stays, and discarded work keeps its branch.
         branchDisposal: input.force ? "keep" : "safe",
+        inMainCheckout,
       });
       yield* store.markTornDown(teammate.threadId);
     });

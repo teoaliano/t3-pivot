@@ -306,6 +306,7 @@ describe("TeammateHost (local)", () => {
         worktreeExists: true,
         force: true,
         branchDisposal: "keep",
+        inMainCheckout: false,
       });
 
       const thread = fake.threads.get(teammate.threadId)!;
@@ -327,6 +328,7 @@ describe("TeammateHost (local)", () => {
         worktreeExists: false,
         force: false,
         branchDisposal: "keep",
+        inMainCheckout: false,
       });
       assert.deepStrictEqual(fake.removedWorktrees, []);
       assert.isTrue(fake.threads.get(teammate.threadId)!.archived);
@@ -351,6 +353,7 @@ describe("TeammateHost (local)", () => {
         worktreeExists: true,
         force: true,
         branchDisposal: "keep",
+        inMainCheckout: false,
       });
 
       assert.isFalse(NodeFS.existsSync(mine));
@@ -375,6 +378,7 @@ describe("TeammateHost (local)", () => {
         worktreeExists: true,
         force: false,
         branchDisposal: { tip },
+        inMainCheckout: false,
       });
 
       assert.isFalse(NodeFS.existsSync(worktree));
@@ -397,6 +401,7 @@ describe("TeammateHost (local)", () => {
         worktreeExists: true,
         force: false,
         branchDisposal: { tip: verified },
+        inMainCheckout: false,
       });
 
       assert.isFalse(NodeFS.existsSync(worktree));

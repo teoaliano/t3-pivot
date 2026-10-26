@@ -26,10 +26,11 @@ import * as PivotToolRestrictions from "./PivotToolRestrictions.ts";
 const projectId = ProjectId.make("project-1");
 const pivotThreadId = ThreadId.make("pivot-1");
 const teammateThreadId = ThreadId.make("ship-1");
+const scoutThreadId = ThreadId.make("scout-1");
 const home = "/home/pivot";
 const modelSelection = { instanceId: ProviderInstanceId.make("claude"), model: "claude-opus-5-5" };
 
-const thread = (id: ThreadId, worktreePath: string): OrchestrationV2AppThread => {
+const thread = (id: ThreadId, worktreePath: string | null): OrchestrationV2AppThread => {
   const now = DateTime.makeUnsafe("2026-10-13T00:00:00.000Z");
   return {
     createdBy: "user",
@@ -121,6 +122,22 @@ const seed = Effect.gen(function* () {
     intent: "Fix the bug",
     spec: "Fix it",
   });
+  yield* store.dispatch({
+    type: "teammate.dispatch",
+    modelEntry: null,
+    shipDirectly: false,
+    pivotThreadId,
+    threadId: scoutThreadId,
+    projectId,
+    kind: "scout",
+    title: "Scout",
+    branch: "main",
+    baseBranch: "main",
+    worktreePath: "/project-root",
+    deliveryMode: "direct-pr",
+    intent: "Why is it slow?",
+    spec: "Find out",
+  });
 });
 
 const layer = Layer.mergeAll(
@@ -132,7 +149,7 @@ const layer = Layer.mergeAll(
   ),
 ).pipe(Layer.provide(PivotDatabase.layerMemory), Layer.provideMerge(NodeServices.layer));
 
-const resolve = (id: ThreadId, worktreePath: string, rootThreadId: ThreadId = id) =>
+const resolve = (id: ThreadId, worktreePath: string | null, rootThreadId: ThreadId = id) =>
   Effect.gen(function* () {
     const policy = yield* RuntimePolicy.RuntimePolicyV2;
     const base = thread(id, worktreePath);
@@ -220,6 +237,19 @@ it.layer(layer)("Pivot and teammate permissions", (it) => {
         allowDangerouslySkipPermissions: true,
         installPermissionCallback: false,
       });
+    }),
+  );
+
+  it.effect("runs a scout read-only in the project's checkout, and its subagents too", () =>
+    Effect.gen(function* () {
+      for (const resolved of [
+        yield* resolve(scoutThreadId, null),
+        yield* resolve(ThreadId.make("scout-child"), null, scoutThreadId),
+      ]) {
+        assert.equal(resolved.cwd, "/project-root");
+        assert.deepEqual(resolved.sandboxPolicy, { type: "readOnly", networkAccess: true });
+        assert.deepEqual(resolved.writableFiles, []);
+      }
     }),
   );
 

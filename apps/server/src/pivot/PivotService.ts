@@ -1164,10 +1164,11 @@ export const make = Effect.gen(function* () {
     decision: PivotDecision,
   ) =>
     Effect.gen(function* () {
-      const teammates = yield* store.listTeammates({
+      // Only ships own branches; a scout reads the project's checkout and has none of its own.
+      const teammates = (yield* store.listTeammates({
         pivotThreadId: pivot.threadId,
         includeTornDown: true,
-      });
+      })).filter((other) => other.kind === "ship");
       const live = teammates.filter((other) => other.tornDownAt === null);
       const pullRequests = (yield* Effect.forEach(
         [
@@ -1348,6 +1349,47 @@ export const make = Effect.gen(function* () {
       };
     });
 
+  /**
+   * Ends a scout once its report is recorded, or on the user's word without one. It works
+   * in the project's own checkout, so nothing there is removed or reset.
+   */
+  const teardownScout = (
+    command: string,
+    pivot: PivotStore.PivotRow,
+    host: TeammateHost["Service"],
+    teammate: PivotStore.TeammateRow,
+    input: PivotMcpTeardownTeammateInput,
+  ) =>
+    Effect.gen(function* () {
+      let reason = "Its scout report is recorded.";
+      if (teammate.scoutReport === null) {
+        if (input.discardDecisionId === undefined) {
+          return yield* refuse(
+            command,
+            "Not torn down: the scout has not recorded its report. Ending it without one needs the user's word.",
+          );
+        }
+        yield* userApproval(command, pivot, teammate, input.discardDecisionId, "Discarding work");
+        reason = "Ended on the user's word, with no scout report recorded.";
+      }
+      yield* host.teardown(command, {
+        projectId: pivot.projectId,
+        threadId: teammate.threadId,
+        worktreePath: teammate.worktreePath,
+        branch: teammate.branch,
+        worktreeExists: false,
+        force: false,
+        branchDisposal: "keep",
+        inMainCheckout: true,
+      });
+      yield* store.dispatch({
+        type: "teammate.tear-down",
+        pivotThreadId: pivot.threadId,
+        threadId: teammate.threadId,
+      });
+      return { threadId: teammate.threadId, reason, branch: teammate.branch };
+    });
+
   const teardownTeammate: PivotService["Service"]["teardownTeammate"] = (caller, input) =>
     Effect.gen(function* () {
       const command = "teardown_teammate";
@@ -1355,9 +1397,14 @@ export const make = Effect.gen(function* () {
       const teammate = yield* ownTeammate(command, pivot, input.threadId);
       const host = yield* hostOf(command, teammate);
       yield* host.project(command, pivot.projectId);
+      if (teammate.kind === "scout")
+        return yield* teardownScout(command, pivot, host, teammate, input);
       // Teardown deletes the worktree and branch, so nobody else may still be using them.
       const others = (yield* store.listTeammates({ includeTornDown: false })).filter(
-        (other) => other.threadId !== teammate.threadId && other.projectId === teammate.projectId,
+        (other) =>
+          other.kind === "ship" &&
+          other.threadId !== teammate.threadId &&
+          other.projectId === teammate.projectId,
       );
       const sharing: Array<PivotStore.TeammateRow> = [];
       for (const other of others) {
@@ -1379,21 +1426,7 @@ export const make = Effect.gen(function* () {
 
       let reason: string;
       let landedHead: string | null = null;
-      if (teammate.kind === "scout" && teammate.scoutReport !== null) {
-        reason = "Its scout report is recorded.";
-        // The report is the deliverable, but files it left uncommitted are still the user's.
-        if (worktreeExists && !(yield* host.worktreeClean(teammate.worktreePath))) {
-          if (input.discardDecisionId === undefined) {
-            return yield* refuse(
-              command,
-              "Not torn down: the scout's worktree has uncommitted files. Its report is recorded; discarding the files needs the user's word.",
-            );
-          }
-          yield* userApproval(command, pivot, teammate, input.discardDecisionId, "Discarding work");
-          reason =
-            "Discarded on the user's word: the scout's uncommitted files. Its scout report is recorded.";
-        }
-      } else {
+      {
         const link = yield* linkedPullRequest(teammate);
         let mergedHead: string | null = null;
         if (link?.snapshot?.state === "merged") {
@@ -1427,14 +1460,9 @@ export const make = Effect.gen(function* () {
         }
       }
       const discarding = reason.startsWith("Discarded");
-      // Landed work's branch goes while it is still at the verified tip; a scout's
-      // report-only branch goes only if git agrees it is merged; discarded work keeps it.
+      // Landed work's branch goes while it is still at the verified tip; discarded work keeps it.
       const branchDisposal =
-        discarding || (landedHead === null && teammate.kind !== "scout")
-          ? ("keep" as const)
-          : landedHead === null
-            ? ("safe" as const)
-            : { tip: landedHead };
+        discarding || landedHead === null ? ("keep" as const) : { tip: landedHead };
 
       yield* host.teardown(command, {
         projectId: pivot.projectId,
@@ -1444,6 +1472,7 @@ export const make = Effect.gen(function* () {
         worktreeExists,
         force: discarding,
         branchDisposal,
+        inMainCheckout: false,
       });
       yield* store.dispatch({
         type: "teammate.tear-down",

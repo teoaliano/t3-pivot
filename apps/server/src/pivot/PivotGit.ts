@@ -67,6 +67,8 @@ export class PivotGit extends Context.Service<
     readonly isClean: (cwd: string) => Effect.Effect<boolean, PivotGitError>;
     /** The uncommitted or untracked changes in the checkout, as `git status` shows them. */
     readonly uncommitted: (cwd: string) => Effect.Effect<ReadonlyArray<string>, PivotGitError>;
+    /** The branch checked out in `cwd`, or `HEAD` when it is detached. */
+    readonly currentBranch: (cwd: string) => Effect.Effect<string, PivotGitError>;
     /**
      * Whether a teammate's work has landed, so its worktree can go: reachable from a
      * remote-tracking ref, or its PR merged with a head containing the local work, or
@@ -298,6 +300,8 @@ export const make = Effect.gen(function* () {
   });
 
   return PivotGit.of({
+    currentBranch: (cwd) =>
+      git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]).pipe(Effect.map((out) => out.trim())),
     isRepository: (cwd) =>
       succeeds(cwd, ["rev-parse", "--is-inside-work-tree"]).pipe(Effect.orElseSucceed(() => false)),
     hasRemote,

@@ -418,6 +418,31 @@ describe("Pivot and teammate tools", () => {
     });
   });
 
+  it.effect("launches a scout in the project's own checkout, with no worktree", () => {
+    const { fake, workspaceRoot, layer } = setup({ remote: true });
+    return Effect.gen(function* () {
+      const pivot = yield* createPivot;
+      const scout = yield* dispatch(pivot, { title: "Why is login slow", kind: "scout" });
+
+      assert.strictEqual(scout.worktreePath, workspaceRoot);
+      assert.strictEqual(scout.branch, "main");
+      assert.strictEqual(scout.setupScript, "none");
+      assert.strictEqual(scout.firstRun, "started");
+      const thread = fake.threads.get(scout.threadId)!;
+      // A thread with no worktree runs in the project's checkout.
+      assert.isNull(thread.worktreePath);
+      assert.isNull(thread.branch);
+      assert.strictEqual(
+        sh(workspaceRoot, "git worktree list --porcelain").split("worktree ").length,
+        2,
+      );
+      const brief = firstMessage(fake, scout.threadId)!.text;
+      assert.include(brief, "This task delivers a report");
+      assert.include(brief, "the user's own checkout");
+      assertNoHardWraps(brief);
+    }).pipe(Effect.provide(layer));
+  });
+
   it.effect("a scout reports, then is promoted in place with a superseding contract", () => {
     const { fake, layer } = setup({ remote: true });
     return Effect.gen(function* () {
@@ -1733,7 +1758,7 @@ describe("delivery and teardown", () => {
     }).pipe(Effect.provide(layer));
   });
 
-  it.effect("a scout's worktree goes once its report is recorded", () => {
+  it.effect("a scout ends once its report is recorded", () => {
     const { layer } = setup();
     return Effect.gen(function* () {
       const pivot = yield* createPivot;
@@ -1749,39 +1774,24 @@ describe("delivery and teardown", () => {
     }).pipe(Effect.provide(layer));
   });
 
-  it.effect("keeps a scout's uncommitted files until the user says to discard them", () => {
+  it.effect("tears a scout down without touching the user's checkout", () => {
     const { fake, workspaceRoot, layer } = setup();
     return Effect.gen(function* () {
       const pivot = yield* createPivot;
       const scout = yield* dispatch(pivot, { title: "Investigate", kind: "scout" });
-      addWorktree(workspaceRoot, scout.worktreePath, scout.branch);
-      NodeFS.writeFileSync(NodePath.join(scout.worktreePath, "notes.md"), "draft\n");
+      // The user's own work in progress, in the checkout the scout read.
+      NodeFS.writeFileSync(NodePath.join(workspaceRoot, "notes.md"), "draft\n");
       expectOk(yield* call(scout.threadId, "record_scout_report", { report: "Found it." }));
 
-      expectRefused(
-        yield* call(pivot, "teardown_teammate", { threadId: scout.threadId }),
-        "invalid_request",
-        "uncommitted",
+      expectOk(yield* call(pivot, "teardown_teammate", { threadId: scout.threadId }));
+      assert.strictEqual(
+        NodeFS.readFileSync(NodePath.join(workspaceRoot, "notes.md"), "utf8"),
+        "draft\n",
       );
       assert.deepStrictEqual(fake.removedWorktrees, []);
-      assert.strictEqual(fake.threads.get(scout.threadId)?.archived, false);
-
-      const pivots = yield* PivotService.PivotService;
-      const { decision } = yield* pivots.openDecision(pivot, {
-        teammateThreadId: scout.threadId,
-        question: "Discard the scout's notes?",
-      });
-      yield* approve(pivot, decision.decisionId, "Yes, discard them.");
-      const torn = expectOk(
-        yield* call(pivot, "teardown_teammate", {
-          threadId: scout.threadId,
-          discardDecisionId: decision.decisionId,
-        }),
-      );
-      assert.include(torn.reason, "Discarded on the user's word");
-      assert.deepStrictEqual(fake.removedWorktrees, [
-        { worktreePath: scout.worktreePath, force: true },
-      ]);
+      assert.deepStrictEqual(fake.stoppedCheckouts, []);
+      assert.strictEqual(sh(workspaceRoot, "git branch --show-current"), "main");
+      assert.isTrue(fake.threads.get(scout.threadId)!.archived);
     }).pipe(Effect.provide(layer));
   });
 });

@@ -207,7 +207,7 @@ export const layer = (fake: FakeV2) =>
           fake.starts.set(threadId, outcome.start);
           return { threadId, runId: outcome.start.runId };
         }),
-      attachTeammate: (input) =>
+      startTeammate: (input) =>
         Effect.sync(() => {
           const threadId = allocate(fake, "teammate");
           const start: RunStart = { type: "started", runId: RunId.make(`run-${threadId}`) };
