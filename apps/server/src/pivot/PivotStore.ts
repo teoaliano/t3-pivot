@@ -116,6 +116,8 @@ export type PivotCommand =
       readonly shipDirectly: boolean;
       /** The teammate whose worktree and branch it took over; that one ends. */
       readonly attachedFrom?: ThreadId | null | undefined;
+      /** For a scout: the project checkout's changed files as it started. */
+      readonly checkoutSnapshot?: Readonly<Record<string, string>> | null | undefined;
     }
   | {
       readonly type: "teammate.record-verdict";
@@ -153,6 +155,8 @@ export type PivotCommand =
       readonly type: "teammate.record-scout-report";
       readonly threadId: ThreadId;
       readonly report: string;
+      /** Files in the project's checkout that changed while it ran; any wake the Pivot. */
+      readonly checkoutChanges?: ReadonlyArray<string> | undefined;
     }
   | {
       readonly type: "teammate.set-resume";
@@ -277,6 +281,8 @@ export interface TeammateRow extends TeammateRecord {
   /** The environment that hosts the teammate; null is the Pivot's own. */
   readonly environmentId: EnvironmentId | null;
   readonly scoutReport: string | null;
+  /** For a scout: the project checkout's changed files as it started. */
+  readonly checkoutSnapshot: Readonly<Record<string, string>> | null;
   readonly observedStatus: TeammateStatus | null;
   readonly observedRunId: RunId | null;
   readonly stuckRunId: RunId | null;
@@ -366,6 +372,7 @@ interface TeammateSqlRow {
   readonly dispatched_at: string;
   readonly ship_ordered_at: string | null;
   readonly verdict_json: string | null;
+  readonly checkout_snapshot_json: string | null;
   readonly torn_down_at: string | null;
   readonly observed_status: string | null;
   readonly observed_run_id: string | null;
@@ -403,6 +410,9 @@ interface EventSqlRow {
 
 const decodeReport = Schema.decodeUnknownSync(Schema.fromJsonString(TeammateReport));
 const VerdictJson = Schema.fromJsonString(TeammateVerdict);
+const SnapshotJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema.String));
+const decodeSnapshot = Schema.decodeUnknownSync(SnapshotJson);
+const encodeSnapshot = Schema.encodeSync(SnapshotJson);
 const decodeVerdict = Schema.decodeUnknownSync(VerdictJson);
 const encodeVerdict = Schema.encodeSync(VerdictJson);
 const decodeEscalation = Schema.decodeUnknownSync(
@@ -462,6 +472,8 @@ const toTeammate = (row: TeammateSqlRow): TeammateRow => ({
   modelEntry: row.model_entry,
   environmentId: row.environment_id as EnvironmentId | null,
   scoutReport: row.scout_report,
+  checkoutSnapshot:
+    row.checkout_snapshot_json === null ? null : decodeSnapshot(row.checkout_snapshot_json),
   observedStatus: row.observed_status as TeammateStatus | null,
   observedRunId: row.observed_run_id as RunId | null,
   stuckRunId: row.stuck_run_id as RunId | null,
@@ -719,6 +731,9 @@ export const make = Effect.gen(function* () {
           intent: command.intent,
           spec: command.spec,
           modelEntry: command.modelEntry,
+          ...(command.checkoutSnapshot == null
+            ? {}
+            : { checkoutSnapshot: { ...command.checkoutSnapshot } }),
         });
         if (command.shipDirectly) {
           if (command.kind !== "ship") return yield* refuse("Only a ship ships directly.");
@@ -826,11 +841,16 @@ export const make = Effect.gen(function* () {
         const teammate = yield* liveTeammate(command.threadId);
         if (teammate.kind !== "scout") return yield* refuse("Only a scout records a report.");
         yield* nonEmpty(command.report, "The report");
-        emit({
-          type: "teammate.scout-report-recorded",
-          threadId: command.threadId,
-          report: command.report,
-        });
+        const changes = command.checkoutChanges ?? [];
+        emit(
+          {
+            type: "teammate.scout-report-recorded",
+            threadId: command.threadId,
+            report: command.report,
+            ...(changes.length === 0 ? {} : { checkoutChanges: [...changes] }),
+          },
+          changes.length > 0,
+        );
         break;
       }
       case "teammate.set-resume": {
@@ -1136,12 +1156,14 @@ export const make = Effect.gen(function* () {
         yield* sql`
           INSERT INTO pivot_teammates (
             thread_id, pivot_thread_id, project_id, kind, title, branch, base_branch,
-            worktree_path, delivery_mode, intent_json, spec, model_entry, dispatched_at
+            worktree_path, delivery_mode, intent_json, spec, model_entry, dispatched_at,
+            checkout_snapshot_json
           ) VALUES (
             ${event.threadId}, ${event.pivotThreadId}, ${event.projectId}, ${event.kind},
             ${event.title}, ${event.branch}, ${event.baseBranch}, ${event.worktreePath},
             ${event.deliveryMode}, ${encodeIntent([event.intent])}, ${event.spec},
-            ${event.modelEntry ?? null}, ${at}
+            ${event.modelEntry ?? null}, ${at},
+            ${event.checkoutSnapshot === undefined ? null : encodeSnapshot(event.checkoutSnapshot)}
           )
         `;
         return;

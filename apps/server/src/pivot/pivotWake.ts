@@ -82,6 +82,10 @@ const eventNote = (stored: StoredPivotEvent): string | null => {
           : `Checks went red on its PR after it reported done: ${event.url}`;
     case "teammate.request-answered":
       return `Its pending approval or question was answered: ${quote(event.answer)}`;
+    case "teammate.scout-report-recorded":
+      return event.checkoutChanges === undefined
+        ? null
+        : `Files changed in the user's checkout while it ran, though a scout must not write there: ${event.checkoutChanges.join(", ")}. Check them with the user before anything else.`;
     case "teammate.stuck":
       return "No activity for 30 minutes while running.";
     case "teammate.pause-rechecked":

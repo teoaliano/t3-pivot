@@ -246,6 +246,15 @@ export class PivotService extends Context.Service<
   }
 >()("t3/pivot/PivotService") {}
 
+/** The files whose state differs between two readings of a checkout, sorted. */
+const checkoutChanges = (
+  before: Readonly<Record<string, string>>,
+  after: Readonly<Record<string, string>>,
+) =>
+  [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter((file) => before[file] !== after[file])
+    .toSorted();
+
 const HISTORY_LINE_MAX = 500;
 const clip = (text: string, max = HISTORY_LINE_MAX) =>
   text.length <= max ? text : `${text.slice(0, max - 1)}…`;
@@ -708,6 +717,8 @@ export const make = Effect.gen(function* () {
           if (modelSelection === null) {
             return yield* refuse(command, "No model to run the teammate on. Name one.");
           }
+          const checkoutSnapshot =
+            input.kind === "scout" ? yield* git.checkoutState(project.workspaceRoot) : null;
           const launched = yield* host.launch({
             projectId: pivot.projectId,
             pivotThreadId: pivot.threadId,
@@ -746,6 +757,7 @@ export const make = Effect.gen(function* () {
               modelEntry: choice.entry,
               shipDirectly: input.shipDirectly === true,
               attachedFrom: previous?.threadId ?? null,
+              checkoutSnapshot,
             })
             .pipe(Effect.tapError(() => host.discard(launched.threadId).pipe(Effect.ignore)));
           // The predecessor's record ended with the handover; its thread goes too, idle.
@@ -1614,14 +1626,27 @@ export const make = Effect.gen(function* () {
           threadId: calling.teammate.threadId,
           event: { _tag: "scout-report-recorded", report: input.report },
         });
-        return { recorded: true };
+        return { recorded: true, checkoutChanges: [] };
       }
+      const teammate = calling.teammate;
+      // A scout reads the user's checkout; whatever changed there since it started is named.
+      const changes =
+        teammate.kind === "scout" && teammate.checkoutSnapshot !== null
+          ? checkoutChanges(
+              teammate.checkoutSnapshot,
+              yield* git.checkoutState(teammate.worktreePath),
+            )
+          : [];
       yield* store.dispatch({
         type: "teammate.record-scout-report",
-        threadId: calling.teammate.threadId,
-        report: input.report,
+        threadId: teammate.threadId,
+        report:
+          changes.length === 0
+            ? input.report
+            : `${input.report}\n\nFiles changed in the user's checkout while this scout ran, though a scout must not write there: ${changes.join(", ")}.`,
+        checkoutChanges: changes,
       });
-      return { recorded: true };
+      return { recorded: true, checkoutChanges: changes };
     });
 
   return PivotService.of({

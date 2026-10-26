@@ -443,6 +443,52 @@ describe("Pivot and teammate tools", () => {
     }).pipe(Effect.provide(layer));
   });
 
+  it.effect("names every file a scout changed in the user's checkout when it reports", () => {
+    const { workspaceRoot, layer } = setup();
+    return Effect.gen(function* () {
+      const pivot = yield* createPivot;
+      // The user's own edit, there before the scout started.
+      NodeFS.writeFileSync(NodePath.join(workspaceRoot, "draft.md"), "mine\n");
+      const scout = yield* dispatch(pivot, { title: "Why is login slow", kind: "scout" });
+      // What a provider that cannot enforce read-only let the scout do.
+      NodeFS.writeFileSync(NodePath.join(workspaceRoot, "README.md"), "changed\n");
+      NodeFS.writeFileSync(NodePath.join(workspaceRoot, "probe.txt"), "probe\n");
+
+      const recorded = expectOk(
+        yield* call(scout.threadId, "record_scout_report", { report: "The lookup scans." }),
+      );
+      assert.deepStrictEqual(recorded.checkoutChanges, ["README.md", "probe.txt"]);
+      const pivots = yield* PivotService.PivotService;
+      const report = (yield* pivots.teammateDetail(scout.threadId)).scoutReport!;
+      assert.include(report, "The lookup scans.");
+      assert.include(report, "README.md");
+      assert.include(report, "probe.txt");
+      assert.notInclude(report, "draft.md");
+      const history = expectOk(
+        yield* call(pivot, "teammate_history", { threadId: scout.threadId }),
+      );
+      assert.include(history.entries[0].line, "probe.txt");
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("records a scout's report with no note when the checkout is as it found it", () => {
+    const { workspaceRoot, layer } = setup();
+    return Effect.gen(function* () {
+      const pivot = yield* createPivot;
+      NodeFS.writeFileSync(NodePath.join(workspaceRoot, "draft.md"), "mine\n");
+      const scout = yield* dispatch(pivot, { title: "Why is login slow", kind: "scout" });
+      const recorded = expectOk(
+        yield* call(scout.threadId, "record_scout_report", { report: "The lookup scans." }),
+      );
+      assert.deepStrictEqual(recorded.checkoutChanges, []);
+      const pivots = yield* PivotService.PivotService;
+      assert.strictEqual(
+        (yield* pivots.teammateDetail(scout.threadId)).scoutReport,
+        "The lookup scans.",
+      );
+    }).pipe(Effect.provide(layer));
+  });
+
   it.effect("a scout reports, then is promoted in place with a superseding contract", () => {
     const { fake, layer } = setup({ remote: true });
     return Effect.gen(function* () {

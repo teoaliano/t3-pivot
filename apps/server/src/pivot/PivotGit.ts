@@ -67,6 +67,13 @@ export class PivotGit extends Context.Service<
     readonly isClean: (cwd: string) => Effect.Effect<boolean, PivotGitError>;
     /** The uncommitted or untracked changes in the checkout, as `git status` shows them. */
     readonly uncommitted: (cwd: string) => Effect.Effect<ReadonlyArray<string>, PivotGitError>;
+    /**
+     * Every changed or untracked file in the checkout with a fingerprint of its content, so
+     * two readings show which files changed in between, an already-changed one included.
+     */
+    readonly checkoutState: (
+      cwd: string,
+    ) => Effect.Effect<Readonly<Record<string, string>>, PivotGitError>;
     /** The branch checked out in `cwd`, or `HEAD` when it is detached. */
     readonly currentBranch: (cwd: string) => Effect.Effect<string, PivotGitError>;
     /**
@@ -156,6 +163,37 @@ export const make = Effect.gen(function* () {
     );
 
   const isClean = (cwd: string) => uncommitted(cwd).pipe(Effect.map((lines) => lines.length === 0));
+
+  const checkoutState = Effect.fn("PivotGit.checkoutState")(function* (cwd: string) {
+    const status = yield* run(cwd, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
+    if (status.code !== 0) {
+      return yield* new PivotGitError({ subcommand: "status", exitCode: status.code });
+    }
+    const state: Record<string, string> = {};
+    const present: Array<string> = [];
+    const entries = status.stdout.split("\0");
+    for (let index = 0; index < entries.length; index += 1) {
+      const entry = entries[index]!;
+      if (entry.length < 4) continue;
+      const code = entry.slice(0, 2);
+      const file = entry.slice(3);
+      // A rename or copy names its source in the next entry.
+      if (code[0] === "R" || code[0] === "C") index += 1;
+      if (code.includes("D")) state[file] = "deleted";
+      else present.push(file);
+    }
+    const hashes = (files: ReadonlyArray<string>) =>
+      run(cwd, ["hash-object", "--", ...files]).pipe(
+        Effect.map((output) => (output.code === 0 ? output.stdout.trim().split("\n") : null)),
+      );
+    const together = present.length === 0 ? [] : yield* hashes(present);
+    for (const [index, file] of present.entries()) {
+      // One unreadable path fails the batch; then each is read on its own.
+      state[file] =
+        together?.[index] ?? (yield* hashes([file]))?.[0] ?? `unreadable ${status.stdout.length}`;
+    }
+    return state;
+  });
 
   const landed = Effect.fn("PivotGit.landed")(
     function* (input: {
@@ -300,6 +338,7 @@ export const make = Effect.gen(function* () {
   });
 
   return PivotGit.of({
+    checkoutState,
     currentBranch: (cwd) =>
       git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]).pipe(Effect.map((out) => out.trim())),
     isRepository: (cwd) =>

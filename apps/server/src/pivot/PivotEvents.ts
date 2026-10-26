@@ -67,6 +67,8 @@ export const PivotEvent = Schema.Union([
     spec: Schema.String,
     /** The teammate model it was dispatched on; absent on events from before entries. */
     modelEntry: Schema.optional(Schema.NullOr(Schema.String)),
+    /** For a scout: the project checkout's changed files with fingerprints, as it started. */
+    checkoutSnapshot: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   }),
   event("teammate.promoted", { threadId: ThreadId, spec: Schema.String }),
   /**
@@ -81,7 +83,12 @@ export const PivotEvent = Schema.Union([
   }),
   event("teammate.intent-added", { threadId: ThreadId, text: Schema.String }),
   event("teammate.reported", { threadId: ThreadId, report: TeammateReport }),
-  event("teammate.scout-report-recorded", { threadId: ThreadId, report: Schema.String }),
+  event("teammate.scout-report-recorded", {
+    threadId: ThreadId,
+    report: Schema.String,
+    /** Files in the project's checkout that changed while the scout ran. */
+    checkoutChanges: Schema.optional(Schema.Array(Schema.String)),
+  }),
   event("teammate.resume-changed", {
     threadId: ThreadId,
     resume: Schema.NullOr(TeammateResumeState),

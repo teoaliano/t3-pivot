@@ -281,5 +281,9 @@ export const PivotMcpRecordScoutReportInput = Schema.Struct({
 });
 export type PivotMcpRecordScoutReportInput = typeof PivotMcpRecordScoutReportInput.Type;
 
-export const PivotMcpRecordScoutReportResult = Schema.Struct({ recorded: Schema.Boolean });
+export const PivotMcpRecordScoutReportResult = Schema.Struct({
+  recorded: Schema.Boolean,
+  /** Files in the user's checkout that changed while you ran. It should be empty. */
+  checkoutChanges: Schema.Array(Schema.String),
+});
 export type PivotMcpRecordScoutReportResult = typeof PivotMcpRecordScoutReportResult.Type;

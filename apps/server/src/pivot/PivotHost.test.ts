@@ -879,7 +879,7 @@ describe("hosted teammate tools", () => {
 
       assert.deepStrictEqual(
         yield* pivots.recordScoutReport(scout.threadId, { report: "It is the cache." }),
-        { recorded: true },
+        { recorded: true, checkoutChanges: [] },
       );
       assert.strictEqual(
         (yield* pivots.recordScoutReport(ship.threadId, { report: "Nope." }).pipe(Effect.flip))
