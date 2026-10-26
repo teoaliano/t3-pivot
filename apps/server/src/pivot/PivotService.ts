@@ -685,22 +685,19 @@ export const make = Effect.gen(function* () {
             input,
           );
           if (choice.type === "refused") return yield* refuse(command, choice.reason);
-          if (input.kind !== "inline") {
-            const cap = yield* teammateCap;
-            const running = (yield* store.listTeammates({ includeTornDown: false })).filter(
-              (teammate) =>
-                teammate.pivotThreadId === pivot.threadId &&
-                teammate.kind !== "inline" &&
-                (teammate.observedStatus === null ||
-                  teammate.observedStatus === "working" ||
-                  teammate.observedStatus === "waiting"),
+          const cap = yield* teammateCap;
+          const running = (yield* store.listTeammates({ includeTornDown: false })).filter(
+            (teammate) =>
+              teammate.pivotThreadId === pivot.threadId &&
+              (teammate.observedStatus === null ||
+                teammate.observedStatus === "working" ||
+                teammate.observedStatus === "waiting"),
+          );
+          if (cap !== null && running.length >= cap) {
+            return yield* refuse(
+              command,
+              `${running.length} teammates are already running, the most at once (${cap}). Queue this one and dispatch it when one finishes.`,
             );
-            if (cap !== null && running.length >= cap) {
-              return yield* refuse(
-                command,
-                `${running.length} teammates are already running, the most at once (${cap}). Queue this one and dispatch it when one finishes, or do it inline if it is small.`,
-              );
-            }
           }
           const pivotShell = yield* threads.shell(pivot.threadId);
           const modelSelection =
@@ -1447,7 +1444,6 @@ export const make = Effect.gen(function* () {
         worktreeExists,
         force: discarding,
         branchDisposal,
-        inline: teammate.kind === "inline",
       });
       yield* store.dispatch({
         type: "teammate.tear-down",

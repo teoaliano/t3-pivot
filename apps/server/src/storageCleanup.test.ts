@@ -1352,19 +1352,6 @@ describe("storage cleanup reports and local file policies", () => {
       }),
     ),
   );
-  it.live("keeps the Pivot's workspace, which it sets up once and reuses", () =>
-    runCleanupTest(
-      Effect.gen(function* () {
-        const { service, fs, worktree } = yield* makeCleanupFixture("pivot-inline");
-        const report = yield* service.runNow;
-        expect(report.entries[0]).toMatchObject({
-          outcome: "kept",
-          reason: "It is the Pivot's workspace",
-        });
-        expect(yield* fs.exists(worktree)).toBe(true);
-      }),
-    ),
-  );
   it.live("keeps a Pivot home, which a Pivot runs in without a branch", () =>
     runCleanupTest(
       Effect.gen(function* () {

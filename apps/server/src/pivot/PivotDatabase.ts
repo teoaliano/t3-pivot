@@ -28,6 +28,7 @@ import Migration0006 from "./migrations/006_PivotHost.ts";
 import Migration0007 from "./migrations/007_TeammateMemoryWait.ts";
 import Migration0008 from "./migrations/008_DecisionAttachments.ts";
 import Migration0009 from "./migrations/009_ReviewThenShip.ts";
+import Migration0010 from "./migrations/010_RemoveInlineTasks.ts";
 
 export class PivotSql extends Context.Service<PivotSql, SqlClient.SqlClient>()(
   "t3/pivot/PivotDatabase/PivotSql",
@@ -43,6 +44,7 @@ const loader = Migrator.fromRecord({
   "7_TeammateMemoryWait": Migration0007,
   "8_DecisionAttachments": Migration0008,
   "9_ReviewThenShip": Migration0009,
+  "10_RemoveInlineTasks": Migration0010,
 });
 
 const setup = Layer.effectDiscard(

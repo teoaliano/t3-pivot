@@ -13,11 +13,7 @@ export const BRIEF_TEXTS = {
   shipPr: "definition-of-done.ship-pr",
   shipLocal: "definition-of-done.ship-local",
   shipReview: "definition-of-done.ship-review",
-  inline: "inline-task",
 } as const;
-
-/** The Pivot's workspace for inline tasks: `<worktrees>/<repo>/pivot-inline`. */
-export const PIVOT_WORKSPACE_DIRNAME = "pivot-inline";
 
 /** A ship waits for review unless it was told to ship, at dispatch or by a ship batch. */
 export const definitionOfDoneText = (
@@ -98,10 +94,6 @@ export const teammateBranchBase = (title: string) => {
     .replace(/-+$/g, "");
   return `pivot/${slug.length > 0 ? slug : "task"}`;
 };
-
-/** `pivot-inline/<slug of the title>`, the branch an inline task works on. */
-export const inlineBranchBase = (title: string) =>
-  teammateBranchBase(title).replace(/^pivot\//, "pivot-inline/");
 
 /** The first of `base`, `base-2`, `base-3`, ... that `taken` does not hold. */
 export const uniqueBranch = (base: string, taken: (branch: string) => boolean) => {

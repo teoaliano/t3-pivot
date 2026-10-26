@@ -1,13 +1,10 @@
 import type { ModelSelection, TeammateKind, TeammateModelEntry } from "@t3tools/contracts";
 
-/**
- * The built-in teammate kinds Settings sets a model for, in the order they are listed.
- * Inline tasks run on the ship's model.
- */
+/** The built-in teammate kinds Settings sets a model for, in the order they are listed. */
 export const TEAMMATE_KIND_LABELS = {
   ship: "Ship",
   scout: "Scout",
-} as const satisfies Record<Exclude<TeammateKind, "inline">, string>;
+} as const satisfies Record<TeammateKind, string>;
 
 /** The entry a Pivot uses when it names none: the one marked, else the first. */
 export function defaultTeammateModelIndex(entries: readonly TeammateModelEntry[]): number {

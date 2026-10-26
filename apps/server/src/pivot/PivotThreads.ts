@@ -35,7 +35,6 @@ import * as Stream from "effect/Stream";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as ManagedProcesses from "../managedProcess/ManagedProcesses.ts";
 import * as ProjectService from "../project/ProjectService.ts";
-import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
@@ -151,24 +150,6 @@ export class PivotThreads extends Context.Service<
       readonly text: string;
     }) => Effect.Effect<TeammateLaunch, PivotThreadsError>;
     /**
-     * Starts an inline task on the Pivot's workspace, which already exists: there is no
-     * worktree to prepare. The project's setup script runs first only when `runSetup`
-     * (the workspace was just created), and its outcome is returned.
-     */
-    readonly launchInline: (input: {
-      readonly projectId: ProjectId;
-      readonly pivotThreadId: ThreadId;
-      readonly title: string;
-      readonly branch: string;
-      readonly worktreePath: string;
-      readonly modelSelection: ModelSelection;
-      readonly text: string;
-      readonly runSetup: boolean;
-    }) => Effect.Effect<
-      TeammateLaunch & { readonly setup: SetupScriptOutcome | null },
-      PivotThreadsError
-    >;
-    /**
      * Starts a teammate in a worktree that already exists, on its branch, with `text` as its
      * first message from the Pivot. Nothing is prepared: no worktree, no setup script.
      */
@@ -265,7 +246,6 @@ export const make = Effect.gen(function* () {
   const processes = yield* ManagedProcesses.ManagedProcesses;
   const git = yield* GitWorkflow.GitWorkflowService;
   const setupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
-  const setupScripts = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   const agentScope = yield* AgentScope;
   const scopeOwner = yield* AgentScopeOwner;
 
@@ -377,78 +357,6 @@ export const make = Effect.gen(function* () {
         });
         return threadId;
       }).pipe(Effect.mapError(fail("create the Pivot thread"))),
-
-    launchInline: (input) =>
-      Effect.gen(function* () {
-        const threadId = ThreadId.make(`thread-inline-${yield* randomUuidV4}`);
-        // Created directly rather than launched: a launch prepares a workspace and runs the
-        // setup script every time, and the Pivot's workspace is already there.
-        yield* threads.dispatch({
-          type: "thread.create",
-          commandId: yield* commandId("create-inline"),
-          threadId,
-          projectId: input.projectId,
-          title: input.title,
-          modelSelection: input.modelSelection,
-          runtimeMode: "full-access",
-          interactionMode: "default",
-          branch: input.branch,
-          worktreePath: input.worktreePath,
-          createdBy: "agent",
-          creationSource: "mcp",
-        });
-        let setup: SetupScriptOutcome | null = null;
-        if (input.runSetup) {
-          const project = Option.getOrUndefined(yield* projects.getById(input.projectId));
-          const started = yield* setupScripts
-            .runForThread({
-              threadId,
-              projectId: input.projectId,
-              ...(project === undefined
-                ? {}
-                : {
-                    projectCwd: project.workspaceRoot,
-                    project: {
-                      id: project.id,
-                      workspaceRoot: project.workspaceRoot,
-                      scripts: project.scripts,
-                    },
-                  }),
-              worktreePath: input.worktreePath,
-              observeCompletion: {},
-            })
-            .pipe(Effect.option);
-          setup =
-            Option.isNone(started) || started.value.status === "no-script"
-              ? { status: Option.isNone(started) ? "failed" : "none", detail: null }
-              : started.value.async || started.value.completion === undefined
-                ? { status: "running", detail: null }
-                : yield* started.value.completion.pipe(
-                    Effect.map((completion): SetupScriptOutcome =>
-                      completion.exitCode === 0
-                        ? { status: "succeeded", detail: null }
-                        : {
-                            status: "failed",
-                            detail: `exited with ${completion.exitCode ?? "no exit code"}`,
-                          },
-                    ),
-                  );
-        }
-        yield* threads.sendToThread({
-          projectId: input.projectId,
-          commandId: yield* commandId("inline-brief"),
-          threadId,
-          messageId: yield* messageId,
-          senderThreadId: input.pivotThreadId,
-          text: input.text,
-          attachments: [],
-          mode: "queue",
-          createdBy: "agent",
-          creationSource: "mcp",
-        });
-        const shell = yield* threads.getThreadShell(threadId);
-        return { threadId, runId: shell?.latestRunId ?? null, setup };
-      }).pipe(Effect.mapError(fail("launch the inline task"))),
 
     attachTeammate: (input) =>
       Effect.gen(function* () {

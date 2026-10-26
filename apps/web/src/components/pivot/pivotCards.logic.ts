@@ -121,14 +121,11 @@ export function teammateCard(
     title: shell?.title || teammate.title,
     status: derived.status,
     needsYou,
-    // An inline task is marked as one: it runs in the Pivot's workspace, not its own worktree.
-    label: `${teammate.kind === "inline" ? "Inline · " : ""}${
-      needsYou
-        ? "Needs you"
-        : memoryWait !== null
-          ? "Waiting for memory"
-          : STATUS_LABEL[derived.status]
-    }`,
+    label: needsYou
+      ? "Needs you"
+      : memoryWait !== null
+        ? "Waiting for memory"
+        : STATUS_LABEL[derived.status],
     attention,
     tone:
       derived.status === "failed"

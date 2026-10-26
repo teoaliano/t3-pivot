@@ -15,6 +15,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -26,6 +27,8 @@ import {
   setup,
   sh,
 } from "../../../pivot/PivotService.testkit.ts";
+import * as PivotDatabase from "../../../pivot/PivotDatabase.ts";
+import RemoveInlineTasks from "../../../pivot/migrations/010_RemoveInlineTasks.ts";
 import * as PivotStore from "../../../pivot/PivotStore.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
 import type { FakeV2 } from "../../../pivot/PivotThreads.testkit.ts";
@@ -338,6 +341,79 @@ describe("Pivot and teammate tools", () => {
           [...fake.threads.values()].filter((thread) => thread.kind === "teammate").length,
           0,
         );
+      }).pipe(Effect.provide(layer));
+    });
+  });
+
+  describe("inline tasks are gone", () => {
+    it.effect("no longer dispatches an inline task", () => {
+      const { fake, layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const outcome = yield* call(pivot, "dispatch_teammate", {
+          title: "Fix the README typo",
+          kind: "inline",
+          intent: "Fix the typo in the README.",
+          spec: "One-line change.",
+        });
+        assert.isFalse(outcome.ok);
+        assert.strictEqual(
+          [...fake.threads.values()].filter((thread) => thread.kind === "teammate").length,
+          0,
+        );
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("reads an inline task an older release stored as an ended teammate", () => {
+      const { layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const sql = yield* PivotDatabase.PivotSql;
+        // What an older release wrote for an inline task still open at the upgrade.
+        yield* sql`
+          INSERT INTO pivot_teammates (
+            thread_id, pivot_thread_id, project_id, kind, title, branch, base_branch,
+            worktree_path, delivery_mode, intent_json, spec, dispatched_at
+          ) VALUES (
+            'thread-inline-1', ${pivot}, ${projectId}, 'inline', 'Fix the README typo',
+            'pivot-inline/fix-the-readme-typo', 'main', '/worktrees/work/pivot-inline',
+            'local-only', '["Fix the typo."]', 'One-line change.', '2026-10-01T00:00:00.000Z'
+          )
+        `;
+        yield* sql`
+          INSERT INTO pivot_events (
+            type, pivot_thread_id, teammate_thread_id, wakes, payload_json, occurred_at
+          ) VALUES (
+            'teammate.dispatched', ${pivot}, 'thread-inline-1', 0,
+            ${JSON.stringify({
+              type: "teammate.dispatched",
+              threadId: "thread-inline-1",
+              pivotThreadId: pivot,
+              projectId,
+              kind: "inline",
+              title: "Fix the README typo",
+              branch: "pivot-inline/fix-the-readme-typo",
+              baseBranch: "main",
+              worktreePath: "/worktrees/work/pivot-inline",
+              deliveryMode: "local-only",
+              intent: "Fix the typo.",
+              spec: "One-line change.",
+            })},
+            '2026-10-01T00:00:00.000Z'
+          )
+        `;
+        yield* RemoveInlineTasks.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+
+        const lines = expectOk(yield* call(pivot, "list_teammates", { includeTornDown: true }))
+          .teammates as Array<{ threadId: string; kind: string; tornDown: boolean }>;
+        assert.deepStrictEqual(
+          lines.map(({ threadId, kind, tornDown }) => ({ threadId, kind, tornDown })),
+          [{ threadId: "thread-inline-1", kind: "ship", tornDown: true }],
+        );
+        const history = expectOk(
+          yield* call(pivot, "teammate_history", { threadId: "thread-inline-1" }),
+        );
+        assert.include(history.entries.at(-1).line, "Dispatched as a ship");
       }).pipe(Effect.provide(layer));
     });
   });

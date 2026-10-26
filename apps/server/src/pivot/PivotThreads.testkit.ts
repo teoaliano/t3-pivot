@@ -82,8 +82,6 @@ export interface FakeV2 {
   /** Threads whose held queue was released. */
   readonly releasedQueues: Array<string>;
   readonly removedWorktrees: Array<{ readonly worktreePath: string; readonly force: boolean }>;
-  /** Inline tasks launched, and whether each ran the setup script. */
-  readonly inlineSetups: Array<{ readonly threadId: string; readonly ran: boolean }>;
 }
 
 export interface FakeWake {
@@ -113,7 +111,6 @@ export const makeFakeV2 = (): FakeV2 => ({
   releasedQueues: [],
   setupOutcomes: new Map(),
   removedWorktrees: [],
-  inlineSetups: [],
 });
 
 let counter = 0;
@@ -232,35 +229,6 @@ export const layer = (fake: FakeV2) =>
           });
           fake.starts.set(threadId, start);
           return { threadId, runId: start.runId };
-        }),
-      // The workspace is real (PivotGit made it); the fake only records the thread.
-      launchInline: (input) =>
-        Effect.sync(() => {
-          const threadId = allocate(fake, "inline");
-          const start: RunStart = { type: "started", runId: RunId.make(`run-${threadId}`) };
-          fake.threads.set(threadId, {
-            threadId,
-            projectId: input.projectId,
-            kind: "teammate",
-            worktreePath: input.worktreePath,
-            branch: input.branch,
-            baseBranch: null,
-            title: input.title,
-            modelSelection: input.modelSelection,
-            archived: false,
-            settled: false,
-            stops: 0,
-            relaunches: 0,
-            messages: [{ senderThreadId: input.pivotThreadId, text: input.text, mode: "launch" }],
-            shell: { latestRunId: start.runId },
-          });
-          fake.starts.set(threadId, start);
-          fake.inlineSetups.push({ threadId, ran: input.runSetup });
-          return {
-            threadId,
-            runId: start.runId,
-            setup: input.runSetup ? { status: "succeeded" as const, detail: null } : null,
-          };
         }),
       awaitStart: (threadId) =>
         Effect.sync(

@@ -50,7 +50,7 @@ const TEAMMATE_ONLY = "Teammates of a Pivot only.";
 
 const DispatchTeammateTool = Tool.make("dispatch_teammate", {
   ...pivotTool,
-  description: `${PIVOT_ONLY} Start a teammate on one task in its own worktree and branch, from the origin's default branch or baseBranch. kind inline makes a small change in your workspace instead: no worktree, setup or dev server, one at a time, from the default branch. intent is the user's words verbatim, spec your instructions. modelEntry names a teammate model from your contract; omitted, the kind's model from Settings runs when one is set, else the default. Returns once its first run started or failed.`,
+  description: `${PIVOT_ONLY} Start a teammate on one task. A ship gets a fresh worktree and branch, from the origin's default branch or baseBranch; attachTo instead hands it the worktree and branch of a ship of yours between turns, which ends that one, to build the next piece of the same PR. A ship commits, reports done with evidence and waits for review; shipDirectly, only when the user said so, has it push and open its PR at done. intent is the user's words verbatim, spec your instructions, including the evidence its done must bring. modelEntry names a teammate model from your contract; omitted, the kind's model from Settings runs when one is set, else the default. Returns once its first run started or failed.`,
   parameters: PivotMcpDispatchTeammateInput,
   success: PivotMcpDispatchTeammateResult,
 }).annotate(Tool.Title, "Dispatch a teammate");

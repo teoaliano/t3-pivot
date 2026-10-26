@@ -27,14 +27,6 @@ describe("chooseTeammateModel", () => {
     });
   });
 
-  it("runs an inline task on the ship's model", () => {
-    expect(chooseTeammateModel(entries, { ...none, ship: codex }, { kind: "inline" })).toEqual({
-      type: "chosen",
-      modelSelection: codex,
-      entry: null,
-    });
-  });
-
   it("lets a named entry win over the kind's model", () => {
     expect(
       chooseTeammateModel(entries, { ...none, ship: codex }, { kind: "ship", modelEntry: "deep" }),

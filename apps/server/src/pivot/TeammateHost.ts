@@ -156,11 +156,6 @@ export class TeammateHost extends Context.Service<
          * git refuse an unmerged one, `keep` leaves it.
          */
         readonly branchDisposal: { readonly tip: string } | "safe" | "keep";
-        /**
-         * An inline task works in the Pivot's workspace, which stays: it goes back to a
-         * clean default branch instead of being removed.
-         */
-        readonly inline?: boolean | undefined;
       },
     ) => Result<void>;
   }
