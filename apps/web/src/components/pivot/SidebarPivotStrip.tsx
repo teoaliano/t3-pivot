@@ -8,7 +8,7 @@ import { TEAMMATE_TONE_CLASSES, type TeammateCard } from "./pivotCards.logic";
  * The last line of a Pivot's sidebar row: one group per state its teammates are in,
  * each with the icon that state shows on a thread row and how many teammates are in it.
  * Only states with teammates show. The teammates themselves live in the Pivot's right
- * panel. A Pivot with nothing to count leaves the line empty, apart from "Retired".
+ * panel. A Pivot with nothing to count says "No teammates", or "Retired" once retired.
  */
 export function SidebarPivotSummary(props: { group: SidebarPivotGroup }) {
   const { group } = props;
@@ -16,7 +16,7 @@ export function SidebarPivotSummary(props: { group: SidebarPivotGroup }) {
     // Still rendered, so the row doesn't fall back to showing the branch here.
     return (
       <span className="min-w-0 flex-1 truncate text-muted-foreground">
-        {group.retired ? "Retired" : null}
+        {group.retired ? "Retired" : "No teammates"}
       </span>
     );
   }
