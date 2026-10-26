@@ -1,9 +1,7 @@
-import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { type ReactNode } from "react";
 import { cn } from "~/lib/utils";
-import { useClientSettings } from "../../hooks/useSettings";
 import {
   animateSidebarLayoutChanges,
   sidebarMarkerId,
@@ -100,45 +98,21 @@ export function SidebarDragBoundary(props: {
   );
 }
 
-export function SidebarSectionHeader(props: {
+// The tab bar replaces the section headers; they stay as invisible markers
+// because they bound the drag sections.
+export function SidebarSectionMarker(props: {
   marker:
     | "pivots-header"
     | "threads-header"
     | "working-header"
     | "snoozed-header"
     | "settled-header";
-  label: string;
-  /** A muted trailing count; classic shows it only while the shelf is collapsed. */
-  count: number;
-  className?: string;
-  dragging?: boolean;
-  isDropTarget?: boolean;
-  toggle: { expanded: boolean; onToggle: () => void };
 }) {
-  const shelf = props.marker.slice(0, -"-header".length);
-  const redesign = useClientSettings((s) => s.redesignEnabled);
-  const collapsedCount = props.toggle.expanded ? null : props.count;
-  const count = redesign ? props.count : collapsedCount;
   return (
     <SortableSidebarMarker
       marker={props.marker}
       data-testid={`sidebar-${props.marker}`}
-      className={cn("mx-0.5 h-8", props.className)}
-    >
-      <CollapsibleSectionHeader
-        onClick={props.toggle.onToggle}
-        expanded={props.toggle.expanded}
-        tone={props.isDropTarget ? "accent" : props.dragging ? "emphasized" : "muted"}
-        data-testid={`sidebar-${shelf}-shelf-toggle`}
-        accessory={
-          redesign && count !== null ? (
-            <span className="font-normal tabular-nums">{count}</span>
-          ) : null
-        }
-      >
-        {props.label}
-        {!redesign && collapsedCount !== null ? ` (${collapsedCount})` : null}
-      </CollapsibleSectionHeader>
-    </SortableSidebarMarker>
+      className="-mb-px h-0"
+    />
   );
 }
