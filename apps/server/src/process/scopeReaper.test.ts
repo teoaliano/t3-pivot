@@ -8,7 +8,6 @@ import {
   ownsUnit,
   type ReaperHost,
   stopScope,
-  stopWorktreeProcesses,
   sweepOrphanScopes,
 } from "./scopeReaper.ts";
 
@@ -132,37 +131,6 @@ describe("stopScope", () => {
     return Effect.gen(function* () {
       yield* stopScope(host, unit("claude", "aaaa0001"), "test");
       assert.deepStrictEqual(signals, ["SIGTERM 1"]);
-    });
-  });
-});
-
-describe("stopWorktreeProcesses", () => {
-  it.effect("stops this server's scoped processes inside the worktree and no others", () => {
-    const wt = "/w/feature-x";
-    const mine = unit("claude", "aaaa1111");
-    const terminal = unit("terminal", "bbbb2222");
-    const { host, signals } = fakeHost([
-      proc(50, { cwd: wt, unit: mine }),
-      proc(51, { cwd: `${wt}/apps/web`, unit: terminal }),
-      proc(52, { cwd: "/w/feature-x-other", unit: mine }),
-      proc(53, { cwd: wt, unit: unit("claude", "cccc3333", "ffffffff") }), // another server's
-      proc(54, { cwd: wt }), // the user's own shell or editor
-      proc(55, { cwd: null, unit: mine }),
-      proc(SERVER, { cwd: wt, ppid: 1, unit: mine }), // the server itself
-    ]);
-    return Effect.gen(function* () {
-      yield* stopWorktreeProcesses(host, { worktreePath: wt, owner: OWNER, self: SERVER });
-      assert.deepStrictEqual(signals, ["SIGTERM 50", "SIGTERM 51"]);
-    });
-  });
-
-  it.effect("does nothing for a relative or root worktree path", () => {
-    const { host, signals } = fakeHost([proc(56, { cwd: "/", unit: unit("claude", "a1") })]);
-    return Effect.gen(function* () {
-      for (const worktreePath of ["", "/", "relative/wt"]) {
-        yield* stopWorktreeProcesses(host, { worktreePath, owner: OWNER, self: SERVER });
-      }
-      assert.deepStrictEqual(signals, []);
     });
   });
 });

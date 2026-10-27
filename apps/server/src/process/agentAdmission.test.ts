@@ -143,12 +143,12 @@ const memoryFileSystem = () => {
           }),
     stat: (path) =>
       directories.has(path)
-        ? Effect.succeed({ mtime: Option.some(new Date(Date.now())) } as FileSystem.File.Info)
+        ? Effect.succeed({ mtime: Option.some(new Date(0)) } as FileSystem.File.Info)
         : Effect.fail(systemError("NotFound", "stat", path)),
     remove: (path) =>
       Effect.sync(() => {
         directories.delete(path);
-        for (const file of [...files.keys()]) {
+        for (const file of files.keys()) {
           if (file === path || file.startsWith(`${path}/`)) files.delete(file);
         }
       }),

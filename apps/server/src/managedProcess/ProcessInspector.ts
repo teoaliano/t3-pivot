@@ -53,16 +53,20 @@ export const make = Effect.gen(function* () {
       );
 
   return ProcessInspector.of({
-    isAlive: (pid) => Effect.sync(() => isProcessAlive(pid)),
+    // Untraced: liveness checks and signals are polled in tight loops.
+    isAlive: Effect.fnUntraced(function* (pid: number) {
+      return yield* Effect.sync(() => isProcessAlive(pid));
+    }),
     commandLine,
-    signal: (pid, signal) =>
-      Effect.sync(() => {
+    signal: Effect.fnUntraced(function* (pid: number, signal: "SIGTERM" | "SIGKILL") {
+      yield* Effect.sync(() => {
         try {
           process.kill(pid, signal);
         } catch {
           // Already gone.
         }
-      }),
+      });
+    }),
   });
 });
 

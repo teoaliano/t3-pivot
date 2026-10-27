@@ -393,8 +393,8 @@ export const make = Effect.fn("ManagedProcesses.make")(function* (
    * never called ours, so it is never recorded and never reaped as an orphan.
    * Where the platform cannot name the listener, readiness alone decides.
    */
-  const watchReadiness = (key: string, target: ManagedProcessTarget, port: number) =>
-    Effect.gen(function* () {
+  const watchReadiness = Effect.fn("ManagedProcesses.watchReadiness")(
+    function* (key: string, target: ManagedProcessTarget, port: number) {
       const current = yield* SubscriptionRef.get(state).pipe(
         Effect.map((latest) => latest.processes.get(key)),
       );
@@ -426,13 +426,13 @@ export const make = Effect.fn("ManagedProcesses.make")(function* (
         managed.status === "starting" ? { ...managed, status: "running" } : managed,
       );
       return true;
-    }).pipe(
-      Effect.repeat({
-        schedule: Schedule.spaced(READINESS_POLL_INTERVAL),
-        until: (done) => done,
-      }),
-      Effect.forkIn(serviceScope),
-    );
+    },
+    Effect.repeat({
+      schedule: Schedule.spaced(READINESS_POLL_INTERVAL),
+      until: (done) => done,
+    }),
+    Effect.forkIn(serviceScope),
+  );
 
   const reserveBlock = (checkoutPath: string, reallocate: boolean) =>
     updateRegistry((registry) => {
@@ -557,47 +557,48 @@ export const make = Effect.fn("ManagedProcesses.make")(function* (
       }),
     );
 
-  const stopUnlocked = (target: ManagedProcessTarget) =>
-    Effect.gen(function* () {
-      const key = processKey(target);
-      const current = (yield* SubscriptionRef.get(state)).processes.get(key);
-      if (!current || !isLive(current)) return;
-      // The terminal layer drops its descendant pids when the terminal closes,
-      // so read them first. They are the only pids escalation may signal.
-      const descendants = new Set(yield* discovery.terminalProcessIds(current.terminal));
-      yield* markStopped(key, null);
-      yield* terminals
-        .close({ ...current.terminal })
-        .pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("managed process terminal close failed", { ...target, cause }),
-          ),
-        );
+  const stopUnlocked = Effect.fn("ManagedProcesses.stopUnlocked")(function* (
+    target: ManagedProcessTarget,
+  ) {
+    const key = processKey(target);
+    const current = (yield* SubscriptionRef.get(state)).processes.get(key);
+    if (!current || !isLive(current)) return;
+    // The terminal layer drops its descendant pids when the terminal closes,
+    // so read them first. They are the only pids escalation may signal.
+    const descendants = new Set(yield* discovery.terminalProcessIds(current.terminal));
+    yield* markStopped(key, null);
+    yield* terminals
+      .close({ ...current.terminal })
+      .pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("managed process terminal close failed", { ...target, cause }),
+        ),
+      );
 
-      // Closing the shell hangs up its foreground group, which stops an
-      // ordinary dev server. Confirm the port is free before trusting that.
-      const holder = yield* waitForPortRelease(current.port);
-      if (Option.isSome(holder)) {
-        const pid = holder.value.pid;
-        if (pid !== null && descendants.has(pid)) {
-          yield* Effect.logWarning("managed process outlived its terminal; killing it", {
-            ...target,
-            pid,
-            port: current.port,
-          });
-          yield* inspector.signal(pid, "SIGKILL");
-          yield* waitForPortRelease(current.port);
-        } else {
-          yield* Effect.logWarning("managed process port still held after stop", {
-            ...target,
-            port: current.port,
-            pid,
-          });
-        }
+    // Closing the shell hangs up its foreground group, which stops an
+    // ordinary dev server. Confirm the port is free before trusting that.
+    const holder = yield* waitForPortRelease(current.port);
+    if (Option.isSome(holder)) {
+      const pid = holder.value.pid;
+      if (pid !== null && descendants.has(pid)) {
+        yield* Effect.logWarning("managed process outlived its terminal; killing it", {
+          ...target,
+          pid,
+          port: current.port,
+        });
+        yield* inspector.signal(pid, "SIGKILL");
+        yield* waitForPortRelease(current.port);
+      } else {
+        yield* Effect.logWarning("managed process port still held after stop", {
+          ...target,
+          port: current.port,
+          pid,
+        });
       }
-      yield* forgetListener(target);
-      yield* syncDiscoveryPorts;
-    });
+    }
+    yield* forgetListener(target);
+    yield* syncDiscoveryPorts;
+  });
 
   const stop: ManagedProcesses["Service"]["stop"] = (target) =>
     lifecycleLock.withPermits(1)(stopUnlocked(target));
@@ -629,24 +630,25 @@ export const make = Effect.fn("ManagedProcesses.make")(function* (
       }),
     );
 
-  const setPinned: ManagedProcesses["Service"]["setPinned"] = (input) =>
-    Effect.gen(function* () {
-      const target = { checkoutPath: input.checkoutPath, scriptId: input.scriptId };
-      const key = processKey(target);
-      yield* updateRegistry((registry) => {
-        const others = registry.pins.filter((pin) => processKey(pin) !== key);
-        return [
-          undefined,
-          { ...registry, pins: input.pinned ? [...others, target] : others },
-        ] as const;
-      });
-      yield* SubscriptionRef.update(state, (current) => {
-        const pins = new Set(current.pins);
-        if (input.pinned) pins.add(key);
-        else pins.delete(key);
-        return { ...current, pins };
-      });
+  const setPinned = Effect.fn("ManagedProcesses.setPinned")(function* (
+    input: Parameters<ManagedProcesses["Service"]["setPinned"]>[0],
+  ) {
+    const target = { checkoutPath: input.checkoutPath, scriptId: input.scriptId };
+    const key = processKey(target);
+    yield* updateRegistry((registry) => {
+      const others = registry.pins.filter((pin) => processKey(pin) !== key);
+      return [
+        undefined,
+        { ...registry, pins: input.pinned ? [...others, target] : others },
+      ] as const;
     });
+    yield* SubscriptionRef.update(state, (current) => {
+      const pins = new Set(current.pins);
+      if (input.pinned) pins.add(key);
+      else pins.delete(key);
+      return { ...current, pins };
+    });
+  });
 
   const borrow: ManagedProcesses["Service"]["borrow"] = (target) => {
     const key = processKey(target);
@@ -879,7 +881,9 @@ export const make = Effect.fn("ManagedProcesses.make")(function* (
       start,
       stop,
       stopAllForCheckout,
-      reserve: (checkoutPath) => reserveBlock(checkoutPath, false).pipe(Effect.asVoid),
+      reserve: Effect.fn("ManagedProcesses.reserve")((checkoutPath: string) =>
+        reserveBlock(checkoutPath, false).pipe(Effect.asVoid),
+      ),
       setPinned,
       borrow,
       stream,

@@ -1,19 +1,9 @@
 /**
- * The admission queue: agents waiting for the agents slice to have memory again.
- *
- * Every server on this machine shares one queue, kept in a file in the user's
- * runtime directory next to the slice it protects, so a file is what lets them
- * see one line. Changes take a
- * lock directory, which `mkdir` creates atomically, and the file is replaced by
- * rename, so a crash mid-write never leaves half a queue.
- *
- * Nothing here waits. Each start asks once; a ticket that is not admitted stays
- * in line while its caller keeps asking, and drops out a few polls after it stops
- * (a stopped run, a server that died), so nobody is held behind it for long.
- *
- * @module agentAdmission
+ * One queue file shared by every server on this machine, so all agents see one line.
+ * Writes take an atomic `mkdir` lock and replace the file by rename, so a crash never
+ * leaves half a queue. Nothing waits: a ticket drops out a few polls after its caller stops.
  */
-import type { AgentAdmission, MemoryProbe, MemoryState } from "@t3tools/shared/AgentScope";
+import type { MemoryProbe, MemoryState } from "@t3tools/shared/AgentScope";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -238,7 +228,7 @@ export const memoryWaitStatus = (probe: MemoryProbe | undefined, position?: numb
  * Asks once whether an agent may start now. A machine whose memory is not measured, or
  * a queue file that cannot be written, never holds a start back.
  */
-export const admitAgent = (input: {
+export const admitAgent = Effect.fn("agentAdmission.admitAgent")(function* (input: {
   readonly fs: FileSystem.FileSystem;
   readonly queuePath: string;
   readonly token: string;
@@ -246,38 +236,37 @@ export const admitAgent = (input: {
   readonly threadId: string | undefined;
   readonly probe: Effect.Effect<MemoryProbe | undefined>;
   readonly timing: AdmissionTiming;
-}): Effect.Effect<AgentAdmission> =>
-  Effect.gen(function* () {
-    const probe = yield* input.probe;
-    const now = yield* Clock.currentTimeMillis;
-    const outcome = yield* modifyQueue(input.fs, input.queuePath, input.token, (queue) => {
-      const next = tryAdmit(queue, {
-        id: input.ticketId,
-        threadId: input.threadId,
-        now,
-        memory: probe?.state,
-        timing: input.timing,
-      });
-      return { queue: next.queue, result: next.outcome };
-    }).pipe(
-      Effect.catch((error) =>
-        Effect.logWarning("Agent admission queue unavailable; starting without it", {
-          error: error.message,
-        }).pipe(Effect.as({ _tag: "admitted" } as AttemptOutcome)),
-      ),
-    );
-    switch (outcome._tag) {
-      case "admitted":
-        return { _tag: "admitted" } as const;
-      case "waiting":
-        return { _tag: "waiting", status: memoryWaitStatus(probe, outcome.position) } as const;
-      case "expired":
-        return {
-          _tag: "expired",
-          message:
-            probe === undefined
-              ? "Not started: the machine did not have memory for another agent in time. Retry once a running agent finishes."
-              : `Not started: the machine does not have memory for another agent (${memoryStatus(probe)}). Retry once a running agent finishes.`,
-        } as const;
-    }
-  });
+}) {
+  const probe = yield* input.probe;
+  const now = yield* Clock.currentTimeMillis;
+  const outcome = yield* modifyQueue(input.fs, input.queuePath, input.token, (queue) => {
+    const next = tryAdmit(queue, {
+      id: input.ticketId,
+      threadId: input.threadId,
+      now,
+      memory: probe?.state,
+      timing: input.timing,
+    });
+    return { queue: next.queue, result: next.outcome };
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.logWarning("Agent admission queue unavailable; starting without it", {
+        error: error.message,
+      }).pipe(Effect.as({ _tag: "admitted" } as AttemptOutcome)),
+    ),
+  );
+  switch (outcome._tag) {
+    case "admitted":
+      return { _tag: "admitted" } as const;
+    case "waiting":
+      return { _tag: "waiting", status: memoryWaitStatus(probe, outcome.position) } as const;
+    case "expired":
+      return {
+        _tag: "expired",
+        message:
+          probe === undefined
+            ? "Not started: the machine did not have memory for another agent in time. Retry once a running agent finishes."
+            : `Not started: the machine does not have memory for another agent (${memoryStatus(probe)}). Retry once a running agent finishes.`,
+      } as const;
+  }
+});

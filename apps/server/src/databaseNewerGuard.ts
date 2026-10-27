@@ -7,7 +7,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Runtime from "effect/Runtime";
 import * as Schema from "effect/Schema";
 
-import { migrationEntries } from "./persistence/Migrations.ts";
+import { migrationManifest } from "./persistence/Migrations.ts";
 
 /**
  * Once a newer build has migrated this T3 home's database, for example a later
@@ -25,7 +25,7 @@ export class ServerDatabaseNewerError extends Schema.TaggedError<ServerDatabaseN
   }
 }
 
-const KNOWN_THROUGH = Math.max(...migrationEntries.map(([id]) => id));
+const KNOWN_THROUGH = Math.max(...migrationManifest.map(([id]) => id));
 
 /** The first recorded migration past the newest one this build ships, if any. */
 export const readNewerMigration = (dbPath: string, knownThrough = KNOWN_THROUGH) =>

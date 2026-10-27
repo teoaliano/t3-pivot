@@ -1,16 +1,8 @@
 #!/usr/bin/env node
 
-// Maintainer commands for T3 Pivot.
-//   sync         open a PR on the fork that merges upstream's newest nightly tag
-//   release      build, sign, notarize and publish T3 Pivot from main (release Mac)
-//   ios-release  upload the iPhone app for main's release to TestFlight (release Mac)
-//   nightly      publish whatever main has not released yet, desktop and iPhone, and
-//                install it on the release Mac
-//   nightly-install  schedule `nightly` with launchd, from the release Mac's clone
-//   host-update  merge upstream's newest nightly into main, with an agent finishing
-//                what the owner rules leave open, then rebuild and restart the host
-// All commands act as the fork owner's GitHub account, whatever gh's active
-// account is.
+// Maintainer commands for T3 Pivot: sync, release, ios-release, nightly,
+// nightly-install and host-update (see docs/operations/pivot-releases.md).
+// All commands act as the fork owner's GitHub account, whatever gh's active account is.
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -191,12 +183,16 @@ const openSyncPrs = Effect.fn("pivot.openSyncPrs")(function* (env: Record<string
   const output = yield* run(
     "gh",
     [
-      ...["pr", "list", "--repo", FORK_REPOSITORY, "--state", "open"],
-      ...["--json", "headRefName,url"],
-      ...[
-        "--jq",
-        '.[] | select(.headRefName | startswith("sync/")) | "\\(.headRefName)\\t\\(.url)"',
-      ],
+      "pr",
+      "list",
+      "--repo",
+      FORK_REPOSITORY,
+      "--state",
+      "open",
+      "--json",
+      "headRefName,url",
+      "--jq",
+      '.[] | select(.headRefName | startswith("sync/")) | "\\(.headRefName)\\t\\(.url)"',
     ],
     env,
   );
@@ -226,19 +222,25 @@ const openSyncPr = Effect.fn("pivot.openSyncPr")(function* (
   const prUrl = yield* run(
     "gh",
     [
-      ...["pr", "create", "--repo", FORK_REPOSITORY, "--base", "main", "--head", branch],
-      ...["--title", `chore: merge upstream ${tag}`],
-      ...[
-        "--body",
-        [
-          `Merges upstream's nightly build ${tag} into T3 Pivot, so it matches the T3 Code (Nightly) app.`,
-          "",
-          ...(reason === undefined
-            ? []
-            : ["The nightly update could not merge it on its own:", "", reason, ""]),
-          "Resolve any conflicts on this branch, review upstream's changes, then merge.",
-        ].join("\n"),
-      ],
+      "pr",
+      "create",
+      "--repo",
+      FORK_REPOSITORY,
+      "--base",
+      "main",
+      "--head",
+      branch,
+      "--title",
+      `chore: merge upstream ${tag}`,
+      "--body",
+      [
+        `Merges upstream's nightly build ${tag} into T3 Pivot, so it matches the T3 Code (Nightly) app.`,
+        "",
+        ...(reason === undefined
+          ? []
+          : ["The nightly update could not merge it on its own:", "", reason, ""]),
+        "Resolve any conflicts on this branch, review upstream's changes, then merge.",
+      ].join("\n"),
     ],
     env,
   );
@@ -257,8 +259,12 @@ const closeSettledSyncPrs = Effect.fn("pivot.closeSettledSyncPrs")(function* (
     yield* run(
       "gh",
       [
-        ...["pr", "close", pr.url, "--delete-branch"],
-        ...["--comment", "Main now contains this nightly, merged by the nightly update."],
+        "pr",
+        "close",
+        pr.url,
+        "--delete-branch",
+        "--comment",
+        "Main now contains this nightly, merged by the nightly update.",
       ],
       env,
     );
@@ -396,8 +402,17 @@ const release = Effect.gen(function* () {
     "node",
     [
       "scripts/build-desktop-artifact.ts",
-      ...["--platform", "mac", "--target", "dmg", "--arch", "arm64", "--signed"],
-      ...["--build-version", version, "--output-dir", outputDir],
+      "--platform",
+      "mac",
+      "--target",
+      "dmg",
+      "--arch",
+      "arm64",
+      "--signed",
+      "--build-version",
+      version,
+      "--output-dir",
+      outputDir,
     ],
     {
       T3CODE_DESKTOP_UPDATE_REPOSITORY: FORK_REPOSITORY,
@@ -440,9 +455,19 @@ const release = Effect.gen(function* () {
   const releaseUrl = yield* run(
     "gh",
     [
-      ...["release", "create", tag, "--repo", FORK_REPOSITORY, "--target", head],
-      ...["--title", `T3 Pivot ${version}`, "--latest", "--generate-notes"],
-      ...["--notes", `Built on upstream ${upstreamBaseTag.value}.`],
+      "release",
+      "create",
+      tag,
+      "--repo",
+      FORK_REPOSITORY,
+      "--target",
+      head,
+      "--title",
+      `T3 Pivot ${version}`,
+      "--latest",
+      "--generate-notes",
+      "--notes",
+      `Built on upstream ${upstreamBaseTag.value}.`,
       ...assets,
     ],
     env,
@@ -512,9 +537,12 @@ const uploadIos = Effect.fn("pivot.uploadIos")(function* (
   };
   const authArgs = [
     "-allowProvisioningUpdates",
-    ...["-authenticationKeyPath", key.keyPath],
-    ...["-authenticationKeyID", key.keyId],
-    ...["-authenticationKeyIssuerID", key.issuerId],
+    "-authenticationKeyPath",
+    key.keyPath,
+    "-authenticationKeyID",
+    key.keyId,
+    "-authenticationKeyIssuerID",
+    key.issuerId,
   ];
 
   yield* Console.log(`Uploading the T3 Pivot iPhone app ${version} (${build}) to TestFlight...`);
@@ -528,9 +556,16 @@ const uploadIos = Effect.fn("pivot.uploadIos")(function* (
     "xcodebuild",
     [
       "archive",
-      ...["-workspace", `apps/mobile/ios/${IOS_PROJECT}.xcworkspace`],
-      ...["-scheme", IOS_PROJECT, "-configuration", "Release"],
-      ...["-destination", "generic/platform=iOS", "-archivePath", archivePath],
+      "-workspace",
+      `apps/mobile/ios/${IOS_PROJECT}.xcworkspace`,
+      "-scheme",
+      IOS_PROJECT,
+      "-configuration",
+      "Release",
+      "-destination",
+      "generic/platform=iOS",
+      "-archivePath",
+      archivePath,
       ...authArgs,
       `DEVELOPMENT_TEAM=${APPLE_TEAM_ID}`,
       "CODE_SIGN_STYLE=Automatic",
@@ -543,8 +578,12 @@ const uploadIos = Effect.fn("pivot.uploadIos")(function* (
   yield* fileSystem.writeFileString(exportOptionsPath, EXPORT_OPTIONS);
   yield* runVisible("xcodebuild", [
     "-exportArchive",
-    ...["-archivePath", archivePath, "-exportOptionsPlist", exportOptionsPath],
-    ...["-exportPath", `${outputDir}/export`],
+    "-archivePath",
+    archivePath,
+    "-exportOptionsPlist",
+    exportOptionsPath,
+    "-exportPath",
+    `${outputDir}/export`,
     ...authArgs,
   ]);
   yield* Console.log(`uploaded ${version} (${build}); TestFlight installs it once processed`);
@@ -596,7 +635,9 @@ const installApp = Effect.fn("pivot.installApp")(function* (version: string) {
   const fileSystem = yield* FileSystem.FileSystem;
   const installed = yield* Effect.option(
     run("plutil", [
-      ...["-extract", "CFBundleShortVersionString", "raw"],
+      "-extract",
+      "CFBundleShortVersionString",
+      "raw",
       `${INSTALLED_APP}/Contents/Info.plist`,
     ]),
   );
@@ -861,7 +902,10 @@ export const runMergeAgent: MergeAgent = Effect.fn("pivot.runMergeAgent")(functi
     [
       "-p",
       mergePrompt(request),
-      ...["--model", MERGE_AGENT_MODEL, "--effort", MERGE_AGENT_EFFORT],
+      "--model",
+      MERGE_AGENT_MODEL,
+      "--effort",
+      MERGE_AGENT_EFFORT,
       "--dangerously-skip-permissions",
       "--no-session-persistence",
     ],
@@ -871,12 +915,9 @@ export const runMergeAgent: MergeAgent = Effect.fn("pivot.runMergeAgent")(functi
 });
 
 /**
- * Merges upstream `tag` into the checked-out branch in `cwd` and commits it once it
- * builds. Conflicts go to their owner first (see PIVOT_OWNED_PATHS and
- * UPSTREAM_OWNED_PATHS). Conflicts left over, or a merge that doesn't build, go to
- * `agent`. Fails with PivotMergeError, the checkout restored to where it was, when the
- * agent asks for the maintainer's decision, fails, or leaves a merge that still
- * doesn't build. Returns the agent's summary, empty when the merge needed no agent.
+ * Merges upstream `tag` and commits once it builds. Conflicts go to their owner paths
+ * first, then to `agent`; anything the agent can't settle fails with PivotMergeError and
+ * restores the checkout. Returns the agent's summary, empty when no agent was needed.
  */
 export const mergeUpstreamTag = Effect.fn("pivot.mergeUpstreamTag")(function* (
   tag: string,

@@ -9,11 +9,7 @@ export interface AgentScopeShape {
     readonly name: string;
     readonly threadId?: string | undefined;
     readonly env?: NodeJS.ProcessEnv | undefined;
-    /**
-     * Set for terminals, so a job the user detached (tmux, nohup) outlives a
-     * server restart. Agents leave it unset: the next server stops agents a
-     * killed server left running before it resumes their sessions.
-     */
+    /** Terminals may survive restarts; agents must remain eligible for orphan cleanup. */
     readonly survivesRestart?: boolean | undefined;
     /**
      * Keep a shared process running after a tool OOM when supported.
@@ -22,6 +18,11 @@ export interface AgentScopeShape {
     readonly shared?: boolean | undefined;
   }) => Effect.Effect<AgentScopeCommand>;
   readonly oomKilled: (threadId: string) => Effect.Effect<boolean>;
+  /**
+   * Reaps processes left after the owning agent exits, including setsid
+   * descendants outside its process group. Preserves systemd OOM diagnosis.
+   */
+  readonly stop: (unit: string) => Effect.Effect<void>;
   /**
    * Forgets the thread's scope. The session manager calls it before it opens
    * a provider session, so a scope only answers for the session that launched
@@ -32,13 +33,11 @@ export interface AgentScopeShape {
    * Stops every process still running in the thread's latest agent scope:
    * SIGTERM first, then SIGKILL for what survives the grace period.
    */
-  readonly stop: (threadId: string) => Effect.Effect<void>;
+  readonly stopThread: (threadId: string) => Effect.Effect<void>;
   /**
-   * One admission attempt for an agent about to start; it never waits. Agents start in
-   * the order they asked, across every T3 server of this user. A ticket that is not
-   * admitted stays in line only while its caller keeps asking: one that stops asking
-   * (a stopped run, a dead server) drops out after a few missed polls. An agent is held
-   * back only while memory is starved.
+   * One admission attempt that never waits; agents start in the order they asked, across
+   * every T3 server of this user, held back only while memory is starved. A ticket whose
+   * caller stops asking drops out after a few missed polls.
    */
   readonly admit: (input: {
     /** Stable across attempts for one start, such as the run id. */
@@ -100,16 +99,19 @@ export class AgentMemoryDeferral extends Schema.TaggedError<AgentMemoryDeferral>
 export interface AgentScopeCommand {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
+  /** The systemd scope the command runs in, for `stop`. */
+  readonly unit?: string | undefined;
 }
 
 export const AgentScope = Context.Reference<AgentScopeShape>("@t3tools/shared/AgentScope", {
   defaultValue: () => ({
     wrap: ({ command, args }) => Effect.succeed({ command, args }),
     oomKilled: () => Effect.succeed(false),
-    clear: () => Effect.void,
     stop: () => Effect.void,
+    clear: () => Effect.void,
+    stopThread: () => Effect.void,
     admit: () => Effect.succeed({ _tag: "admitted" }),
-    memory: () => Effect.succeed(undefined),
+    memory: () => Effect.undefined,
     queuedThreadIds: () => Effect.succeed(new Set<string>()),
   }),
 });
@@ -125,8 +127,7 @@ export const RAISE_OOM_SCORE_LINE = `{ echo ${AGENT_OOM_SCORE_ADJ} >/proc/self/o
 
 const LAUNCH_SCRIPT = [RAISE_OOM_SCORE_LINE, 'exec "$@"'].join("\n");
 
-// systemd-run needs XDG_RUNTIME_DIR to reach the user manager. Fill it in when
-// the agent environment does not carry it; it is the same user either way.
+// systemd-run needs XDG_RUNTIME_DIR to reach this user's manager.
 const SCOPED_LAUNCH_SCRIPT = [
   RAISE_OOM_SCORE_LINE,
   ': "${XDG_RUNTIME_DIR:=$1}"',
@@ -143,11 +144,7 @@ export interface AgentSystemdScope {
   readonly options: ReadonlyArray<string>;
 }
 
-/**
- * Every step `exec`s, so the spawned PID, stdio, and signals all belong to the agent itself.
- * `systemd-run --scope` registers its own PID as the scope and then runs the command, so the
- * agent and all of its children start inside the scope.
- */
+/** Exec at every step preserves the agent PID, stdio, and signals; systemd-run places it and descendants in the scope. */
 export function agentScopeCommand(input: {
   readonly command: string;
   readonly args: ReadonlyArray<string>;

@@ -62,39 +62,38 @@ export function planUpstreamSync(input: {
  * releases on the upstream base from 0. A newer upstream base always sorts
  * above every release on an older one, so the updater never sees a downgrade.
  */
-export const planForkVersion = (input: {
+export const planForkVersion = Effect.fn("pivot-release-plan.planForkVersion")(function* (input: {
   readonly upstreamBase: string;
   readonly forkTags: ReadonlyArray<string>;
-}) =>
-  Effect.gen(function* () {
-    const base = parseStableVersion(input.upstreamBase);
-    if (Option.isNone(base)) {
-      return yield* new ForkVersionError({
-        reason: "base-not-stable",
-        upstreamBase: input.upstreamBase,
-      });
+}) {
+  const base = parseStableVersion(input.upstreamBase);
+  if (Option.isNone(base)) {
+    return yield* new ForkVersionError({
+      reason: "base-not-stable",
+      upstreamBase: input.upstreamBase,
+    });
+  }
+  const { major, minor, patch } = base.value;
+  const firstPatch = patch * RELEASES_PER_BASE;
+  let next = 0;
+  for (const tag of input.forkTags) {
+    if (!tag.startsWith(FORK_TAG_PREFIX)) continue;
+    const released = parseStableVersion(tag.slice(FORK_TAG_PREFIX.length));
+    if (Option.isNone(released)) continue;
+    const { major: releasedMajor, minor: releasedMinor, patch: releasedPatch } = released.value;
+    const n = releasedPatch - firstPatch;
+    if (releasedMajor === major && releasedMinor === minor && n >= 0 && n < RELEASES_PER_BASE) {
+      next = Math.max(next, n + 1);
     }
-    const { major, minor, patch } = base.value;
-    const firstPatch = patch * RELEASES_PER_BASE;
-    let next = 0;
-    for (const tag of input.forkTags) {
-      if (!tag.startsWith(FORK_TAG_PREFIX)) continue;
-      const released = parseStableVersion(tag.slice(FORK_TAG_PREFIX.length));
-      if (Option.isNone(released)) continue;
-      const { major: releasedMajor, minor: releasedMinor, patch: releasedPatch } = released.value;
-      const n = releasedPatch - firstPatch;
-      if (releasedMajor === major && releasedMinor === minor && n >= 0 && n < RELEASES_PER_BASE) {
-        next = Math.max(next, n + 1);
-      }
-    }
-    if (next >= RELEASES_PER_BASE) {
-      return yield* new ForkVersionError({
-        reason: "base-exhausted",
-        upstreamBase: input.upstreamBase,
-      });
-    }
-    return `${major}.${minor}.${firstPatch + next}`;
-  });
+  }
+  if (next >= RELEASES_PER_BASE) {
+    return yield* new ForkVersionError({
+      reason: "base-exhausted",
+      upstreamBase: input.upstreamBase,
+    });
+  }
+  return `${major}.${minor}.${firstPatch + next}`;
+});
 
 /** The version of the fork release tagged among `tags`, the tags pointing at one commit. */
 export function releasedVersion(tags: ReadonlyArray<string>): Option.Option<string> {
