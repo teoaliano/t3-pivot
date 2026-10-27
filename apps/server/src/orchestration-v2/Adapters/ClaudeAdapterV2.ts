@@ -4335,9 +4335,13 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
     adapterOptions.settings.homePath.trim().length > 0 ||
     adapterOptions.environment.CLAUDE_CONFIG_DIR !== hostEnvironment.CLAUDE_CONFIG_DIR;
   const announcedBypassDowngrades = new Set<ThreadId>();
+  // Claude Code rewrites remote-settings.json in place, so a read can land on the empty file
+  // between truncate and write. Empty means no settings; anything else must decode.
   const readBypassSettings = (filePath: string) =>
     fileSystem.readFileString(filePath).pipe(
-      Effect.flatMap(decodeClaudeBypassSettings),
+      Effect.flatMap((contents) =>
+        contents.trim().length === 0 ? Effect.succeed({}) : decodeClaudeBypassSettings(contents),
+      ),
       Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed({})),
     );
   const resolveBypassAvailability = Effect.fn("ClaudeAdapterV2.resolveBypassAvailability")(
@@ -4555,7 +4559,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           }
           const cwd = turnInput.runtimePolicy.cwd;
           if (bypassCache === null || bypassCache.cwd !== cwd) {
-            const resolved = yield* resolveBypassAvailability(cwd).pipe(Effect.option);
+            // Retry briefly before failing closed: a write caught mid-flight is torn, not a policy.
+            const resolved = yield* resolveBypassAvailability(cwd).pipe(
+              Effect.retry({ times: 2 }),
+              Effect.option,
+            );
             if (Option.isNone(resolved)) {
               return claudeRuntimeQueryPolicyForRuntimePolicy(turnInput.runtimePolicy, {
                 bypassDisabled: true,
