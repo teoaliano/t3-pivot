@@ -11,7 +11,7 @@ import * as DateTime from "effect/DateTime";
 import { deriveTeammateStatus, type TeammateStatusInput } from "@t3tools/shared/teammateStatus";
 
 /**
- * The teammate cards in the Pivot view, as data. A card shows its status (dot,
+ * A Pivot's teammates as cards, as data. A card shows its status (dot,
  * elapsed time, label), title, PR number or "Scout", and provider. Cards keep
  * dispatch order; finished teammates fold into one chip at the end.
  */

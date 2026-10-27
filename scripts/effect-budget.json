@@ -331,7 +331,6 @@
   "apps/web/src/components/pivot/NewPivot.tsx": 1,
   "apps/web/src/components/pivot/PivotAppChrome.tsx": 1,
   "apps/web/src/components/pivot/PivotDecisionCard.tsx": 1,
-  "apps/web/src/components/pivot/PivotDecisionsPane.tsx": 1,
   "apps/web/src/components/pivot/pivotDecisionDraft.ts": 1,
   "apps/web/src/components/pivot/pivotStatesStore.ts": 1,
   "apps/web/src/components/preview/AgentBrowserCursor.tsx": 1,

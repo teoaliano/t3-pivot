@@ -88,7 +88,6 @@ import { usePivotState } from "../../state/pivot";
 import { readLocalApi } from "../../localApi";
 import { takeoverSummary } from "@t3tools/client-runtime/pivot-state";
 import { decideNewPivot, replacePivotPrompt } from "../pivot/newPivot.logic";
-import { usePivotViewStore } from "../pivot/pivotViewStore";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { runMobileComposerTransition } from "./draftHeroTransition";
 import { useClientSettingsHydrated, useEnvironmentSettings } from "../../hooks/useSettings";
@@ -1269,13 +1268,7 @@ export function useComposerSend(input: ComposerSendInput) {
           threadId: threadIdForSend,
         },
       });
-      if (created._tag === "Success") {
-        usePivotViewStore
-          .getState()
-          .setMode(scopeThreadRef(pivotDraft.environmentId, created.value.threadId), "chat");
-      } else {
-        failure = created;
-      }
+      if (created._tag === "Failure") failure = created;
     }
 
     if (failure === null && turnAttachmentsResult._tag === "Success") {

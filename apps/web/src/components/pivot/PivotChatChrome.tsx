@@ -1,30 +1,23 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { decisionsHeldBy } from "@t3tools/client-runtime/pivot-state";
 import type { EnvironmentId, PivotDecision, ThreadId } from "@t3tools/contracts";
-import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
-import { LayoutDashboardIcon } from "lucide-react";
 import { useState } from "react";
 
-import { shortcutLabelForCommand } from "../../keybindings";
 import { useServerConfigs } from "../../state/entities";
 import { usePivotState } from "../../state/pivot";
-import { primaryServerKeybindingsAtom, serverEnvironment } from "../../state/server";
+import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { useChatCanvas } from "../chat/ChatCanvasContext";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
-import { Toggle } from "../ui/toggle";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   clearPivotDecisionAttachments,
   readyPivotDecisionImages,
   usePivotDecisionAttachments,
 } from "./pivotDecisionAttachments";
 import { PivotDecisionCard } from "./PivotDecisionCard";
-import { useInPivotView } from "./pivotViewContext";
-import { otherPivotViewMode, usePivotViewMode, usePivotViewStore } from "./pivotViewStore";
 
 /** What a thread is in Pivot mode, for the chat around it. */
 export type PivotChatRole =
@@ -44,46 +37,6 @@ export function usePivotChatRole(environmentId: EnvironmentId, threadId: ThreadI
   const teammate = state?.teammates[threadId];
   if (teammate !== undefined) return { kind: "teammate", pivotThreadId: teammate.pivotThreadId };
   return { kind: "none" };
-}
-
-/** The header button that flips a Pivot between its chat and its Pivot view. Nothing for other threads. */
-export function PivotViewSwitch(props: {
-  environmentId: EnvironmentId;
-  threadId: ThreadId;
-  /** Show it inside the Pivot view too; its top bar passes this. */
-  force?: boolean;
-}) {
-  const inPivotView = useInPivotView();
-  const role = usePivotChatRole(props.environmentId, props.threadId);
-  const ref = scopeThreadRef(props.environmentId, props.threadId);
-  const mode = usePivotViewMode(ref);
-  const setMode = usePivotViewStore((state) => state.setMode);
-  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  if (role.kind !== "pivot" || (inPivotView && props.force !== true)) return null;
-  const next = otherPivotViewMode(mode);
-  const shortcut = shortcutLabelForCommand(keybindings, "pivot.toggleView");
-  const hint = next === "pivot" ? "Switch to Pivot view" : "Switch to chat";
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Toggle
-            className="shrink-0"
-            aria-label="Pivot view"
-            variant="ghost"
-            size="sm"
-            pressed={mode === "pivot"}
-            onPressedChange={() => setMode(ref, next)}
-          />
-        }
-      >
-        <LayoutDashboardIcon className="size-3.5" />
-      </TooltipTrigger>
-      <TooltipPopup side="bottom">
-        {shortcut === null ? hint : `${hint} (${shortcut})`}
-      </TooltipPopup>
-    </Tooltip>
-  );
 }
 
 /** Stands in for the composer on a retired Pivot, which is read-only history. */
@@ -124,7 +77,6 @@ export function PivotDecisionsStrip(props: {
   pivotThreadId: ThreadId;
 }) {
   const state = usePivotState(props.environmentId);
-  // A short Pivot view pane still needs room for the timeline and composer around the card.
   const canvasHeight = useChatCanvas()?.container.height ?? 0;
   const decisions = state === null ? [] : decisionsHeldBy(state, props.pivotThreadId);
   if (decisions.length === 0) return null;

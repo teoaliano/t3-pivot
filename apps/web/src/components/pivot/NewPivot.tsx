@@ -29,7 +29,6 @@ import { readLocalApi } from "../../localApi";
 import { toastManager } from "../ui/toast";
 import { decideNewPivot, pivotEnvironmentChoices, replacePivotPrompt } from "./newPivot.logic";
 import { pivotDefaultModel } from "./pivotModel.logic";
-import { usePivotViewStore } from "./pivotViewStore";
 
 interface NewPivotTarget {
   readonly environmentId: EnvironmentId;
@@ -117,7 +116,6 @@ function NewPivotCreation(props: { target: NewPivotTarget; onDone: () => void })
     ),
   );
   const createPivot = useAtomCommand(serverEnvironment.createPivot, { reportFailure: false });
-  const setMode = usePivotViewStore((state) => state.setMode);
   // Runs once per request, including under StrictMode's double effects, and
   // only once the project's Pivots have loaded so a replacement is never missed.
   const started = useRef(false);
@@ -185,7 +183,6 @@ function NewPivotCreation(props: { target: NewPivotTarget; onDone: () => void })
           description: "The previous Pivot stays as read-only history.",
         });
       }
-      setMode(ref, "chat");
       void navigate({ to: "/$environmentId/$threadId", params: buildThreadRouteParams(ref) });
     })();
   });

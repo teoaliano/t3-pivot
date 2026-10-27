@@ -76,7 +76,7 @@ export function SidebarPivotSummary(props: { group: SidebarPivotGroup }) {
 }
 
 /** The icon a normal thread row shows for the same state; paused rests like done. */
-export function teammateStatusIcon(card: TeammateCard): SidebarStatusIconKind {
+function teammateStatusIcon(card: TeammateCard): SidebarStatusIconKind {
   switch (card.tone) {
     case "working":
       return "working";

@@ -358,8 +358,7 @@ function QuestionDecision({
               ) : null}
             </ComposerBanner.Body>
           </ComposerBanner.Scroll>
-          {/* The box's top edge: dragging up grows it, since its bottom stays on the composer.
-              The pill shows on hover, like the Pivot view's pane dividers. */}
+          {/* The box's top edge: dragging up grows it, since its bottom stays on the composer. */}
           <div
             role="separator"
             aria-orientation="horizontal"

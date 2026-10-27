@@ -34,8 +34,6 @@ Calls that need you appear above the Pivot's composer until you answer. A merge,
 discarding work asks for your approval: answer with **Accept**, adding a note if you want to waive
 a check, or with **Comment**, which needs a note. Your answer is recorded in your words and passed on
 to the teammate; after a comment, the teammate makes its change and proposes again.
-To check the Pivot's judgment, show the **Decisions** pane in the Pivot view: it lists every
-decision, with the answers the Pivot gave on its own labeled as its own.
 
 The Pivot notifies you when it needs a call, when a scout's findings are ready, and when it
 replies to you. A teammate notifies you only when its agent stops to ask you a question or for an
@@ -47,14 +45,6 @@ rest of their updates.
 In the sidebar a Pivot's row counts its teammates by state, each with its icon: how many need you,
 how many are working and how many are done. Clicking a teammate opens its chat, and you can type to
 it directly; the Pivot is told what you said.
-
-The switch in a Pivot's header moves between its chat and the **Pivot view**, a full-screen
-layout with no sidebar. Start from a layout preset in the view's menu, then show, hide, resize
-and move panes. The panes are the Pivot's chat, a card per teammate, one teammate's chat, and
-that teammate's preview, files and diff. Open them from a card's menu. A teammate's chat is
-read-only in the Pivot view except for approvals; steer it through the Pivot, or type to it from
-the sidebar. The view and the layout are remembered per Pivot on each device. An optional
-wallpaper sits behind the Pivot view; it is set once per device and shared by every Pivot.
 
 ## Your standing rules
 

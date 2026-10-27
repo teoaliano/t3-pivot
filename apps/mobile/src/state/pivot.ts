@@ -13,7 +13,7 @@ const NO_PIVOT_MODE = Atom.make(AsyncResult.success(EMPTY_PIVOT_STATE)).pipe(
 
 /**
  * The retired Pivot a thread is, with the Pivot that took over its work, or null for any
- * other thread. Mobile has no Pivot view; a retired Pivot is read-only history here too.
+ * other thread. A retired Pivot is read-only history here too.
  */
 export function useRetiredPivot(
   environmentId: EnvironmentId | null,
