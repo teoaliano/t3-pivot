@@ -178,6 +178,11 @@ export const PivotRecord = Schema.Struct({
   retiredAt: Schema.NullOr(IsoDateTime),
   /** The Pivot that took over when this one was retired. */
   successorThreadId: Schema.NullOr(ThreadId),
+  /**
+   * What this Pivot wrote for its successor as it retired: what only its conversation held.
+   * Null or absent when it wrote none.
+   */
+  handoff: Schema.optional(Schema.NullOr(Schema.String)),
   openDecisionCount: NonNegativeInt,
   /** Open decisions held for the user, for the sidebar badge. */
   escalatedDecisionCount: NonNegativeInt,

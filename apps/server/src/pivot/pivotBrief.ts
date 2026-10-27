@@ -65,6 +65,11 @@ export const renderBrief = (template: string, values: BriefValues) =>
     definitionOfDone: stripTemplateNote(values.definitionOfDone),
   });
 
+export const renderHandoffRequest = (
+  template: string,
+  values: { readonly successorThreadId: string },
+) => fill(template, { successorThreadId: values.successorThreadId });
+
 export const renderShipOrder = (
   template: string,
   values: {

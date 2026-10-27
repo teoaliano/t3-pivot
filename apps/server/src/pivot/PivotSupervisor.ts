@@ -13,6 +13,7 @@
  */
 import {
   MessageId,
+  type RunId,
   type TeammateStatus,
   type ThreadId,
   type ThreadPullRequestLink,
@@ -33,6 +34,7 @@ import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import { memoryWaitStatus } from "../process/agentAdmission.ts";
 import * as ServerActivation from "../serverActivation.ts";
+import { renderHandoffRequest } from "./pivotBrief.ts";
 import { loadPivotText } from "./pivotTexts.ts";
 import * as PivotHostStore from "./PivotHostStore.ts";
 import * as PivotStore from "./PivotStore.ts";
@@ -42,6 +44,8 @@ import { composeWake, type WakeDigest, type WakeTeammate } from "./pivotWake.ts"
 
 /** A teammate still resuming this long after the supervisor started did not survive the restart. */
 export const RESUME_GRACE_MS = 5 * 60 * 1000;
+/** How long a takeover waits for the retired Pivot's handoff before going on without it. */
+export const HANDOFF_WAIT_MS = 2 * 60 * 1000;
 /** A running teammate with no activity this long wakes its Pivot, once per run. */
 export const STUCK_AFTER_MS = 30 * 60 * 1000;
 /** A hosted teammate's activity is logged at most this often, since a turn emits many events. */
@@ -118,6 +122,7 @@ export const make = Effect.gen(function* () {
   const guidance = {
     stuck: yield* text("stuck-teammate-ladder"),
     failed: yield* text("failed-teammate-diagnosis"),
+    handoff: yield* text("handoff-request"),
   };
 
   // In memory, rebuilt from the records: nothing here outlives a restart that matters.
@@ -131,6 +136,12 @@ export const make = Effect.gen(function* () {
   const knownPivots = new Set<string>();
   // The first wake after a server start, and a takeover's first, tell the whole state.
   const digests = new Map<string, WakeDigest>();
+  // Takeovers whose successor waits for the retired Pivot's handoff, by successor. A restart
+  // forgets them: the successor then opens with the restart digest.
+  const handoffs = new Map<
+    string,
+    { readonly predecessor: ThreadId; readonly runId: RunId; readonly askedAtMs: number }
+  >();
   let started = false;
   let startedAtMs: number | null = null;
 
@@ -321,11 +332,60 @@ export const make = Effect.gen(function* () {
         summary: derived.detail ?? row.report?.summary ?? null,
         resume: row.resume,
         tornDown: row.tornDownAt !== null,
+        branch: row.branch,
+        worktreePath: row.worktreePath,
+        goal: row.intent[0] ?? null,
+        verdict: row.verdict?.text ?? null,
       } satisfies WakeTeammate;
     });
 
+  /**
+   * The successor opens with the retired Pivot's handoff, or a note that it has none, and the
+   * retired thread settles now that its work moved on.
+   */
+  const settleHandoff = (successor: ThreadId, predecessor: ThreadId, handoff: string | null) =>
+    Effect.gen(function* () {
+      handoffs.delete(successor);
+      if (handoff !== null) {
+        yield* record({ type: "pivot.record-handoff", threadId: predecessor, text: handoff });
+      }
+      digests.set(successor, { kind: "takeover", predecessorThreadId: predecessor, handoff });
+      yield* threads.settle(predecessor).pipe(Effect.catchCause(logFailure("settle")));
+    });
+
+  const askForHandoff = (successor: ThreadId, predecessor: ThreadId) =>
+    Effect.gen(function* () {
+      const askedAtMs = yield* Clock.currentTimeMillis;
+      const runId = yield* threads
+        .request({
+          threadId: predecessor,
+          senderThreadId: successor,
+          text: renderHandoffRequest(guidance.handoff, { successorThreadId: successor }),
+        })
+        .pipe(Effect.catchCause((cause) => Effect.as(logFailure("handoff")(cause), null)));
+      if (runId === null) return yield* settleHandoff(successor, predecessor, null);
+      handoffs.set(successor, { predecessor, runId, askedAtMs });
+    });
+
+  /** Takes each handoff whose reply came, and gives up on each whose wait is over. */
+  const advanceHandoffs = Effect.gen(function* () {
+    // oxlint-disable-next-line unicorn/no-useless-spread
+    for (const [successor, pending] of [...handoffs]) {
+      const reply = yield* threads
+        .runReply(pending.predecessor, pending.runId)
+        .pipe(Effect.orElseSucceed(() => ({ type: "pending" as const })));
+      if (reply.type === "ended") {
+        yield* settleHandoff(successor as ThreadId, pending.predecessor, reply.text);
+      } else if ((yield* Clock.currentTimeMillis) - pending.askedAtMs >= HANDOFF_WAIT_MS) {
+        yield* settleHandoff(successor as ThreadId, pending.predecessor, null);
+      }
+    }
+  });
+
   const wakePivot = (pivot: PivotStore.PivotRow) =>
     Effect.gen(function* () {
+      // A takeover's first wake carries the handoff, so it waits for it.
+      if (handoffs.has(pivot.threadId)) return;
       const digest = digests.get(pivot.threadId) ?? null;
       const fresh = yield* store.pendingWake(pivot.threadId);
       const forced = digest?.kind === "takeover";
@@ -344,7 +404,13 @@ export const make = Effect.gen(function* () {
         pivotThreadId: pivot.threadId,
         openOnly: true,
       });
-      const wake = composeWake({ events, teammates, openDecisions, digest, guidance });
+      const wake = composeWake({
+        events,
+        teammates,
+        openDecisions,
+        digest,
+        guidance: { stuck: guidance.stuck, failed: guidance.failed },
+      });
       const messageId = MessageId.make(`pivot-wake-${yield* randomUuidV4}`);
       yield* threads.wake({
         pivotThreadId: pivot.threadId,
@@ -382,9 +448,7 @@ export const make = Effect.gen(function* () {
           }
         } else {
           const predecessor = yield* findPredecessor(pivot.threadId);
-          if (predecessor !== null) {
-            digests.set(pivot.threadId, { kind: "takeover", predecessorThreadId: predecessor });
-          }
+          if (predecessor !== null) yield* askForHandoff(pivot.threadId, predecessor);
         }
         knownPivots.add(pivot.threadId);
       }
@@ -433,6 +497,7 @@ export const make = Effect.gen(function* () {
         .listTeammates({ includeTornDown: false })
         .pipe(Effect.orElseSucceed(() => teammates)),
     );
+    yield* advanceHandoffs.pipe(Effect.catchCause(logFailure("handoffs")));
     for (const pivot of yield* store.listActivePivots) yield* wakePivot(pivot);
   }).pipe(Effect.catchCause(logFailure("tick")));
 

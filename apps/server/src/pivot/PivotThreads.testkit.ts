@@ -82,6 +82,8 @@ export interface FakeV2 {
   /** Threads whose held queue was released. */
   readonly releasedQueues: Array<string>;
   readonly removedWorktrees: Array<{ readonly worktreePath: string; readonly force: boolean }>;
+  /** What a thread's agent replied to a request, once its run ended; no entry while it runs. */
+  readonly replies: Map<string, string | null>;
 }
 
 export interface FakeWake {
@@ -111,6 +113,7 @@ export const makeFakeV2 = (): FakeV2 => ({
   releasedQueues: [],
   setupOutcomes: new Map(),
   removedWorktrees: [],
+  replies: new Map(),
 });
 
 let counter = 0;
@@ -271,6 +274,17 @@ export const layer = (fake: FakeV2) =>
                   ...(attachments === undefined ? {} : { attachments }),
                 });
               }),
+        ),
+      request: ({ threadId, senderThreadId, text }) =>
+        Effect.map(thread(fake, threadId, "request"), (found) => {
+          found.messages.push({ senderThreadId, text, mode: "queue" });
+          return RunId.make(`run-request-${threadId}-${found.messages.length}`);
+        }),
+      runReply: (threadId) =>
+        Effect.sync(() =>
+          fake.replies.has(threadId)
+            ? { type: "ended" as const, text: fake.replies.get(threadId) ?? null }
+            : { type: "pending" as const },
         ),
       stop: (threadId) =>
         Effect.map(thread(fake, threadId, "stop"), (found) => {

@@ -90,6 +90,7 @@ export type PivotCommand =
       /** Without it, a project with an active Pivot refuses. */
       readonly takeover: boolean;
     }
+  | { readonly type: "pivot.record-handoff"; readonly threadId: ThreadId; readonly text: string }
   | {
       readonly type: "pivot.record-wake";
       readonly threadId: ThreadId;
@@ -299,6 +300,10 @@ export class PivotStore extends Context.Service<
       projectId: ProjectId,
     ) => Effect.Effect<PivotRow | null, PivotStoreError>;
     readonly listActivePivots: Effect.Effect<ReadonlyArray<PivotRow>, PivotStoreError>;
+    /** The retired Pivot this one took over from, if any. */
+    readonly getPredecessor: (
+      threadId: ThreadId,
+    ) => Effect.Effect<PivotRow | null, PivotStoreError>;
     readonly getTeammate: (
       threadId: ThreadId,
     ) => Effect.Effect<TeammateRow | null, PivotStoreError>;
@@ -344,6 +349,7 @@ interface PivotSqlRow {
   readonly successor_thread_id: string | null;
   readonly wake_cursor: number;
   readonly wake_from: number;
+  readonly handoff: string | null;
   readonly open_decisions: number;
   readonly escalated_decisions: number;
 }
@@ -437,6 +443,7 @@ const toPivot = (row: PivotSqlRow): PivotRow => ({
   createdAt: row.created_at,
   retiredAt: row.retired_at,
   successorThreadId: row.successor_thread_id as ThreadId | null,
+  handoff: row.handoff,
   openDecisionCount: row.open_decisions,
   escalatedDecisionCount: row.escalated_decisions,
   homePath: row.home_path,
@@ -509,6 +516,7 @@ export const pivotRecord = (row: PivotRow): PivotRecord => ({
   createdAt: row.createdAt,
   retiredAt: row.retiredAt,
   successorThreadId: row.successorThreadId,
+  handoff: row.handoff ?? null,
   openDecisionCount: row.openDecisionCount,
   escalatedDecisionCount: row.escalatedDecisionCount,
 });
@@ -679,6 +687,19 @@ export const make = Effect.gen(function* () {
           projectId: command.projectId,
           homePath: command.homePath,
           predecessorThreadId: active?.threadId ?? null,
+        });
+        break;
+      }
+      case "pivot.record-handoff": {
+        const pivot = yield* readPivot(command.threadId);
+        if (pivot === null) return yield* refuse(`Thread ${command.threadId} is not a Pivot.`);
+        if (pivot.retiredAt === null) return yield* refuse("Only a retired Pivot hands over.");
+        if (pivot.handoff != null)
+          return yield* refuse("This Pivot's handoff is already recorded.");
+        emit({
+          type: "pivot.handoff-recorded",
+          threadId: command.threadId,
+          text: yield* nonEmpty(command.text, "The handoff"),
         });
         break;
       }
@@ -1157,6 +1178,11 @@ export const make = Effect.gen(function* () {
         `;
         return;
       }
+      case "pivot.handoff-recorded":
+        yield* sql`
+          UPDATE pivot_pivots SET handoff = ${event.text} WHERE thread_id = ${event.threadId}
+        `;
+        return;
       case "pivot.woke":
         yield* sql`
           UPDATE pivot_pivots
@@ -1329,6 +1355,7 @@ export const make = Effect.gen(function* () {
     switch (event.type) {
       case "pivot.created":
       case "pivot.retired":
+      case "pivot.handoff-recorded":
       case "pivot.woke":
         return { pivot: event.threadId, teammate: null, decision: null };
       case "teammate.dispatched":
@@ -1488,6 +1515,13 @@ export const make = Effect.gen(function* () {
         Effect.map((rows) => rows.map(toPivot)),
       ),
     ),
+    getPredecessor: (threadId) =>
+      read(
+        "getPredecessor",
+        sql<PivotSqlRow>`${pivotSelect} WHERE p.successor_thread_id = ${threadId}`.pipe(
+          Effect.map((rows) => (rows[0] ? toPivot(rows[0]) : null)),
+        ),
+      ),
     getTeammate: (threadId) => read("getTeammate", readTeammate(threadId)),
     listTeammates: ({ pivotThreadId, includeTornDown }) =>
       read(

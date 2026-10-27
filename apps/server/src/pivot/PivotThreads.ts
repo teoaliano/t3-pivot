@@ -106,6 +106,14 @@ export const setupScriptOutcome = (snapshot: WorktreeSetupSnapshot | null): Setu
   }
 };
 
+const ENDED_RUN_STATUSES: ReadonlySet<string> = new Set([
+  "completed",
+  "interrupted",
+  "failed",
+  "cancelled",
+  "rolled_back",
+]);
+
 /** What the supervisor hears from V2, already narrowed to what Pivot mode acts on. */
 export type PivotThreadEvent =
   | { readonly type: "activity"; readonly threadId: ThreadId }
@@ -183,6 +191,23 @@ export class PivotThreads extends Context.Service<
       readonly attachments?: ReadonlyArray<ChatImageAttachment> | undefined;
       readonly mode: "auto" | "queue";
     }) => Effect.Effect<void, PivotThreadsError>;
+    /**
+     * Sends `text` from `senderThreadId`, queued behind the active turn, and returns the run
+     * that answers it. Null when V2 created none.
+     */
+    readonly request: (input: {
+      readonly threadId: ThreadId;
+      readonly senderThreadId: ThreadId;
+      readonly text: string;
+    }) => Effect.Effect<RunId | null, PivotThreadsError>;
+    /** Pending while the run goes on; once it ended, its last assistant message, if any. */
+    readonly runReply: (
+      threadId: ThreadId,
+      runId: RunId,
+    ) => Effect.Effect<
+      { readonly type: "pending" } | { readonly type: "ended"; readonly text: string | null },
+      PivotThreadsError
+    >;
     /** Interrupts the running turn, holds the queue, and ends the provider session. */
     readonly stop: (threadId: ThreadId) => Effect.Effect<void, PivotThreadsError>;
     /**
@@ -480,6 +505,50 @@ export const make = Effect.gen(function* () {
           creationSource: "mcp",
         });
       }).pipe(Effect.mapError(fail("send", threadId))),
+
+    request: ({ threadId, senderThreadId, text }) =>
+      Effect.gen(function* () {
+        const shell = yield* threads.getThreadShell(threadId);
+        if (shell === null) {
+          return yield* new PivotThreadsError({
+            operation: "request: the thread is gone",
+            threadId,
+          });
+        }
+        const sent = yield* threads.sendToThread({
+          projectId: shell.projectId,
+          commandId: yield* commandId("request"),
+          threadId,
+          messageId: yield* messageId,
+          senderThreadId,
+          text,
+          attachments: [],
+          mode: "queue",
+          createdBy: "agent",
+          creationSource: "mcp",
+        });
+        return sent.run?.id ?? null;
+      }).pipe(Effect.mapError(fail("send the request", threadId))),
+
+    runReply: (threadId, runId) =>
+      threads.getThreadRecords(threadId, ["runs", "messages"], { runIds: [runId] }).pipe(
+        Effect.map((records) => {
+          const run = records.runs.find((candidate) => candidate.id === runId);
+          if (run !== undefined && !ENDED_RUN_STATUSES.has(run.status)) {
+            return { type: "pending" as const };
+          }
+          const reply = records.messages
+            .filter(
+              (message) =>
+                message.runId === runId &&
+                message.role === "assistant" &&
+                message.text.trim().length > 0,
+            )
+            .at(-1);
+          return { type: "ended" as const, text: reply?.text.trim() ?? null };
+        }),
+        Effect.mapError(fail("read the reply", threadId)),
+      ),
 
     stop: (threadId) =>
       Effect.gen(function* () {

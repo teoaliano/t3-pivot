@@ -22,12 +22,22 @@ export interface WakeTeammate {
   readonly summary: string | null;
   readonly resume: TeammateResumeState | null;
   readonly tornDown: boolean;
+  /** Where it works, and the user's first words for it: what a digest names for each teammate. */
+  readonly branch?: string;
+  readonly worktreePath?: string;
+  readonly goal?: string | null;
+  readonly verdict?: string | null;
 }
 
 /** A wake that tells the whole state, not only what changed. */
 export type WakeDigest =
   | { readonly kind: "restart" }
-  | { readonly kind: "takeover"; readonly predecessorThreadId: ThreadId };
+  | {
+      readonly kind: "takeover";
+      readonly predecessorThreadId: ThreadId;
+      /** The retired Pivot's handoff; null when it wrote none in time. */
+      readonly handoff: string | null;
+    };
 
 export interface WakeInput {
   readonly events: ReadonlyArray<StoredPivotEvent>;
@@ -56,6 +66,20 @@ const quote = (text: string) => {
 const verbatim = (text: string) => `"${text}"`;
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+
+/** What a digest adds under a teammate: where it works, its goal and your verdict. */
+const digestNotes = (teammate: WakeTeammate): ReadonlyArray<string> =>
+  teammate.tornDown
+    ? []
+    : [
+        ...(teammate.branch === undefined
+          ? []
+          : [
+              `On ${teammate.branch}${teammate.worktreePath === undefined ? "" : ` in ${teammate.worktreePath}`}.`,
+            ]),
+        ...(teammate.goal == null ? [] : [`Goal: ${quote(teammate.goal)}`]),
+        ...(teammate.verdict == null ? [] : [`Your verdict: ${quote(teammate.verdict)}`]),
+      ];
 
 const teammateLine = (teammate: WakeTeammate) => {
   const summary = teammate.summary === null ? "" : ` — ${teammate.summary}`;
@@ -166,22 +190,57 @@ export const composeWake = (input: WakeInput): Wake => {
     lines.push("The server restarted since your last wake. Where every teammate stands now:");
   } else if (input.digest?.kind === "takeover") {
     lines.push(
-      `You took over from the retired Pivot in thread ${input.digest.predecessorThreadId}. Read its transcript with t3_thread_read before acting: plans the user only mentioned there are yours now.`,
-      "",
-      "Where every teammate stands now:",
+      `You took over from the retired Pivot in thread ${input.digest.predecessorThreadId}.`,
     );
+    if (input.digest.handoff === null) {
+      lines.push(
+        "It did not write a handoff in time, so what only its conversation held is missing: plans not yet dispatched, what the user is waiting on or agreed to, preferences it did not save. Ask the user, or read its transcript.",
+      );
+    } else {
+      lines.push("Its handoff, written as it retired:", "", input.digest.handoff.trim());
+    }
+    lines.push("", "Where every teammate stands now:");
   } else {
     lines.push("Teammates that changed:");
   }
   if (listed.length === 0) lines.push("- None.");
   for (const teammate of listed) {
     lines.push(teammateLine(teammate));
+    if (input.digest !== null) for (const note of digestNotes(teammate)) lines.push(`  · ${note}`);
     for (const note of changed.get(teammate.threadId) ?? []) lines.push(`  · ${note}`);
   }
 
   lines.push("", input.openDecisions.length === 0 ? "No open decisions." : "Open decisions:");
   for (const decision of input.openDecisions) {
     lines.push(decisionLine(decision, input.teammates, answeredHere.has(decision.decisionId)));
+  }
+
+  const batches = input.openDecisions.filter(
+    (decision) => (decision.escalation?.shipGroups?.length ?? 0) > 0,
+  );
+  if (input.digest !== null && batches.length > 0) {
+    lines.push("", "Ship batches waiting:");
+    for (const batch of batches) {
+      const state =
+        batch.userApproved === true
+          ? "approved, its leads told to ship"
+          : batch.userAnswer !== null
+            ? "declined"
+            : "held for the user";
+      const title = (threadId: ThreadId) => quote(input.teammates.get(threadId)?.title ?? threadId);
+      const groups = (batch.escalation?.shipGroups ?? []).map(
+        (group, index) =>
+          `${index + 1}. ${title(group.lead)}${group.members.length === 0 ? "" : ` with ${group.members.map(title).join(", ")}`}`,
+      );
+      lines.push(`- ${batch.decisionId}, ${state}: ${groups.join("; ")}`);
+    }
+  }
+
+  if (input.digest?.kind === "takeover") {
+    lines.push(
+      "",
+      `Read its transcript only when the user refers to earlier work or you need to verify what a retired teammate did: thread ${input.digest.predecessorThreadId}, with t3_thread_read. read_handoff brings back its handoff after a compaction.`,
+    );
   }
 
   const needsLadder = listed.some(

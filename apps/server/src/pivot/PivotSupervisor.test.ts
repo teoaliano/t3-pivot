@@ -663,6 +663,7 @@ describe("PivotSupervisor", () => {
       yield* finish(fake, teammate, "blocked");
       const successor = (yield* pivots.create({ projectId, modelSelection, takeover: true }))
         .threadId;
+      fake.replies.set(pivot, "Nothing beyond the records.");
       yield* tick;
       assert.deepStrictEqual(wakesFor(fake, pivot), []);
       const [digest] = wakesFor(fake, successor);
@@ -671,6 +672,112 @@ describe("PivotSupervisor", () => {
       assert.include(digest!.text, '"Fix the login bug"');
       assert.include(digest!.text, "Open decisions:");
     }).pipe(Effect.provide(withSupervisor(fake)));
+  });
+
+  describe("handoff", () => {
+    const messagesTo = (fake: FakeV2, threadId: ThreadId) => fake.threads.get(threadId)!.messages;
+
+    it.effect("asks the retired Pivot once for its handoff and records its reply", () => {
+      const { fake } = setup();
+      return Effect.gen(function* () {
+        const { pivot } = yield* running(fake);
+        const pivots = yield* PivotService.PivotService;
+        const successor = (yield* pivots.create({ projectId, modelSelection, takeover: true }))
+          .threadId;
+        yield* tick;
+        const [request, ...others] = messagesTo(fake, pivot);
+        assert.deepStrictEqual(others, []);
+        assert.strictEqual(request?.senderThreadId, successor);
+        assert.include(request!.text, "# Hand over to your successor");
+        assert.include(request!.text, successor);
+        assert.notInclude(request!.text, "{{");
+        // The successor waits for the handoff, and the retired Pivot is not settled yet.
+        assert.deepStrictEqual(wakesFor(fake, successor), []);
+        assert.isFalse(fake.threads.get(pivot)!.settled);
+
+        fake.replies.set(pivot, "Goals: the user wants login fixed before Friday.");
+        yield* tick;
+        const store = yield* PivotStore.PivotStore;
+        assert.strictEqual(
+          (yield* store.getPivot(pivot))?.handoff,
+          "Goals: the user wants login fixed before Friday.",
+        );
+        assert.isTrue(fake.threads.get(pivot)!.settled);
+        assert.strictEqual(wakesFor(fake, successor).length, 1);
+        yield* tick;
+        assert.strictEqual(messagesTo(fake, pivot).length, 1);
+      }).pipe(Effect.provide(withSupervisor(fake)));
+    });
+
+    it.effect(
+      "opens the successor with the handoff, the records and the transcript to read on need",
+      () => {
+        const { fake } = setup();
+        return Effect.gen(function* () {
+          const { pivot, teammate } = yield* running(fake);
+          const pivots = yield* PivotService.PivotService;
+          yield* finish(fake, teammate, "done");
+          const { decision } = yield* pivots.openDecision(pivot, {
+            key: "ship",
+            question: "Ship?",
+          });
+          yield* pivots.escalateDecision(pivot, {
+            decisionId: decision.decisionId,
+            questions: ["Ship the login fix?"],
+            evidence: "Reviewed.",
+            consequence: "It opens a PR.",
+            options: [],
+            recommendation: "Ship",
+            shipGroups: [{ lead: teammate, members: [] }],
+          });
+          yield* tick;
+          const successor = (yield* pivots.create({ projectId, modelSelection, takeover: true }))
+            .threadId;
+          yield* tick;
+          fake.replies.set(pivot, "Goals: the user wants login fixed before Friday.");
+          yield* tick;
+
+          const [digest] = wakesFor(fake, successor);
+          assert.include(digest!.text, `You took over from the retired Pivot in thread ${pivot}`);
+          assert.include(digest!.text, "Goals: the user wants login fixed before Friday.");
+          assert.include(digest!.text, '"Fix the login bug"');
+          assert.include(digest!.text, "pivot/fix-the-login-bug");
+          assert.include(digest!.text, "Ship batches waiting:");
+          assert.include(digest!.text, decision.decisionId);
+          assert.include(digest!.text, "Read its transcript only");
+          assert.notInclude(digest!.text, "before acting");
+        }).pipe(Effect.provide(withSupervisor(fake)));
+      },
+    );
+
+    it.effect("opens the successor from the records after two minutes without a handoff", () => {
+      const { fake } = setup();
+      return Effect.gen(function* () {
+        const { pivot } = yield* running(fake);
+        const pivots = yield* PivotService.PivotService;
+        const successor = (yield* pivots.create({ projectId, modelSelection, takeover: true }))
+          .threadId;
+        yield* tick;
+        yield* TestClock.adjust("119 seconds");
+        yield* tick;
+        assert.deepStrictEqual(wakesFor(fake, successor), []);
+
+        yield* TestClock.adjust("1 second");
+        yield* tick;
+        const [digest] = wakesFor(fake, successor);
+        assert.include(digest!.text, "did not write a handoff");
+        assert.include(digest!.text, '"Fix the login bug"');
+        assert.isTrue(fake.threads.get(pivot)!.settled);
+
+        // A reply that comes after the wait is over is not taken as the handoff.
+        fake.replies.set(pivot, "Too late.");
+        yield* TestClock.adjust("5 minutes");
+        yield* tick;
+        const store = yield* PivotStore.PivotStore;
+        assert.isNull((yield* store.getPivot(pivot))?.handoff ?? null);
+        assert.strictEqual(wakesFor(fake, successor).length, 1);
+      }).pipe(Effect.provide(withSupervisor(fake)));
+    });
   });
 
   it.effect("the first wake after a restart is a digest", () => {

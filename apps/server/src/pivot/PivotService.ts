@@ -350,6 +350,7 @@ export const historyLine = (event: PivotEvent): string => {
       );
     case "pivot.created":
     case "pivot.retired":
+    case "pivot.handoff-recorded":
     case "pivot.woke":
       return event.type;
   }
@@ -444,17 +445,8 @@ export const make = Effect.gen(function* () {
             takeover: input.takeover,
           })
           .pipe(Effect.tapError(() => threads.archive(threadId).pipe(Effect.ignore)));
-        // A retired Pivot's work moved to its successor, so it leaves the inbox.
-        if (active !== null) {
-          yield* threads.settle(active.threadId).pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("Retired Pivot did not settle", {
-                threadId: active.threadId,
-                cause,
-              }),
-            ),
-          );
-        }
+        // The retired Pivot stays in the inbox while it writes its handoff; the supervisor
+        // asks for it and settles the thread once it is in, or the wait is over.
         return { threadId, predecessorThreadId: active?.threadId ?? null };
       }),
     );

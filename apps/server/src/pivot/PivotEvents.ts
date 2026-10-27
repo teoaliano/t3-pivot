@@ -45,6 +45,8 @@ export const PivotEvent = Schema.Union([
     predecessorThreadId: Schema.NullOr(ThreadId),
   }),
   event("pivot.retired", { threadId: ThreadId, successorThreadId: ThreadId }),
+  /** The retired Pivot's reply to the handoff request, for its successor. */
+  event("pivot.handoff-recorded", { threadId: ThreadId, text: Schema.String }),
   /** A wake went out, covering the Pivot's pending events through `throughSequence`. */
   event("pivot.woke", {
     threadId: ThreadId,
