@@ -82,7 +82,6 @@ const makeHarness = (
     readonly worktreePath?: string;
     /** What the started process does next: serves a page, exits, or keeps compiling. */
     readonly outcome?: "running" | { readonly exited: string } | "compiling";
-    /** A dev server the checkout already runs. */
     readonly running?: boolean;
   } = {},
 ) =>

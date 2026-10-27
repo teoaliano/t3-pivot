@@ -161,10 +161,6 @@ export class PivotService extends Context.Service<
       caller: ThreadId,
       input: PivotMcpDispatchTeammateInput,
     ) => Result<PivotMcpDispatchTeammateResult>;
-    /**
-     * Dispatches a ship in a fresh worktree with the scout's report in its brief, and ends
-     * the scout.
-     */
     readonly promoteScout: (
       caller: ThreadId,
       input: PivotMcpPromoteScoutInput,
@@ -191,7 +187,6 @@ export class PivotService extends Context.Service<
       caller: ThreadId,
       input: PivotMcpMarkDecisionMootInput,
     ) => Result<PivotMcpDecisionResult>;
-    /** Records the Pivot's review of a `done` teammate's work, beside its evidence. */
     readonly recordVerdict: (
       caller: ThreadId,
       input: PivotMcpRecordVerdictInput,
@@ -200,7 +195,6 @@ export class PivotService extends Context.Service<
       caller: ThreadId,
       input: PivotMcpListTeammatesInput,
     ) => Result<PivotMcpListTeammatesResult>;
-    /** The predecessor's handoff and thread, to read again after a compaction. */
     readonly readHandoff: (
       caller: ThreadId,
       input: PivotMcpReadHandoffInput,
@@ -259,7 +253,6 @@ export class PivotService extends Context.Service<
   }
 >()("t3/pivot/PivotService") {}
 
-/** The files whose state differs between two readings of a checkout, sorted. */
 const checkoutChanges = (
   before: Readonly<Record<string, string>>,
   after: Readonly<Record<string, string>>,
@@ -279,8 +272,6 @@ export const historyLine = (event: PivotEvent): string => {
       return `Dispatched as a ${event.kind} on ${event.branch} from ${event.baseBranch}${event.modelEntry ? `, on teammate model ${event.modelEntry}` : ""}.`;
     case "teammate.promoted":
       return "Promoted from scout to ship.";
-    case "teammate.scout-promoted":
-      return `Ended: ${event.shipThreadId} ships the work its report found.`;
     case "teammate.verdict-recorded":
       return clip(`The Pivot's verdict: ${event.text}`);
     case "teammate.ship-ordered":
@@ -339,7 +330,7 @@ export const historyLine = (event: PivotEvent): string => {
     case "teammate.torn-down":
       return "Torn down.";
     case "teammate.handed-over":
-      return `Ended: ${event.successorThreadId} took over its worktree and branch.`;
+      return `Ended: ${event.successorThreadId} took over its work.`;
     case "decision.opened":
       return clip(`Decision "${event.key}" opened by the ${event.openedBy}: ${event.summary}`);
     case "decision.escalated":
@@ -452,8 +443,6 @@ export const make = Effect.gen(function* () {
             takeover: input.takeover,
           })
           .pipe(Effect.tapError(() => threads.archive(threadId).pipe(Effect.ignore)));
-        // The retired Pivot stays in the inbox while it writes its handoff; the supervisor
-        // asks for it and settles the thread once it is in, or the wait is over.
         return { threadId, predecessorThreadId: active?.threadId ?? null };
       }),
     );
@@ -495,10 +484,6 @@ export const make = Effect.gen(function* () {
       return decisions.toReversed();
     });
 
-  /**
-   * Tells each lead of an approved ship batch to merge its members' branches and ship. The
-   * order is already recorded; a send that fails is logged, and the Pivot can resend it.
-   */
   const sendShipOrders = (decision: PivotDecision) =>
     Effect.forEach(decision.escalation?.shipGroups ?? [], (group) =>
       Effect.gen(function* () {
@@ -663,10 +648,6 @@ export const make = Effect.gen(function* () {
 
   // --- Dispatch ---
 
-  /**
-   * The teammate whose worktree and branch a dispatch takes over: one of the Pivot's ships,
-   * between turns, its worktree still there. Two agents never write in one worktree.
-   */
   const attachTarget = Effect.fn("PivotService.attachTarget")(function* (
     command: string,
     pivot: PivotStore.PivotRow,
@@ -703,10 +684,6 @@ export const make = Effect.gen(function* () {
     return previous;
   });
 
-  /**
-   * Launches a teammate and records it, under the project lock. `promotedFrom` is the scout
-   * whose report it builds on, which ends with it.
-   */
   const launchTeammate = Effect.fn("PivotService.launchTeammate")(function* (
     command: string,
     pivot: PivotStore.PivotRow,
@@ -807,7 +784,6 @@ export const make = Effect.gen(function* () {
             checkoutSnapshot,
           })
           .pipe(Effect.tapError(() => host.discard(launched.threadId).pipe(Effect.ignore)));
-        // The predecessor's record ended with it; its thread goes too, between turns.
         const predecessor = attachedFrom ?? promotedFrom;
         if (predecessor !== null) {
           yield* host.discard(predecessor.threadId).pipe(
@@ -862,7 +838,6 @@ export const make = Effect.gen(function* () {
         return yield* refuse(command, "Promote a scout once its report is recorded.");
       }
       yield* nonEmpty(command, input.spec, "The spec");
-      // The scout's checkout is the user's, so the work starts over in a fresh worktree.
       return yield* launchTeammate(
         command,
         pivot,
@@ -929,10 +904,6 @@ export const make = Effect.gen(function* () {
       return yield* decisionResult("open_decision", opened.event.decisionId);
     });
 
-  /**
-   * A ship batch's escalation as the user approves it: every teammate named once, a ship of
-   * the Pivot's that reported done, and the merge order the leads' branches.
-   */
   const shipBatchEscalation = Effect.fn("PivotService.shipBatchEscalation")(function* (
     command: string,
     pivot: PivotStore.PivotRow,
@@ -1198,7 +1169,6 @@ export const make = Effect.gen(function* () {
         shell.status === "failed" &&
         (shell.latestRunStartedAt === null || shell.latestRunStartedAt === undefined);
       const host = yield* hostOf(command, teammate);
-      // Cleanup may have reclaimed the worktree while it waited; its branch brings it back.
       const reclaimed =
         !launchFailed &&
         teammate.kind === "ship" &&
@@ -1247,10 +1217,6 @@ export const make = Effect.gen(function* () {
       return decision;
     });
 
-  /**
-   * The decision that delivers this ship: one about it, or a ship batch it leads, whose
-   * merge order covers every group.
-   */
   const deliveryDecision = Effect.fn("PivotService.deliveryDecision")(function* (
     command: string,
     pivot: PivotStore.PivotRow,
@@ -1341,7 +1307,6 @@ export const make = Effect.gen(function* () {
     decision: PivotDecision,
   ) =>
     Effect.gen(function* () {
-      // Only ships own branches; a scout reads the project's checkout and has none of its own.
       const teammates = (yield* store.listTeammates({
         pivotThreadId: pivot.threadId,
         includeTornDown: true,
@@ -1528,10 +1493,6 @@ export const make = Effect.gen(function* () {
       };
     });
 
-  /**
-   * The lead of an approved ship batch group this ship is a member of, once the lead's work
-   * landed: its PR merged, or its branch landed in a project with no remote. Null otherwise.
-   */
   const landedGroup = Effect.fn("PivotService.landedGroup")(function* (
     command: string,
     pivot: PivotStore.PivotRow,
@@ -1548,7 +1509,6 @@ export const make = Effect.gen(function* () {
         const lead = yield* store.getTeammate(group.lead);
         if (lead === null) continue;
         if (lead.deliveryMode === "local-only") {
-          // land_teammate records the landing; once the lead is torn down its branch is gone.
           const history = yield* store.teammateHistory({ threadId: lead.threadId, limit: 500 });
           if (history.some((stored) => stored.event.type === "teammate.landed")) return lead;
           const verdict = yield* (yield* hostOf(command, lead)).landed(command, {
@@ -1567,10 +1527,6 @@ export const make = Effect.gen(function* () {
     return null;
   });
 
-  /**
-   * Ends a scout once its report is recorded, or on the user's word without one. It works
-   * in the project's own checkout, so nothing there is removed or reset.
-   */
   const teardownScout = Effect.fn("PivotService.teardownScout")(function* (
     command: string,
     pivot: PivotStore.PivotRow,
@@ -1646,7 +1602,6 @@ export const make = Effect.gen(function* () {
       let discarding = false;
       const group = yield* landedGroup(command, pivot, teammate);
       if (group !== null) {
-        // A squash merge leaves no trace of a member's branch in git, so its group says it landed.
         if (worktreeExists && !(yield* host.worktreeClean(teammate.worktreePath))) {
           return yield* refuse(command, "Not torn down: its worktree has uncommitted changes.");
         }
@@ -1709,8 +1664,6 @@ export const make = Effect.gen(function* () {
 
   // --- Teammate tools ---
 
-  // A ship waiting on review holds no dev server; "start it" brings one back on the same port.
-  // A scout's checkout is the user's own, so its servers are not the scout's to stop.
   const stopServersAtDone = (
     status: PivotMcpReportStatusInput["status"],
     teammate: { readonly kind: string; readonly worktreePath: string },
@@ -1740,12 +1693,12 @@ export const make = Effect.gen(function* () {
           );
         }
       }
-      // Until it is told to ship, `done` is committed work waiting for review: no push, no PR.
       if (
         input.status === "done" &&
         teammate.kind === "ship" &&
         teammate.deliveryMode === "direct-pr" &&
-        teammate.shipOrderedAt != null
+        calling.type === "local" &&
+        calling.teammate.shipOrderedAt != null
       ) {
         const link = shell?.pullRequests?.find(
           (candidate) => candidate.source !== "stack-dismissed",
@@ -1787,7 +1740,6 @@ export const make = Effect.gen(function* () {
             status: input.status,
             summary: input.summary,
             until: input.until ?? null,
-            ...(input.evidence === undefined ? {} : { evidence: input.evidence }),
             runId: shell?.latestRunId ?? null,
             decisionKey: input.decisionKey ?? null,
             clearedDecision:
@@ -1842,7 +1794,6 @@ export const make = Effect.gen(function* () {
         return { recorded: true, checkoutChanges: [] };
       }
       const teammate = calling.teammate;
-      // A scout reads the user's checkout; whatever changed there since it started is named.
       const changes =
         teammate.kind === "scout" && teammate.checkoutSnapshot !== null
           ? checkoutChanges(

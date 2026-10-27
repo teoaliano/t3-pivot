@@ -69,64 +69,47 @@ export const make = Effect.gen(function* () {
         const deliveryMode = (yield* git.hasRemote(project.workspaceRoot))
           ? ("direct-pr" as const)
           : ("local-only" as const);
-        if (input.attach !== undefined) {
-          const { worktreePath, branch, baseBranch } = input.attach;
-          const brief = renderBrief(yield* text(BRIEF_TEXTS.brief), {
+        const briefFor = Effect.fn("LocalTeammateHost.briefFor")(function* (checkout: {
+          readonly branch: string;
+          readonly baseBranch: string;
+          readonly worktreePath: string;
+        }) {
+          return renderBrief(yield* text(BRIEF_TEXTS.brief), {
             title: input.title,
             kind: input.kind,
             intent: input.intent,
             spec: input.spec,
-            branch,
-            baseBranch,
-            worktreePath,
+            ...checkout,
             definitionOfDone: yield* text(
               definitionOfDoneText(input.kind, deliveryMode, input.shipDirectly === true),
             ),
           });
+        });
+        const existing =
+          input.attach ??
+          (input.kind === "scout"
+            ? yield* git.currentBranch(project.workspaceRoot).pipe(
+                Effect.map((branch) => ({
+                  branch,
+                  baseBranch: branch,
+                  worktreePath: project.workspaceRoot,
+                })),
+              )
+            : null);
+        if (existing !== null) {
+          const brief = yield* briefFor(existing);
           const threadId = yield* threads.createTeammateThread({
             projectId: input.projectId,
             title: input.title,
-            branch,
-            worktreePath,
+            branch: input.kind === "scout" ? null : existing.branch,
+            worktreePath: input.kind === "scout" ? null : existing.worktreePath,
             modelSelection: input.modelSelection,
           });
           return {
             threadId,
             runId: null,
             start: threads.request({ threadId, senderThreadId: input.pivotThreadId, text: brief }),
-            branch,
-            baseBranch,
-            worktreePath,
-            deliveryMode,
-          };
-        }
-        if (input.kind === "scout") {
-          // A scout reads the user's own checkout as it stands; it has no worktree or branch.
-          const branch = yield* git.currentBranch(project.workspaceRoot);
-          const brief = renderBrief(yield* text(BRIEF_TEXTS.brief), {
-            title: input.title,
-            kind: input.kind,
-            intent: input.intent,
-            spec: input.spec,
-            branch,
-            baseBranch: branch,
-            worktreePath: project.workspaceRoot,
-            definitionOfDone: yield* text(definitionOfDoneText(input.kind, deliveryMode)),
-          });
-          const threadId = yield* threads.createTeammateThread({
-            projectId: input.projectId,
-            title: input.title,
-            branch: null,
-            worktreePath: null,
-            modelSelection: input.modelSelection,
-          });
-          return {
-            threadId,
-            runId: null,
-            start: threads.request({ threadId, senderThreadId: input.pivotThreadId, text: brief }),
-            branch,
-            baseBranch: branch,
-            worktreePath: project.workspaceRoot,
+            ...existing,
             deliveryMode,
           };
         }
@@ -146,18 +129,7 @@ export const make = Effect.gen(function* () {
           branch = uniqueBranch(base, (candidate) => taken.has(candidate));
         }
         const worktreePath = worktreeFor(branch);
-        const brief = renderBrief(yield* text(BRIEF_TEXTS.brief), {
-          title: input.title,
-          kind: input.kind,
-          intent: input.intent,
-          spec: input.spec,
-          branch,
-          baseBranch,
-          worktreePath,
-          definitionOfDone: yield* text(
-            definitionOfDoneText(input.kind, deliveryMode, input.shipDirectly === true),
-          ),
-        });
+        const brief = yield* briefFor({ branch, baseBranch, worktreePath });
         const launched = yield* threads.launchTeammate({
           projectId: input.projectId,
           pivotThreadId: input.pivotThreadId,

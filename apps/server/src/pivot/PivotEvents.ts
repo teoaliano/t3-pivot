@@ -45,7 +45,6 @@ export const PivotEvent = Schema.Union([
     predecessorThreadId: Schema.NullOr(ThreadId),
   }),
   event("pivot.retired", { threadId: ThreadId, successorThreadId: ThreadId }),
-  /** The retired Pivot's reply to the handoff request, for its successor. */
   event("pivot.handoff-recorded", { threadId: ThreadId, text: Schema.String }),
   /** A wake went out, covering the Pivot's pending events through `throughSequence`. */
   event("pivot.woke", {
@@ -69,19 +68,10 @@ export const PivotEvent = Schema.Union([
     spec: Schema.String,
     /** The teammate model it was dispatched on; absent on events from before entries. */
     modelEntry: Schema.optional(Schema.NullOr(Schema.String)),
-    /** For a scout: the project checkout's changed files with fingerprints, as it started. */
     checkoutSnapshot: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   }),
-  /** An older release promoted the scout in place. */
   event("teammate.promoted", { threadId: ThreadId, spec: Schema.String }),
-  /** A ship was dispatched from the scout's report, and the scout ended. */
-  event("teammate.scout-promoted", { threadId: ThreadId, shipThreadId: ThreadId }),
-  /** The Pivot reviewed the teammate's `done`. */
   event("teammate.verdict-recorded", { threadId: ThreadId, text: Schema.String }),
-  /**
-   * The teammate was told to push and open its PR: at dispatch when the user said to ship
-   * directly (no decision), or by the approved ship batch `decisionId`.
-   */
   event("teammate.ship-ordered", {
     threadId: ThreadId,
     decisionId: Schema.NullOr(PivotDecisionId),
@@ -91,7 +81,6 @@ export const PivotEvent = Schema.Union([
   event("teammate.scout-report-recorded", {
     threadId: ThreadId,
     report: Schema.String,
-    /** Files in the project's checkout that changed while the scout ran. */
     checkoutChanges: Schema.optional(Schema.Array(Schema.String)),
   }),
   event("teammate.resume-changed", {
@@ -135,7 +124,6 @@ export const PivotEvent = Schema.Union([
   event("teammate.merge-requested", { threadId: ThreadId, url: Schema.NullOr(Schema.String) }),
   event("teammate.landed", { threadId: ThreadId, head: Schema.String }),
   event("teammate.torn-down", { threadId: ThreadId }),
-  /** Another teammate attached to its worktree and branch, which it ended on and left behind. */
   event("teammate.handed-over", { threadId: ThreadId, successorThreadId: ThreadId }),
   event("decision.opened", {
     decisionId: PivotDecisionId,

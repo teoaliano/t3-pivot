@@ -37,7 +37,7 @@ you write yourself, pass it in the command, for example `vite --port $T3CODE_MAN
 
 ## When a dev server stops
 
-A dev server nobody has used for 20 minutes stops. A visible preview and an agent working in
+A dev server nobody has used for 30 minutes stops. A visible preview and an agent working in
 the checkout both count as use. Pin a server to keep it running. A stopped server stays listed so
 you can start it again. Nothing restarts it for you, including a pinned server that exits on its
 own.
@@ -60,8 +60,7 @@ to a fresh block.
 Agents can start the checkout's dev server with the `preview_start_server` tool. They get the same
 port and the same idle rule. The tool waits up to 30 seconds for the server to serve a page, and
 tells the agent if the server exited instead, so an agent does not report a server that never
-came up. An agent stops the server with `preview_stop_server` once it has what it needed, and the
-checkout keeps its port for the next start.
+came up.
 
 ## Open the preview automatically
 

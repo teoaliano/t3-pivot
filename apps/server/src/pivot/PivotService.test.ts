@@ -118,7 +118,6 @@ describe("PivotService.create", () => {
       assert.strictEqual(second.predecessorThreadId, first.threadId);
       assert.isNotNull((yield* store.getPivot(first.threadId))?.retiredAt);
       assert.strictEqual((yield* store.getActivePivot(projectId))?.threadId, second.threadId);
-      // The supervisor settles it once its handoff is in, or its wait is over.
       assert.isFalse(fake.threads.get(first.threadId)?.settled);
       assert.isFalse(fake.threads.get(second.threadId)?.settled);
     }).pipe(Effect.provide(layer));

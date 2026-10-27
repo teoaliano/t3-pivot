@@ -73,16 +73,13 @@ export interface FakeV2 {
   readonly pullRequests: Map<string, Partial<PullRequestDetail>>;
   /** Merges asked of the forge, with the head they were pinned to. */
   readonly merges: Array<{ readonly url: string; readonly expectedHeadSha: string }>;
-  /** Checkouts whose processes stopped with the checkout going away: port block released. */
   readonly stoppedCheckouts: Array<string>;
-  /** Checkouts whose dev servers stopped while the checkout stays: port block kept. */
   readonly stoppedServers: Array<string>;
   /** Setup script outcomes by thread; none when unset. */
   readonly setupOutcomes: Map<string, SetupScriptOutcome>;
   /** Threads whose held queue was released. */
   readonly releasedQueues: Array<string>;
   readonly removedWorktrees: Array<{ readonly worktreePath: string; readonly force: boolean }>;
-  /** What a thread's agent replied to a request, once its run ended; no entry while it runs. */
   readonly replies: Map<string, string | null>;
 }
 
@@ -277,7 +274,6 @@ export const layer = (fake: FakeV2) =>
         Effect.map(thread(fake, threadId, "request"), (found) => {
           found.messages.push({ senderThreadId, text, mode: "queue" });
           const runId = RunId.make(`run-request-${threadId}-${found.messages.length}`);
-          // A first message starts the thread's first run.
           if (!fake.starts.has(threadId)) {
             fake.starts.set(threadId, { type: "started", runId });
             found.shell = { ...found.shell, latestRunId: runId };

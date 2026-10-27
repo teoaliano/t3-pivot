@@ -1,10 +1,3 @@
-<!--
-The one message a retired Pivot gets on takeover. Its reply to this turn is recorded as its
-handoff and opens its successor's first wake. The server strips this comment. Placeholder:
-  successorThreadId  the new Pivot's thread
-Keep each paragraph and list item on one line: chat renders a single newline as a line break.
--->
-
 # Hand over to your successor
 
 The user started a new Pivot, in thread {{successorThreadId}}, and it takes over your work. You are retired: your Pivot tools are gone, so change nothing now. Your reply to this message is your handoff, recorded exactly as you write it, so reply with the handoff and nothing else.

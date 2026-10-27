@@ -44,7 +44,6 @@ import { composeWake, type WakeDigest, type WakeTeammate } from "./pivotWake.ts"
 
 /** A teammate still resuming this long after the supervisor started did not survive the restart. */
 export const RESUME_GRACE_MS = 5 * 60 * 1000;
-/** How long a takeover waits for the retired Pivot's handoff before going on without it. */
 const HANDOFF_WAIT_MS = 2 * 60 * 1000;
 /** A running teammate with no activity this long wakes its Pivot, once per run. */
 export const STUCK_AFTER_MS = 30 * 60 * 1000;
@@ -136,8 +135,6 @@ export const make = Effect.gen(function* () {
   const knownPivots = new Set<string>();
   // The first wake after a server start, and a takeover's first, tell the whole state.
   const digests = new Map<string, WakeDigest>();
-  // Takeovers whose successor waits for the retired Pivot's handoff, by successor. A restart
-  // forgets them: the successor then opens with the restart digest.
   const handoffs = new Map<
     ThreadId,
     { readonly predecessor: ThreadId; readonly runId: RunId; readonly askedAtMs: number }
@@ -335,14 +332,9 @@ export const make = Effect.gen(function* () {
         branch: row.branch,
         worktreePath: row.worktreePath,
         goal: row.intent[0] ?? null,
-        verdict: row.verdict?.text ?? null,
       } satisfies WakeTeammate;
     });
 
-  /**
-   * The successor opens with the retired Pivot's handoff, or a note that it has none, and the
-   * retired thread settles now that its work moved on.
-   */
   const settleHandoff = Effect.fn("PivotSupervisor.settleHandoff")(function* (
     successor: ThreadId,
     predecessor: ThreadId,
@@ -372,11 +364,9 @@ export const make = Effect.gen(function* () {
     handoffs.set(successor, { predecessor, runId, askedAtMs });
   });
 
-  /** Takes each handoff whose reply came, and gives up on each whose wait is over. */
   const advanceHandoffs = Effect.gen(function* () {
     // oxlint-disable-next-line unicorn/no-useless-spread -- settling deletes from the map mid-loop
     for (const [successor, pending] of [...handoffs]) {
-      // The deadline is checked first, so a reply only seen after it is never taken.
       if ((yield* Clock.currentTimeMillis) - pending.askedAtMs >= HANDOFF_WAIT_MS) {
         yield* settleHandoff(successor, pending.predecessor, null);
         continue;
@@ -390,7 +380,6 @@ export const make = Effect.gen(function* () {
 
   const wakePivot = (pivot: PivotStore.PivotRow) =>
     Effect.gen(function* () {
-      // A takeover's first wake carries the handoff, so it waits for it.
       if (handoffs.has(pivot.threadId)) return;
       const digest = digests.get(pivot.threadId) ?? null;
       const fresh = yield* store.pendingWake(pivot.threadId);

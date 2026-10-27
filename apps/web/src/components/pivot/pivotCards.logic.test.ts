@@ -127,7 +127,6 @@ describe("teammate cards", () => {
   });
 
   it("keeps dispatch order and folds finished teammates behind the chip", () => {
-    // Done, and already told to ship: nothing waits on the user.
     const done = teammate({
       threadId: ThreadId.make("done"),
       report: report("done", "2026-10-06T11:00:00.000Z"),
@@ -167,14 +166,12 @@ describe("teammate cards", () => {
     });
     expect(teammateCards([ready], () => shell({ status: "idle" })).live).toHaveLength(1);
 
-    // Told to ship, it is no longer waiting for review.
     const shipping = teammateCard(
       teammate({ ...ready, shipOrderedAt: "2026-10-06T12:00:00.000Z" }),
       shell({ status: "idle" }),
     );
     expect(shipping.review).toBeNull();
     expect(shipping.label).toBe("Done");
-    // A scout's done is its report, not work to review.
     expect(
       teammateCard(teammate({ ...ready, kind: "scout" }), shell({ status: "idle" })).review,
     ).toBeNull();

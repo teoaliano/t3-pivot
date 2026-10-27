@@ -310,7 +310,6 @@ export const make = Effect.gen(function* () {
       if (input.baseBranch !== undefined && !isBranchName(input.baseBranch)) {
         return yield* refuse(command, "The base branch is not a valid branch name.");
       }
-      // A scout reads the project's own checkout, which on a host belongs to someone else.
       if (input.kind === "scout") {
         return yield* refuse(command, "Scouts run on the Pivot's own environment.");
       }
@@ -359,7 +358,6 @@ export const make = Effect.gen(function* () {
                   spec: input.spec,
                   baseBranch: input.baseBranch,
                   modelSelection: input.modelSelection,
-                  shipDirectly: input.shipDirectly,
                 });
                 const { runId } = launched;
                 const recorded = yield* Effect.gen(function* () {
@@ -380,7 +378,6 @@ export const make = Effect.gen(function* () {
                       worktreePath: launched.worktreePath,
                       deliveryMode: launched.deliveryMode,
                       firstRunId: runId,
-                      shipDirectly: input.shipDirectly === true,
                     },
                     { maxLive: PIVOT_HOST_MAX_LIVE_TEAMMATES },
                   );
@@ -503,7 +500,6 @@ export const make = Effect.gen(function* () {
         // The host cannot tell whether the home merged the work, so git decides: an unmerged
         // branch stays, and discarded work keeps its branch.
         branchDisposal: input.force ? "keep" : "safe",
-        // Hosted scouts, from before hosts refused them, have worktrees of their own.
         inMainCheckout: false,
       });
       yield* store.markTornDown(teammate.threadId);

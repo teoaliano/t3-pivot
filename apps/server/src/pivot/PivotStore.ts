@@ -113,13 +113,9 @@ export type PivotCommand =
       readonly intent: string;
       readonly spec: string;
       readonly modelEntry: string | null;
-      /** The user said to ship it directly, so it is told to ship from the start. */
       readonly shipDirectly: boolean;
-      /** The teammate whose worktree and branch it took over; that one ends. */
       readonly attachedFrom?: ThreadId | null | undefined;
-      /** For a scout: the project checkout's changed files as it started. */
       readonly checkoutSnapshot?: Readonly<Record<string, string>> | null | undefined;
-      /** The scout whose report it ships; that one ends. */
       readonly promotedFrom?: ThreadId | null | undefined;
     }
   | {
@@ -140,7 +136,6 @@ export type PivotCommand =
       readonly status: TeammateReportedStatus;
       readonly summary: string;
       readonly until: IsoDateTime | null;
-      /** Only for `done`. */
       readonly evidence: TeammateEvidence | null;
       readonly runId: RunId | null;
       /** Opens or names the decision a `needs-decision` or `blocked` report raises. */
@@ -152,7 +147,6 @@ export type PivotCommand =
       readonly type: "teammate.record-scout-report";
       readonly threadId: ThreadId;
       readonly report: string;
-      /** Files in the project's checkout that changed while it ran; any wake the Pivot. */
       readonly checkoutChanges?: ReadonlyArray<string> | undefined;
     }
   | {
@@ -260,6 +254,7 @@ export type PivotCommand =
 
 /** A Pivot with what only the server needs. */
 export interface PivotRow extends PivotRecord {
+  readonly handoff: string | null;
   readonly homePath: string;
   /** The Pivot-log sequence its last wake covered. */
   readonly wakeCursor: number;
@@ -278,7 +273,6 @@ export interface TeammateRow extends TeammateRecord {
   /** The environment that hosts the teammate; null is the Pivot's own. */
   readonly environmentId: EnvironmentId | null;
   readonly scoutReport: string | null;
-  /** For a scout: the project checkout's changed files as it started. */
   readonly checkoutSnapshot: Readonly<Record<string, string>> | null;
   readonly observedStatus: TeammateStatus | null;
   readonly observedRunId: RunId | null;
@@ -300,7 +294,6 @@ export class PivotStore extends Context.Service<
       projectId: ProjectId,
     ) => Effect.Effect<PivotRow | null, PivotStoreError>;
     readonly listActivePivots: Effect.Effect<ReadonlyArray<PivotRow>, PivotStoreError>;
-    /** The retired Pivot this one took over from, if any. */
     readonly getPredecessor: (
       threadId: ThreadId,
     ) => Effect.Effect<PivotRow | null, PivotStoreError>;
@@ -516,7 +509,7 @@ export const pivotRecord = (row: PivotRow): PivotRecord => ({
   createdAt: row.createdAt,
   retiredAt: row.retiredAt,
   successorThreadId: row.successorThreadId,
-  handoff: row.handoff ?? null,
+  hasHandoff: row.handoff !== null,
   openDecisionCount: row.openDecisionCount,
   escalatedDecisionCount: row.escalatedDecisionCount,
 });
@@ -778,9 +771,9 @@ export const make = Effect.gen(function* () {
             return yield* refuse("A ship is promoted from a scout.");
           }
           emit({
-            type: "teammate.scout-promoted",
+            type: "teammate.handed-over",
             threadId: scout.threadId,
-            shipThreadId: command.threadId,
+            successorThreadId: command.threadId,
           });
         }
         break;
@@ -1094,7 +1087,6 @@ export const make = Effect.gen(function* () {
           },
           true,
         );
-        // An approved ship batch tells each lead to ship, in the same commit as the approval.
         if (asksApproval && command.approved === true) {
           for (const group of decision.escalation?.shipGroups ?? []) {
             const lead = yield* readTeammate(group.lead);
@@ -1225,7 +1217,6 @@ export const make = Effect.gen(function* () {
         return;
       }
       case "teammate.reported":
-        // A verdict reviews one `done`; whatever the teammate reports next makes it stale.
         yield* sql`
           UPDATE pivot_teammates SET report_json = ${encodeReport(event.report)}, verdict_json = NULL
           WHERE thread_id = ${event.threadId}
@@ -1305,7 +1296,6 @@ export const make = Effect.gen(function* () {
       case "teammate.landed":
         return;
       case "teammate.handed-over":
-      case "teammate.scout-promoted":
       case "teammate.torn-down":
         yield* sql`
           UPDATE pivot_teammates SET torn_down_at = ${at}, recheck_at = NULL

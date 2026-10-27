@@ -1,11 +1,3 @@
-<!--
-The message a ship batch's lead gets once the user approves the batch. The server strips
-this comment. Placeholders, written in double braces in the body:
-  members           a list of the branches that merge into the lead's, one per line, or a line saying there are none
-  definitionOfDone  the ship definition of done for the project's delivery mode
-Keep each paragraph and list item on one line: chat renders a single newline as a line break.
--->
-
 # Ship it
 
 The user approved shipping your work. This message supersedes the review-first definition of done in your brief. Everything else carries over.

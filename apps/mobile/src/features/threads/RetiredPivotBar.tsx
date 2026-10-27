@@ -5,7 +5,6 @@ import { Button } from "../../components/ui/Button";
 
 /** Replaces the composer on a retired Pivot, which is read-only history. */
 export function RetiredPivotBar(props: {
-  /** It answered the handoff request: its last message is what its successor started from. */
   readonly hasHandoff: boolean;
   readonly onOpenSuccessor: (() => void) | null;
 }) {

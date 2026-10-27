@@ -1,11 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 
-/**
- * Inline tasks are gone. Each one an older release stored becomes an ended ship, in its
- * record and in the events that dispatched it, so every stored event still decodes. Its
- * branch stays; the shared workspace falls under the ordinary worktree cleanup rules.
- */
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   yield* sql`

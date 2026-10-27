@@ -46,9 +46,7 @@ export interface LaunchTeammateInput {
   readonly spec: string;
   readonly baseBranch?: string | undefined;
   readonly modelSelection: ModelSelection;
-  /** The user said to ship it directly: push and open the PR at `done`, without review. */
   readonly shipDirectly?: boolean | undefined;
-  /** Start in this existing worktree and branch instead of a fresh one, with no setup. */
   readonly attach?:
     | {
         readonly worktreePath: string;
@@ -61,12 +59,8 @@ export interface LaunchTeammateInput {
 /** A launched teammate: V2 accepted it, and the worktree is still being prepared. */
 export interface LaunchedTeammate {
   readonly threadId: ThreadId;
-  /** The first run. Null when the launch created none, or `start` has yet to send the brief. */
+  /** The first run. Null when the launch created none. */
   readonly runId: RunId | null;
-  /**
-   * For a thread made without a message: sends its brief once the caller recorded the
-   * teammate, so its first run already finds the record, and with it the write scope.
-   */
   readonly start?: Result<RunId | null> | undefined;
   readonly branch: string;
   readonly baseBranch: string;
@@ -111,10 +105,6 @@ export class TeammateHost extends Context.Service<
       readonly attachments?: ReadonlyArray<ChatImageAttachment> | undefined;
     }) => Result<void>;
     readonly stop: (threadId: ThreadId) => Result<void>;
-    /**
-     * Stops the dev servers the teammate's checkout runs, keeping its port block. Its
-     * agent's own processes are untouched, so it can run while the agent is mid-turn.
-     */
     readonly stopServers: (worktreePath: string) => Effect.Effect<void>;
     /** Stops what the teammate's agent scope still runs, once its work is landed or merged. */
     readonly stopScope: (threadId: ThreadId) => Effect.Effect<void>;
@@ -142,10 +132,6 @@ export class TeammateHost extends Context.Service<
       | { readonly type: "refused"; readonly reason: string }
     >;
     readonly worktreeExists: (worktreePath: string) => Effect.Effect<boolean>;
-    /**
-     * Recreates a ship's worktree that cleanup reclaimed, at its path and on its branch,
-     * without the setup script. Refuses a branch that is gone.
-     */
     readonly recreateWorktree: (command: string, input: TeammateCheckout) => Result<void>;
     /** Whether the worktree has no uncommitted or untracked changes. */
     readonly worktreeClean: (worktreePath: string) => Result<boolean>;
@@ -166,10 +152,6 @@ export class TeammateHost extends Context.Service<
          * git refuse an unmerged one, `keep` leaves it.
          */
         readonly branchDisposal: { readonly tip: string } | "safe" | "keep";
-        /**
-         * A scout works in the project's own checkout, which is the user's: only its session
-         * stops and its thread archives. No process, file, worktree or branch is touched.
-         */
         readonly inMainCheckout: boolean;
       },
     ) => Result<void>;

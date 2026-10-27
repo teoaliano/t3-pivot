@@ -874,7 +874,6 @@ describe("hosted teammate tools", () => {
       const host = yield* PivotHost.PivotHost;
       const pivots = yield* PivotService.PivotService;
       const home = yield* newHome();
-      // A scout reads the project's own checkout, which on a host is someone else's machine.
       const refused = yield* host
         .launchTeammate(home.caller, launchInput(home, { kind: "scout" }))
         .pipe(Effect.flip);
@@ -895,7 +894,6 @@ describe("hosted teammate tools", () => {
         worktreePath: "/worktrees/why-is-it-slow",
         deliveryMode: "local-only",
         firstRunId: null,
-        shipDirectly: false,
       });
       const ship = yield* launch(home, { dispatchId: "dispatch-2" });
 
@@ -1563,40 +1561,27 @@ describe("pull requests of a hosted teammate", () => {
 });
 
 describe("hosted `done` when the project delivers pull requests", () => {
-  it.effect(
-    "needs a linked PR on the right branch, and the branch pushed, when shipping directly",
-    () => {
-      const { fake, workspaceRoot, layer } = hostSetup({ remote: true });
-      return Effect.gen(function* () {
-        const pivots = yield* PivotService.PivotService;
-        const home = yield* newHome();
-        const ship = yield* launch(home, { shipDirectly: true });
-        assert.strictEqual(ship.deliveryMode, "direct-pr");
-        const worktree = attachWorktree(fake, workspaceRoot, ship.threadId, ship.branch);
-        const done = {
-          status: "done",
-          summary: "Fixed.",
-          evidence: { text: "Tests pass." },
-        } as const;
-        const refusal = () => pivots.reportStatus(ship.threadId, done).pipe(Effect.flip);
+  it.effect("is committed work with evidence, with nothing pushed and no PR", () => {
+    const { fake, workspaceRoot, layer } = hostSetup({ remote: true });
+    return Effect.gen(function* () {
+      const pivots = yield* PivotService.PivotService;
+      const home = yield* newHome();
+      const ship = yield* launch(home);
+      assert.strictEqual(ship.deliveryMode, "direct-pr");
+      attachWorktree(fake, workspaceRoot, ship.threadId, ship.branch);
 
-        assert.include((yield* refusal()).message, "`done` needs a linked PR.");
-
-        const url = "https://github.com/acme/app/pull/7";
-        const thread = fake.threads.get(ship.threadId)!;
-        thread.shell = {
-          pullRequests: [{ url, snapshot: { headBranch: "pivot/somebody-else" } }],
-        } as never;
-        assert.include((yield* refusal()).message, "not your branch");
-
-        thread.shell = { pullRequests: [{ url, snapshot: { headBranch: ship.branch } }] } as never;
-        assert.include((yield* refusal()).message, "is not pushed");
-
-        sh(worktree, `git push -q origin ${ship.branch}`);
-        assert.strictEqual((yield* pivots.reportStatus(ship.threadId, done)).status, "done");
-      }).pipe(Effect.provide(layer));
-    },
-  );
+      const bare = yield* pivots
+        .reportStatus(ship.threadId, { status: "done", summary: "Fixed." })
+        .pipe(Effect.flip);
+      assert.include(bare.message, "evidence");
+      const done = yield* pivots.reportStatus(ship.threadId, {
+        status: "done",
+        summary: "Fixed.",
+        evidence: { text: "Tests pass." },
+      });
+      assert.strictEqual(done.status, "done");
+    }).pipe(Effect.provide(layer));
+  });
 });
 
 describe("what a failure tells the home", () => {
@@ -1713,7 +1698,6 @@ describe("hosted teammates after a host restart", () => {
       worktreePath: `/worktrees/${threadId}`,
       deliveryMode: "local-only" as const,
       firstRunId: null,
-      shipDirectly: false,
     });
     return Effect.gen(function* () {
       yield* Effect.gen(function* () {

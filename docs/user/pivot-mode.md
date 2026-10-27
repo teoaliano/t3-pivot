@@ -1,51 +1,34 @@
 # Pivot mode
 
 A **Pivot** is a thread you talk to instead of juggling threads yourself. You tell it what you
-want done. It dispatches **teammates**, supervises them, reviews their work, answers what it
-can, and brings you only the calls that need you and the work that is ready to try. Pivot mode needs the project to be a git repository.
+want done. It dispatches **teammates**, each an agent in its own worktree on its own branch,
+supervises them, answers what it can, and brings you only the calls that need you and the
+work that is ready for review. Pivot mode needs the project to be a git repository.
 
 ## Start a Pivot
 
 Choose **New Pivot** from the sidebar header, the command palette or its shortcut, then pick the
 project. The Pivot runs on the Pivot model set in Settings. A project has one active Pivot at a
 time. Starting a new one while one is active asks first, telling you how many live teammates and
-open decisions the new Pivot takes over. The old Pivot writes a short handoff of what only its
-conversation held, such as plans not yet started and what you were waiting on, and the new one
-starts from it. If the old one doesn't answer within about two minutes, the new one starts
-without it and tells you. The old Pivot then stays as read-only history. Do this when a
+open decisions the new Pivot takes over. The old Pivot stays as read-only history, and the new
+one can read its conversation, so plans you only mentioned there are not lost. Do this when a
 long Pivot conversation gets unwieldy. You don't need to for automatic compaction: the Pivot keeps going
 through it.
 
 ## Working with it
 
-Describe the work in plain words. A single task goes out straight away. Work that needs more
-than one teammate starts with a plan in the Pivot's chat: the pieces, where each runs, what
-runs in parallel and how many PRs. Nothing starts until you agree to it there. Teammates run
-without stopping for permission prompts, on the project's default model unless you name one.
+Describe the work in plain words. The Pivot dispatches a teammate for each independent piece,
+using the project's default model unless you name one. Teammates run without stopping for
+permission prompts. A **scout** investigates and leaves a report; a **ship** delivers a change.
 
-A **ship** delivers a change in a worktree of its own, or in another ship's worktree when it
-builds the next piece of the same PR. A **scout** investigates and leaves a report. It reads
-your project's checkout without changing it, so it needs no worktree or install; if a file
-there changes anyway while it runs, the Pivot tells you.
-
-Say what you want to see when the work is done, such as "send me screenshots", "I'll try it
-in a dev server" or "check it in the browser and report back", and the teammate brings that.
-Without a hint, the Pivot picks by the kind of change and tells you which. A finished ship
-commits its work and waits: nothing is pushed and no PR exists yet. The Pivot reviews it, and
-the teammate's card in the Pivot view shows **Ready for review** with the Pivot's verdict and
-the evidence, plus **Try it** when a dev server is part of it. Send feedback through the Pivot,
-and the same teammate acts on it. Say "ship it directly" when you dispatch a task you trust,
-and it opens its PR as soon as it is done instead.
-
-When you and the Pivot agree the work is finished, it proposes one **ship batch**: the PRs to
-open, which teammates' work goes into each, and the order they merge in. Approve it once. Each
-PR's lead teammate merges the others' work into its branch, reruns the tests and opens the PR,
-and the Pivot merges the PRs in order as their checks pass, on GitHub and GitLab, pinned to the
-commit it checked. A PR with red checks holds the ones after it. A conflict after an earlier
-merge is fixed under the same approval, unless fixing it changes what the code does, in which
-case the Pivot asks you. On other forges you merge by hand. In a project with no remote, each
-branch lands on your default branch by fast-forward, in the same order. The Pivot never edits
-your project itself, and nothing merges without your approval.
+The Pivot updates you as teammates finish, fail, block or need a call. It never edits your
+project itself, and nothing merges without your approval. In a project with a remote, a
+teammate's work counts as done only once its pull request exists with its latest commit pushed.
+The Pivot gives you the full PR link. When you approve, it merges the PR on GitHub and GitLab,
+pinned to the commit it checked. Red checks block the merge unless you waive a specific check by
+name. When several PRs are open, the approval shows the order they merge in, and the Pivot
+refuses to merge a PR before the work it builds on. On other forges you merge by hand. In a project with no remote, a ready branch lands on
+your default branch by fast-forward.
 
 Calls that need you appear above the Pivot's composer until you answer. A merge, a landing or
 discarding work asks for your approval: answer with **Accept**, adding a note if you want to waive
@@ -86,7 +69,14 @@ A Pivot and its teammates carry on by themselves after T3 restarts, whatever the
 continue-after-update setting says. The Pivot's first update tells you which teammates resumed
 and which did not.
 
-## How many run at once
+## Small changes run inline
+
+For a small, self-contained change, such as a typo, a one-file fix or a docs edit, the Pivot
+runs an inline task instead of a full teammate. It works in the Pivot's workspace, a copy of
+the project the Pivot sets up once and reuses, so it starts without a new worktree, setup
+run or dev server, and runs only targeted checks. It still delivers a PR for your approval,
+and its card is marked **Inline**. One runs at a time per project. When it isn't clear
+whether a change is small enough, the Pivot asks you.
 
 The Pivot runs at most a few teammates at once and queues the rest. Set the number in
 **Settings → General → Teammates at once**; left on Auto, it follows your machine's memory on

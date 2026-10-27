@@ -256,7 +256,6 @@ it.layer(layer)("Pivot and teammate permissions", (it) => {
   it.effect("keeps a fork of a scout read-only in the project's checkout", () =>
     Effect.gen(function* () {
       const policy = yield* RuntimePolicy.RuntimePolicyV2;
-      // A fork copies its source thread, checkout included, and keeps its lineage root.
       const fork: OrchestrationV2AppThread = {
         ...thread(ThreadId.make("scout-fork"), null),
         lineage: {

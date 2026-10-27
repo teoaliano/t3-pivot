@@ -691,7 +691,6 @@ describe("PivotSupervisor", () => {
         assert.include(request!.text, "# Hand over to your successor");
         assert.include(request!.text, successor);
         assert.notInclude(request!.text, "{{");
-        // The successor waits for the handoff, and the retired Pivot is not settled yet.
         assert.deepStrictEqual(wakesFor(fake, successor), []);
         assert.isFalse(fake.threads.get(pivot)!.settled);
 
@@ -758,7 +757,6 @@ describe("PivotSupervisor", () => {
         const successor = (yield* pivots.create({ projectId, modelSelection, takeover: true }))
           .threadId;
         yield* tick;
-        // Nothing ticked in between, so the first look at the reply comes after the wait.
         yield* TestClock.adjust("3 minutes");
         fake.replies.set(pivot, "Late.");
         yield* tick;
@@ -788,7 +786,6 @@ describe("PivotSupervisor", () => {
         assert.include(digest!.text, '"Fix the login bug"');
         assert.isTrue(fake.threads.get(pivot)!.settled);
 
-        // A reply that comes after the wait is over is not taken as the handoff.
         fake.replies.set(pivot, "Too late.");
         yield* TestClock.adjust("5 minutes");
         yield* tick;

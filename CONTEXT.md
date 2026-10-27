@@ -47,35 +47,28 @@ _Avoid_: using it for the Pivot view (the layout) or for a Pivot (the thread)
 A thread whose agent supervises teammates. The user talks to it, and it dispatches and
 supervises its own teammates. A thread is a Pivot from creation and stays one. A project
 has at most one active Pivot. Creating a new one moves the active Pivot's live teammates
-and open decisions to it, and the old one is **retired**: read-only history, after it
-writes its **handoff**.
+and open decisions to it, and the old one is **retired**: read-only history.
 _Avoid_: first mate (firstmate's word for the same role), supervisor, orchestrator,
 settled (T3's thread lifecycle state, not a retired Pivot). Do not confuse it with T3
 Pivot, the name of this fork.
 
 **Teammate**:
-A thread a Pivot dispatched and supervises. It belongs to one Pivot at a time and stays a
-teammate for good. A teammate is either a **ship**, which delivers a change from its own
-worktree, or a **scout**, which reads the project's checkout and leaves a report. Promoting
-a scout dispatches a new ship from its report.
+A thread a Pivot dispatched and supervises, working in its own worktree. It belongs to one
+Pivot at a time and stays a teammate for good. A teammate is either a **ship** (delivers
+a change) or a **scout** (investigates and leaves a report), and a scout can be promoted
+to a ship in place.
 _Avoid_: session (see below), crewmate (firstmate's word), worker, subagent (V2's word
 for a provider-native helper or a `delegate_task` child thread; a teammate is neither)
 
-**Ship batch**:
-The one approval that ships finished work: a decision listing the PRs to open in the order
-they merge. The Pivot proposes it only once the user agrees the work is finished, and
-approving it tells each PR's lead to ship.
-_Avoid_: merge decision (one PR's own approval, for a task the user said to ship directly)
+**Inline task**:
+A teammate of kind `inline`: a small change made in the Pivot workspace rather than a
+worktree of its own. One runs at a time per project. It delivers through a PR like a ship.
+_Avoid_: calling it a subagent; the Pivot's subagents only read
 
-**PR group**:
-One PR of a ship batch: a lead ship and the member ships whose branches merge into the
-lead's. When the PR merges, every member counts as landed.
-
-**Handoff**:
-What a retiring Pivot writes for its successor: only what its conversation holds and the
-records don't, such as goals, plans not yet dispatched and what the user is waiting on. It
-opens the successor's first wake.
-_Avoid_: digest (the records part of a wake), summary
+**Pivot workspace**:
+The one worktree per project a Pivot keeps for inline tasks. It is set up once and reused,
+never removed by teardown or storage cleanup.
+_Avoid_: Pivot home (the Pivot's own folder, which is not the project)
 
 **Teammate status**:
 What a teammate is doing, as the user and the Pivot see it. It combines the teammate's

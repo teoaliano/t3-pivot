@@ -30,15 +30,7 @@ export const PivotMcpDispatchTeammateInput = Schema.Struct({
   spec: TrimmedNonEmptyString,
   /** Stack on another branch instead of the origin's default branch. */
   baseBranch: Schema.optional(TrimmedNonEmptyString),
-  /**
-   * A teammate of yours whose worktree and branch this one takes over, to build the next
-   * piece of the same PR there. That teammate ends; its worktree and branch stay.
-   */
   attachTo: Schema.optional(ThreadId),
-  /**
-   * Only when the user said to ship this task directly: the ship pushes and opens its PR at
-   * `done` instead of waiting for review and a ship batch.
-   */
   shipDirectly: Schema.optional(Schema.Boolean),
   /** A teammate model from Settings, by name. Without one, the default entry runs it. */
   modelEntry: Schema.optional(TrimmedNonEmptyString),
@@ -77,9 +69,7 @@ export type PivotMcpTeammateTarget = typeof PivotMcpTeammateTarget.Type;
 
 export const PivotMcpPromoteScoutInput = Schema.Struct({
   threadId: ThreadId,
-  /** The ship's spec; the scout's report is added to it. */
   spec: TrimmedNonEmptyString,
-  /** The ship's title, its branch's name; the scout's when omitted. */
   title: Schema.optional(TrimmedNonEmptyString),
   baseBranch: Schema.optional(TrimmedNonEmptyString),
   modelEntry: Schema.optional(TrimmedNonEmptyString),
@@ -146,18 +136,11 @@ export const PivotMcpTeammateLine = Schema.Struct({
   branch: Schema.String,
   pullRequestUrl: Schema.NullOr(Schema.String),
   lastChangeAt: Schema.NullOr(IsoDateTime),
-  /**
-   * Null for a ship whose worktree T3's worktree cleanup reclaimed; its branch stays, and
-   * relaunch_teammate recreates the worktree from it. A scout's is the project's checkout.
-   */
   worktreePath: Schema.NullOr(Schema.String),
   /** The teammate model it was dispatched on, if any. */
   modelEntry: Schema.NullOr(Schema.String),
-  /** What its latest `done` brought; null otherwise. */
   evidence: Schema.NullOr(TeammateEvidence),
-  /** Your review of that `done`, if you recorded one. */
   verdict: Schema.NullOr(Schema.String),
-  /** Whether it was told to push and open its PR. */
   shipOrdered: Schema.Boolean,
   tornDown: Schema.Boolean,
 });
@@ -172,9 +155,7 @@ export const PivotMcpReadHandoffInput = Schema.Struct({});
 export type PivotMcpReadHandoffInput = typeof PivotMcpReadHandoffInput.Type;
 
 export const PivotMcpReadHandoffResult = Schema.Struct({
-  /** The retired Pivot you took over from; null for a Pivot that took over from none. */
   predecessorThreadId: Schema.NullOr(ThreadId),
-  /** What it wrote for you as it retired; null when it wrote none. */
   handoff: Schema.NullOr(Schema.String),
 });
 export type PivotMcpReadHandoffResult = typeof PivotMcpReadHandoffResult.Type;
@@ -208,7 +189,6 @@ export type PivotMcpControlResult = typeof PivotMcpControlResult.Type;
 
 export const PivotMcpRecordVerdictInput = Schema.Struct({
   threadId: ThreadId,
-  /** Your review of the diff and the evidence, in a line or two. */
   verdict: TrimmedNonEmptyString,
 });
 export type PivotMcpRecordVerdictInput = typeof PivotMcpRecordVerdictInput.Type;
@@ -276,7 +256,6 @@ export const PivotMcpReportStatusInput = Schema.Struct({
   summary: TrimmedNonEmptyString,
   /** Only for `paused`: when the wait should clear. */
   until: Schema.optional(IsoDateTime),
-  /** A ship's `done` carries the evidence its brief asks for. */
   evidence: Schema.optional(TeammateEvidence),
   /** Names the decision a `needs-decision` or `blocked` report raises. */
   decisionKey: Schema.optional(TrimmedNonEmptyString),
@@ -303,7 +282,6 @@ export type PivotMcpRecordScoutReportInput = typeof PivotMcpRecordScoutReportInp
 
 export const PivotMcpRecordScoutReportResult = Schema.Struct({
   recorded: Schema.Boolean,
-  /** Files in the user's checkout that changed while you ran. It should be empty. */
   checkoutChanges: Schema.Array(Schema.String),
 });
 export type PivotMcpRecordScoutReportResult = typeof PivotMcpRecordScoutReportResult.Type;

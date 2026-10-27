@@ -35,7 +35,6 @@ export type PivotChatRole =
       readonly kind: "pivot";
       readonly retired: true;
       readonly successorThreadId: ThreadId | null;
-      /** It answered the handoff request: its last message is what its successor started from. */
       readonly hasHandoff: boolean;
     }
   | { readonly kind: "teammate"; readonly pivotThreadId: ThreadId };
@@ -50,7 +49,7 @@ export function usePivotChatRole(environmentId: EnvironmentId, threadId: ThreadI
           kind: "pivot",
           retired: true,
           successorThreadId: pivot.successorThreadId,
-          hasHandoff: pivot.handoff != null,
+          hasHandoff: pivot.hasHandoff === true,
         };
   }
   const teammate = state?.teammates[threadId];

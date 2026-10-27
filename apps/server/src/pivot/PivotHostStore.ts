@@ -67,18 +67,11 @@ export interface HostedTeammate {
   readonly worktreePath: string;
   readonly deliveryMode: PivotDeliveryMode;
   readonly firstRunId: RunId | null;
-  /** Set at launch for a teammate the home dispatched to ship directly. */
-  readonly shipOrderedAt: IsoDateTime | null;
   readonly createdAt: IsoDateTime;
   readonly tornDownAt: IsoDateTime | null;
 }
 
-export type NewHostedTeammate = Omit<
-  HostedTeammate,
-  "createdAt" | "tornDownAt" | "shipOrderedAt"
-> & {
-  readonly shipDirectly: boolean;
-};
+export type NewHostedTeammate = Omit<HostedTeammate, "createdAt" | "tornDownAt">;
 
 export interface HostedEntry {
   readonly sequence: number;
@@ -199,7 +192,6 @@ interface TeammateSqlRow {
   readonly worktree_path: string;
   readonly delivery_mode: string;
   readonly first_run_id: string | null;
-  readonly ship_ordered_at: string | null;
   readonly created_at: string;
   readonly torn_down_at: string | null;
 }
@@ -243,7 +235,6 @@ const toTeammate = (row: TeammateSqlRow): HostedTeammate => ({
   worktreePath: row.worktree_path,
   deliveryMode: row.delivery_mode as PivotDeliveryMode,
   firstRunId: row.first_run_id as RunId | null,
-  shipOrderedAt: row.ship_ordered_at,
   createdAt: row.created_at,
   tornDownAt: row.torn_down_at,
 });
@@ -438,14 +429,13 @@ export const make = Effect.gen(function* () {
           yield* sql`
             INSERT INTO pivot_hosted_teammates (
               thread_id, grant_id, dispatch_id, project_id, pivot_thread_id, pivot_label, kind,
-              title, branch, base_branch, worktree_path, delivery_mode, first_run_id, created_at,
-              ship_ordered_at
+              title, branch, base_branch, worktree_path, delivery_mode, first_run_id, created_at
             )
             SELECT
               ${input.threadId}, ${input.grantId}, ${input.dispatchId}, ${input.projectId},
               ${input.pivotThreadId}, ${input.pivotLabel}, ${input.kind}, ${input.title},
               ${input.branch}, ${input.baseBranch}, ${input.worktreePath}, ${input.deliveryMode},
-              ${input.firstRunId}, ${createdAt}, ${input.shipDirectly ? createdAt : null}
+              ${input.firstRunId}, ${createdAt}
             WHERE EXISTS (
               SELECT 1 FROM pivot_host_grants g, json_each(g.allowed_project_ids) allowed
               WHERE g.grant_id = ${input.grantId} AND g.revoked_at IS NULL

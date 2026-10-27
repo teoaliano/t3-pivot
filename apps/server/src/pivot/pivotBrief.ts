@@ -15,7 +15,6 @@ export const BRIEF_TEXTS = {
   shipOrder: "ship-order",
 } as const;
 
-/** A ship waits for review unless it was told to ship, at dispatch or by a ship batch. */
 export const definitionOfDoneText = (
   kind: TeammateKind,
   deliveryMode: PivotDeliveryMode,

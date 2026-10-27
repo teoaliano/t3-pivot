@@ -53,18 +53,13 @@ export const TeammateStatus = Schema.Literals([
 ]);
 export type TeammateStatus = typeof TeammateStatus.Type;
 
-/** What a ship brings to its `done` so the user and the Pivot can check the work. */
 export const TeammateEvidence = Schema.Struct({
-  /** Steps run and their results, test output, and how to try the change. */
   text: TrimmedNonEmptyString,
-  /** Absolute paths of screenshots and other files the teammate captured. */
   files: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
-  /** Trying it in a dev server is part of the agreed evidence, so clients offer to start one. */
   devServer: Schema.optional(Schema.Boolean),
 });
 export type TeammateEvidence = typeof TeammateEvidence.Type;
 
-/** The Pivot's short review of a `done` teammate's work, shown beside its evidence. */
 export const TeammateVerdict = Schema.Struct({
   text: TrimmedNonEmptyString,
   recordedAt: IsoDateTime,
@@ -79,7 +74,6 @@ export const TeammateReport = Schema.Struct({
   summary: Schema.NullOr(TrimmedNonEmptyString),
   /** Only for `paused`: when the external wait should clear. */
   until: Schema.optional(Schema.NullOr(IsoDateTime)),
-  /** Only for a ship's `done`. */
   evidence: Schema.optional(Schema.NullOr(TeammateEvidence)),
   reportedAt: IsoDateTime,
 });
@@ -99,10 +93,6 @@ export type PivotDeliveryMode = typeof PivotDeliveryMode.Type;
 export const PivotDecisionId = TrimmedNonEmptyString.pipe(Schema.brand("PivotDecisionId"));
 export type PivotDecisionId = typeof PivotDecisionId.Type;
 
-/**
- * One PR of a ship batch: the lead merges its members' branches into its own and opens
- * the PR. When it merges, every member counts as landed.
- */
 export const PivotShipGroup = Schema.Struct({
   lead: ThreadId,
   members: Schema.Array(ThreadId),
@@ -126,10 +116,6 @@ export const PivotDecisionEscalation = Schema.Struct({
    * order with the merge. Every unmerged PR of the Pivot's has to be in it.
    */
   mergeOrder: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
-  /**
-   * A ship batch: the PRs to open, in the order they merge. Approving it tells each lead
-   * to ship; the merge order is the leads' branches.
-   */
   shipGroups: Schema.optional(Schema.Array(PivotShipGroup)),
 });
 export type PivotDecisionEscalation = typeof PivotDecisionEscalation.Type;
@@ -178,11 +164,7 @@ export const PivotRecord = Schema.Struct({
   retiredAt: Schema.NullOr(IsoDateTime),
   /** The Pivot that took over when this one was retired. */
   successorThreadId: Schema.NullOr(ThreadId),
-  /**
-   * What this Pivot wrote for its successor as it retired: what only its conversation held.
-   * Null or absent when it wrote none.
-   */
-  handoff: Schema.optional(Schema.NullOr(Schema.String)),
+  hasHandoff: Schema.optional(Schema.Boolean),
   openDecisionCount: NonNegativeInt,
   /** Open decisions held for the user, for the sidebar badge. */
   escalatedDecisionCount: NonNegativeInt,
@@ -205,13 +187,7 @@ export const TeammateRecord = Schema.Struct({
   hasScoutReport: Schema.Boolean,
   /** Order among the Pivot's teammates, so cards keep dispatch order. */
   dispatchedAt: IsoDateTime,
-  /**
-   * When the teammate was told to push and open its PR: at dispatch for a task the user
-   * said to ship directly, else when the user approved a ship batch leading with it. Until
-   * then its `done` is committed work waiting for review. Null or absent when not told.
-   */
   shipOrderedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
-  /** The Pivot's review of its latest `done`; cleared by its next report. Null or absent when none. */
   verdict: Schema.optional(Schema.NullOr(TeammateVerdict)),
   tornDownAt: Schema.NullOr(IsoDateTime),
   /**
@@ -387,7 +363,6 @@ export const PivotHostLaunchInput = Schema.Struct({
   spec: TrimmedNonEmptyString.check(Schema.isMaxLength(PIVOT_HOST_TEXT_MAX_LENGTH)),
   baseBranch: Schema.optional(PivotHostBranchName),
   modelSelection: ModelSelection,
-  shipDirectly: Schema.optional(Schema.Boolean),
 });
 export type PivotHostLaunchInput = typeof PivotHostLaunchInput.Type;
 
@@ -468,7 +443,6 @@ export const PivotHostEventBody = Schema.Union([
     status: TeammateReportedStatus,
     summary: TrimmedNonEmptyString,
     until: Schema.NullOr(IsoDateTime),
-    evidence: Schema.optional(Schema.NullOr(TeammateEvidence)),
     runId: Schema.NullOr(RunId),
     decisionKey: Schema.NullOr(TrimmedNonEmptyString),
     clearedDecision: Schema.NullOr(

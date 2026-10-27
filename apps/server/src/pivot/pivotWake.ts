@@ -22,11 +22,9 @@ export interface WakeTeammate {
   readonly summary: string | null;
   readonly resume: TeammateResumeState | null;
   readonly tornDown: boolean;
-  /** Where it works, and the user's first words for it: what a digest names for each teammate. */
   readonly branch: string;
   readonly worktreePath: string;
   readonly goal: string | null;
-  readonly verdict: string | null;
 }
 
 /** A wake that tells the whole state, not only what changed. */
@@ -35,7 +33,6 @@ export type WakeDigest =
   | {
       readonly kind: "takeover";
       readonly predecessorThreadId: ThreadId;
-      /** The retired Pivot's handoff; null when it wrote none in time. */
       readonly handoff: string | null;
     };
 
@@ -67,14 +64,12 @@ const verbatim = (text: string) => `"${text}"`;
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
-/** What a digest adds under a teammate: where it works, its goal and your verdict. */
 const digestNotes = (teammate: WakeTeammate): ReadonlyArray<string> =>
   teammate.tornDown
     ? []
     : [
         `On ${teammate.branch} in ${teammate.worktreePath}.`,
         ...(teammate.goal === null ? [] : [`Goal: ${quote(teammate.goal)}`]),
-        ...(teammate.verdict === null ? [] : [`Your verdict: ${quote(teammate.verdict)}`]),
       ];
 
 const teammateLine = (teammate: WakeTeammate) => {

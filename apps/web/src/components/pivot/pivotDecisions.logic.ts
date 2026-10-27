@@ -108,7 +108,6 @@ export function userAnswerLabel(userApproved: boolean | null): string {
       : "You answered";
 }
 
-/** A ship batch's PRs in merge order, each its lead and the members merging into it. */
 export function shipBatchLines(
   decision: PivotDecision,
   titleOf: (threadId: string) => string,

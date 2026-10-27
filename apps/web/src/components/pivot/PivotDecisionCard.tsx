@@ -38,7 +38,6 @@ export interface PivotDecisionCardProps {
   decision: PivotDecision;
   /** Who is asking: the teammate's title, or the Pivot for its own decisions. */
   asker: string;
-  /** For a ship batch: its PRs in merge order, as `shipBatchLines` reads them. */
   shipBatch?: ReadonlyArray<string> | undefined;
   /** Where this decision sits among those waiting for the user, when more than one is. */
   position: { readonly index: number; readonly total: number } | null;

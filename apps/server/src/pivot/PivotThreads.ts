@@ -149,11 +149,6 @@ export class PivotThreads extends Context.Service<
       readonly modelSelection: ModelSelection;
       readonly text: string;
     }) => Effect.Effect<TeammateLaunch, PivotThreadsError>;
-    /**
-     * Creates a teammate's thread in a checkout that already exists, with no message yet: a
-     * worktree on its branch, or with both null, the project's own checkout. Nothing is
-     * prepared: no worktree, no setup script. `request` sends its brief.
-     */
     readonly createTeammateThread: (input: {
       readonly projectId: ProjectId;
       readonly title: string;
@@ -181,16 +176,11 @@ export class PivotThreads extends Context.Service<
       readonly attachments?: ReadonlyArray<ChatImageAttachment> | undefined;
       readonly mode: "auto" | "queue";
     }) => Effect.Effect<void, PivotThreadsError>;
-    /**
-     * Sends `text` from `senderThreadId`, queued behind the active turn, and returns the run
-     * that answers it. Null when V2 created none.
-     */
     readonly request: (input: {
       readonly threadId: ThreadId;
       readonly senderThreadId: ThreadId;
       readonly text: string;
     }) => Effect.Effect<RunId | null, PivotThreadsError>;
-    /** Pending while the run goes on; once it ended, its last assistant message, if any. */
     readonly runReply: (
       threadId: ThreadId,
       runId: RunId,
@@ -242,9 +232,7 @@ export class PivotThreads extends Context.Service<
     ) => Effect.Effect<void, PivotThreadsError>;
     /** Stops every managed process the worktree runs and frees its port block. */
     readonly stopProcesses: (worktreePath: string) => Effect.Effect<void>;
-    /** Stops the worktree's managed processes and keeps its port block for the next start. */
     readonly stopServers: (worktreePath: string) => Effect.Effect<void>;
-    /** Recreates a removed worktree at its path, on its branch as it stands; no setup runs. */
     readonly recreateWorktree: (input: {
       readonly projectRoot: string;
       readonly worktreePath: string;
@@ -383,8 +371,6 @@ export const make = Effect.gen(function* () {
     createTeammateThread: Effect.fn("PivotThreads.createTeammateThread")(
       function* (input) {
         const threadId = ThreadId.make(`thread-teammate-${yield* randomUuidV4}`);
-        // Created directly rather than launched: a launch prepares its workspace and runs the
-        // setup script, and this checkout is already prepared and in use.
         yield* threads.dispatch({
           type: "thread.create",
           commandId: yield* commandId("create-teammate"),

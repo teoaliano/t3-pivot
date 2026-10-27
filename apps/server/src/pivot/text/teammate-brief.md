@@ -5,8 +5,7 @@ teammate's first message. Placeholders, written in double braces in the body:
   kind              ship or scout
   intent            the user's words, verbatim, as the Pivot passed them
   spec              the Pivot's instructions
-  definitionOfDone  one definition-of-done.*.md text, picked by kind, delivery mode and
-                    whether the user said to ship it directly
+  definitionOfDone  one definition-of-done.*.md text, picked by kind and delivery mode
   branch            the teammate's branch, pivot/<slug>
   baseBranch        the branch the worktree started from
   worktreePath      the absolute path of the teammate's worktree

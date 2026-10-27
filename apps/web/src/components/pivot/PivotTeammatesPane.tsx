@@ -189,11 +189,6 @@ const PivotTeammateCard = memo(function PivotTeammateCard(
   );
 });
 
-/**
- * A ship's work waiting for the user: the Pivot's verdict, the evidence behind a button, and
- * when a dev server is part of it, Try it, which starts the teammate's dev server and opens
- * its preview. The preview's own controls stop it.
- */
 function TeammateReview(props: {
   environmentId: EnvironmentId;
   threadId: ThreadId;

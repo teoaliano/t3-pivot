@@ -28,5 +28,5 @@ export function useRetiredPivot(
   const pivot = Option.getOrNull(AsyncResult.value(result))?.pivots[threadId];
   return pivot === undefined || pivot.retiredAt === null
     ? null
-    : { successorThreadId: pivot.successorThreadId, hasHandoff: pivot.handoff != null };
+    : { successorThreadId: pivot.successorThreadId, hasHandoff: pivot.hasHandoff === true };
 }

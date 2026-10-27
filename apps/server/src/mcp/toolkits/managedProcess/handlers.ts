@@ -76,7 +76,6 @@ const handlers = {
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.requireThreadMcpCapability("preview");
       const processes = yield* ManagedProcesses.ManagedProcesses;
-      // A checkout with no dev server at all has nothing running; only a named script is missing.
       const target = yield* resolveManagedScriptTarget(scope.thread.threadId, input.script).pipe(
         Effect.catchTags({
           ManagedProcessScriptNotFoundError: (error) =>
@@ -84,7 +83,6 @@ const handlers = {
         }),
       );
       if (target === null) return { stopped: false } satisfies StopServerResult;
-      // Stopping one script keeps the checkout's port block, unlike removing the checkout.
       const stopped = yield* processes.stopIfLive({
         checkoutPath: target.checkoutPath,
         scriptId: target.script.id,

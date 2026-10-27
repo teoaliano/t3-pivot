@@ -395,7 +395,6 @@ describe("Pivot and teammate tools", () => {
       return Effect.gen(function* () {
         const pivot = yield* createPivot;
         const sql = yield* PivotDatabase.PivotSql;
-        // What an older release wrote for an inline task still open at the upgrade.
         yield* sql`
           INSERT INTO pivot_teammates (
             thread_id, pivot_thread_id, project_id, kind, title, branch, base_branch,
@@ -455,7 +454,6 @@ describe("Pivot and teammate tools", () => {
       assert.strictEqual(scout.setupScript, "none");
       assert.strictEqual(scout.firstRun, "started");
       const thread = fake.threads.get(scout.threadId)!;
-      // A thread with no worktree runs in the project's checkout.
       assert.isNull(thread.worktreePath);
       assert.isNull(thread.branch);
       assert.strictEqual(
@@ -473,10 +471,8 @@ describe("Pivot and teammate tools", () => {
     const { workspaceRoot, layer } = setup();
     return Effect.gen(function* () {
       const pivot = yield* createPivot;
-      // The user's own edit, there before the scout started.
       NodeFS.writeFileSync(NodePath.join(workspaceRoot, "draft.md"), "mine\n");
       const scout = yield* dispatch(pivot, { title: "Why is login slow", kind: "scout" });
-      // What a provider that cannot enforce read-only let the scout do.
       NodeFS.writeFileSync(NodePath.join(workspaceRoot, "README.md"), "changed\n");
       NodeFS.writeFileSync(NodePath.join(workspaceRoot, "probe.txt"), "probe\n");
 
@@ -543,7 +539,6 @@ describe("Pivot and teammate tools", () => {
       assert.isTrue(
         promoted.worktreePath.endsWith(NodePath.join("work", "pivot-why-is-login-slow")),
       );
-      // A fresh worktree from the default branch, as V2 launches any ship.
       const ship = fake.threads.get(promoted.threadId)!;
       assert.strictEqual(ship.branch, "pivot/why-is-login-slow");
       assert.strictEqual(ship.baseBranch, "main");
@@ -556,7 +551,6 @@ describe("Pivot and teammate tools", () => {
       assert.include(brief.text, "This task delivers committed work for review.");
       assertNoHardWraps(brief.text);
 
-      // The scout ended; its report stays readable.
       assert.isTrue(fake.threads.get(scout.threadId)!.archived);
       const lines = expectOk(yield* call(pivot, "list_teammates", { includeTornDown: true }))
         .teammates as Array<{ threadId: ThreadId; tornDown: boolean }>;
@@ -885,7 +879,6 @@ describe("Pivot and teammate tools", () => {
           }),
         );
         assert.deepStrictEqual(fake.stoppedServers, [ship.worktreePath]);
-        // The checkout stays, so its port block is kept for the next start.
         assert.deepStrictEqual(fake.stoppedCheckouts, []);
       }).pipe(Effect.provide(layer));
     });
@@ -908,7 +901,6 @@ describe("Pivot and teammate tools", () => {
   });
 
   describe("review", () => {
-    /** A ship in a no-remote project that committed its work and reported done with evidence. */
     const doneShip = (fake: FakeV2, workspaceRoot: string, pivot: ThreadId) =>
       Effect.gen(function* () {
         const ship = yield* dispatch(pivot);
@@ -1016,7 +1008,6 @@ describe("Pivot and teammate tools", () => {
   });
 
   describe("attaching to a teammate's worktree", () => {
-    /** A ship whose commit sits on its branch in a real worktree, its turn over. */
     const committedShip = (fake: FakeV2, workspaceRoot: string, pivot: ThreadId) =>
       Effect.gen(function* () {
         const ship = yield* dispatch(pivot, { title: "Add the API" });
@@ -1040,7 +1031,6 @@ describe("Pivot and teammate tools", () => {
         assert.strictEqual(next.setupScript, "none");
         assert.strictEqual(next.firstRun, "started");
         const thread = fake.threads.get(next.threadId)!;
-        // Bound to the worktree from the start: nothing was created or set up for it.
         assert.strictEqual(thread.worktreePath, first.worktreePath);
         assert.strictEqual(thread.branch, first.branch);
         const brief = firstMessage(fake, next.threadId)!;
@@ -1136,7 +1126,6 @@ describe("Pivot and teammate tools", () => {
       NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "fix.txt"), "fixed\n");
       sh(ship.worktreePath, "git add -A && git commit -q -m fix");
       const head = sh(ship.worktreePath, "git rev-parse HEAD");
-      // Worktree cleanup reclaimed it while the ship waited; its branch stays.
       sh(workspaceRoot, `git worktree remove --force ${ship.worktreePath}`);
 
       const line = (
@@ -1446,7 +1435,6 @@ describe("delivery and teardown", () => {
     });
 
   describe("ship batches", () => {
-    /** Ships that committed their work and reported done, as the batch finds them. */
     const doneShips = (workspaceRoot: string, pivot: ThreadId, titles: ReadonlyArray<string>) =>
       Effect.forEach(titles, (title) =>
         Effect.gen(function* () {
@@ -1542,7 +1530,6 @@ describe("delivery and teardown", () => {
         assert.include(order.text, ui!.branch);
         assert.include(order.text, "This task delivers a pull request.");
         assertNoHardWraps(order.text);
-        // A member's work goes in through its lead; it is not told anything.
         assert.strictEqual(lastMessage(fake, ui!.threadId)!.mode, "launch");
         const lines = expectOk(yield* call(pivot, "list_teammates", {})).teammates as Array<{
           threadId: ThreadId;
@@ -1567,7 +1554,6 @@ describe("delivery and teardown", () => {
       }).pipe(Effect.provide(layer));
     });
 
-    /** Links a green PR from the lead's branch, as the lead does once told to ship. */
     const openPr = (
       fake: FakeV2,
       lead: PivotMcpDispatchTeammateResult,
@@ -1610,7 +1596,6 @@ describe("delivery and teardown", () => {
         });
         const docsPr = openPr(fake, docs!, 22);
 
-        // CI failed on the first PR: it does not merge, and nothing merges after it.
         expectRefused(
           yield* call(pivot, "merge_teammate", { threadId: api!.threadId, decisionId }),
           "invalid_request",
@@ -1649,7 +1634,6 @@ describe("delivery and teardown", () => {
         const { decisionId } = yield* proposeBatch(pivot, [{ lead: api!.threadId, members: [] }]);
         const pivots = yield* PivotService.PivotService;
         yield* pivots.recordUserAnswer({ decisionId, answer: "Ship it.", approved: true });
-        // The lead fixed a conflict after an earlier merge and pushed again.
         const url = openPr(fake, api!, 31, { headSha: "def456" });
 
         const merged = expectOk(
@@ -1675,9 +1659,7 @@ describe("delivery and teardown", () => {
           "has not landed",
         );
         yield* pivots.recordUserAnswer({ decisionId, answer: "Ship it.", approved: true });
-        // The lead merged the member in, and the forge squashed the PR onto main.
         sh(api!.worktreePath, `git merge -q --no-edit ${ui!.branch}`);
-        // Resolving the merge reworked the member's change, so main never holds its exact tree.
         NodeFS.writeFileSync(NodePath.join(api!.worktreePath, "add-the-ui.txt"), "reworked\n");
         sh(api!.worktreePath, "git add -A && git commit -q -m rework");
         sh(
@@ -1717,12 +1699,10 @@ describe("delivery and teardown", () => {
           sh(api!.worktreePath, `git merge -q --no-edit ${ui!.branch}`);
           NodeFS.writeFileSync(NodePath.join(api!.worktreePath, "add-the-ui.txt"), "reworked\n");
           sh(api!.worktreePath, "git add -A && git commit -q -m rework");
-          // The default branch moved meanwhile, so the lead rebases, rewriting the member's commits.
           NodeFS.writeFileSync(NodePath.join(workspaceRoot, "other.txt"), "other\n");
           sh(workspaceRoot, "git add -A && git commit -q -m other");
           sh(api!.worktreePath, "git rebase -q main");
           expectOk(yield* call(pivot, "land_teammate", { threadId: api!.threadId, decisionId }));
-          // The lead goes first, and its branch with it.
           expectOk(yield* call(pivot, "teardown_teammate", { threadId: api!.threadId }));
           assert.strictEqual(sh(workspaceRoot, `git branch --list ${api!.branch}`), "");
 
@@ -1762,7 +1742,6 @@ describe("delivery and teardown", () => {
           yield* call(pivot, "land_teammate", { threadId: api!.threadId, decisionId }),
         );
         assert.strictEqual(sh(workspaceRoot, "git rev-parse main"), first.landedHead);
-        // The second lead catches up with the default branch, as its ship order says.
         sh(docs!.worktreePath, "git rebase -q main");
         const second = expectOk(
           yield* call(pivot, "land_teammate", { threadId: docs!.threadId, decisionId }),
@@ -2238,7 +2217,6 @@ describe("delivery and teardown", () => {
     return Effect.gen(function* () {
       const pivot = yield* createPivot;
       const scout = yield* dispatch(pivot, { title: "Investigate", kind: "scout" });
-      // The user's own work in progress, in the checkout the scout read.
       NodeFS.writeFileSync(NodePath.join(workspaceRoot, "notes.md"), "draft\n");
       expectOk(yield* call(scout.threadId, "record_scout_report", { report: "Found it." }));
 

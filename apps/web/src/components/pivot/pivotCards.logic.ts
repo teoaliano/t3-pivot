@@ -66,10 +66,6 @@ export interface TeammateCard {
   readonly detail: string | null;
   /** Before its first report, the card follows the worktree setup. */
   readonly followsSetup: boolean;
-  /**
-   * A ship that reported done and waits for the user to try its work: what it brought, the
-   * Pivot's verdict, and whether trying it in a dev server is part of it. Null otherwise.
-   */
   readonly review: {
     readonly evidence: TeammateEvidence | null;
     readonly verdict: string | null;
@@ -186,7 +182,6 @@ export function teammateCards(
   const finished: Array<TeammateCard> = [];
   for (const teammate of teammates) {
     const card = teammateCard(teammate, shellOf(teammate.threadId));
-    // Work waiting for review stays in view: the user is the one it waits on.
     const isFinished =
       teammate.tornDownAt !== null ||
       (card.status === "done" && !card.needsYou && card.review === null);

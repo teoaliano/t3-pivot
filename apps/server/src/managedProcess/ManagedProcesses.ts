@@ -101,7 +101,6 @@ export class ManagedProcesses extends Context.Service<
     ) => Effect.Effect<ManagedProcess, ManagedProcessServiceStartFailure>;
     /** Stops the process and waits for its reserved port to be released. */
     readonly stop: (target: ManagedProcessTarget) => Effect.Effect<void>;
-    /** Like `stop`, and says whether there was a starting or running process to stop. */
     readonly stopIfLive: (target: ManagedProcessTarget) => Effect.Effect<boolean>;
     /**
      * Stops every process a checkout runs. Call before removing the checkout.
