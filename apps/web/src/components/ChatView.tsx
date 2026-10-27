@@ -3507,6 +3507,7 @@ export default function ChatView(props: ChatViewProps) {
                             <PivotComposerBar
                               environmentId={environmentId}
                               successorThreadId={pivotRole.successorThreadId}
+                              hasHandoff={pivotRole.hasHandoff}
                             />
                           ) : null}
                           {!composerMounted ? null : (

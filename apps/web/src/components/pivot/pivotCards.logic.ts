@@ -1,5 +1,6 @@
 import type {
   OrchestrationV2ThreadShell,
+  TeammateEvidence,
   TeammateRecord,
   TeammateStatus,
   ThreadId,
@@ -65,6 +66,15 @@ export interface TeammateCard {
   readonly detail: string | null;
   /** Before its first report, the card follows the worktree setup. */
   readonly followsSetup: boolean;
+  /**
+   * A ship that reported done and waits for the user to try its work: what it brought, the
+   * Pivot's verdict, and whether trying it in a dev server is part of it. Null otherwise.
+   */
+  readonly review: {
+    readonly evidence: TeammateEvidence | null;
+    readonly verdict: string | null;
+    readonly tryIt: boolean;
+  } | null;
 }
 
 export interface TeammateCards {
@@ -116,6 +126,17 @@ export function teammateCard(
       ? teammate.report.reportedAt
       : null;
   const attention = needsYou || ATTENTION.has(derived.status);
+  const review =
+    teammate.kind === "ship" &&
+    teammate.tornDownAt === null &&
+    derived.status === "done" &&
+    teammate.shipOrderedAt == null
+      ? {
+          evidence: teammate.report?.evidence ?? null,
+          verdict: teammate.verdict?.text ?? null,
+          tryIt: teammate.report?.evidence?.devServer === true,
+        }
+      : null;
   return {
     threadId: teammate.threadId,
     title: shell?.title || teammate.title,
@@ -125,7 +146,9 @@ export function teammateCard(
       ? "Needs you"
       : memoryWait !== null
         ? "Waiting for memory"
-        : STATUS_LABEL[derived.status],
+        : review !== null
+          ? "Ready for review"
+          : STATUS_LABEL[derived.status],
     attention,
     tone:
       derived.status === "failed"
@@ -150,6 +173,7 @@ export function teammateCard(
     providerInstanceId: shell?.providerInstanceId ?? null,
     detail: memoryWait ?? derived.detail,
     followsSetup: teammate.report === null && teammate.tornDownAt === null,
+    review,
   };
 }
 
@@ -162,7 +186,10 @@ export function teammateCards(
   const finished: Array<TeammateCard> = [];
   for (const teammate of teammates) {
     const card = teammateCard(teammate, shellOf(teammate.threadId));
-    const isFinished = teammate.tornDownAt !== null || (card.status === "done" && !card.needsYou);
+    // Work waiting for review stays in view: the user is the one it waits on.
+    const isFinished =
+      teammate.tornDownAt !== null ||
+      (card.status === "done" && !card.needsYou && card.review === null);
     (isFinished ? finished : live).push(card);
   }
   return { live, finished };

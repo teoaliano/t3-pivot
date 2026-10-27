@@ -75,7 +75,7 @@ describe("teammate cards", () => {
       teammate({ memoryWait: status, report: report("done", "2026-10-06T10:05:00.000Z") }),
       shell({ status: "idle" }),
     );
-    expect(finished.label).toBe("Done");
+    expect(finished.label).toBe("Ready for review");
   });
 
   it("gives attention statuses and escalated decisions an accent, and reads the latter as needs you", () => {
@@ -127,9 +127,11 @@ describe("teammate cards", () => {
   });
 
   it("keeps dispatch order and folds finished teammates behind the chip", () => {
+    // Done, and already told to ship: nothing waits on the user.
     const done = teammate({
       threadId: ThreadId.make("done"),
       report: report("done", "2026-10-06T11:00:00.000Z"),
+      shipOrderedAt: "2026-10-06T11:30:00.000Z",
     });
     const tornDown = teammate({
       threadId: ThreadId.make("gone"),
@@ -146,6 +148,36 @@ describe("teammate cards", () => {
     );
     expect(cards.live.map((card) => card.threadId)).toEqual(["running", "asking"]);
     expect(cards.finished.map((card) => card.threadId)).toEqual(["done", "gone"]);
+  });
+
+  it("keeps a ship ready for review in view, with its evidence and the Pivot's verdict", () => {
+    const ready = teammate({
+      report: {
+        ...report("done", "2026-10-06T11:00:00.000Z"),
+        evidence: { text: "Signed in on Safari.", files: ["/tmp/safari.png"], devServer: true },
+      },
+      verdict: { text: "Small, matches the spec.", recordedAt: "2026-10-06T11:05:00.000Z" },
+    });
+    const card = teammateCard(ready, shell({ status: "idle" }));
+    expect(card.label).toBe("Ready for review");
+    expect(card.review).toEqual({
+      evidence: { text: "Signed in on Safari.", files: ["/tmp/safari.png"], devServer: true },
+      verdict: "Small, matches the spec.",
+      tryIt: true,
+    });
+    expect(teammateCards([ready], () => shell({ status: "idle" })).live).toHaveLength(1);
+
+    // Told to ship, it is no longer waiting for review.
+    const shipping = teammateCard(
+      teammate({ ...ready, shipOrderedAt: "2026-10-06T12:00:00.000Z" }),
+      shell({ status: "idle" }),
+    );
+    expect(shipping.review).toBeNull();
+    expect(shipping.label).toBe("Done");
+    // A scout's done is its report, not work to review.
+    expect(
+      teammateCard(teammate({ ...ready, kind: "scout" }), shell({ status: "idle" })).review,
+    ).toBeNull();
   });
 
   it("wears the thread status colors and settles like a thread", () => {

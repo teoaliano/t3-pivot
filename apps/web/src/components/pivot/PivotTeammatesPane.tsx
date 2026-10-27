@@ -181,6 +181,70 @@ const PivotTeammateCard = memo(function PivotTeammateCard(
   );
 });
 
+/**
+ * A ship's work waiting for the user: the Pivot's verdict, the evidence behind a button, and
+ * when a dev server is part of it, Try it, which opens the preview where it starts.
+ */
+function TeammateReview(props: {
+  review: NonNullable<TeammateCard["review"]>;
+  onTryIt: () => void;
+}) {
+  const { evidence, verdict } = props.review;
+  return (
+    <span className="flex w-full min-w-0 items-center gap-1.5 text-xs">
+      <span className="min-w-0 flex-1 truncate text-muted-foreground">
+        {verdict ?? "The Pivot has not reviewed it yet."}
+      </span>
+      {evidence !== null ? (
+        <Popover>
+          <PopoverTrigger
+            render={
+              <Button size="xs" variant="ghost" onClick={(event) => event.stopPropagation()} />
+            }
+          >
+            Evidence
+          </PopoverTrigger>
+          <PopoverPopup side="bottom" align="end">
+            <div
+              className="flex max-h-80 w-80 flex-col gap-2 overflow-y-auto text-sm"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <p className="whitespace-pre-wrap wrap-anywhere">{evidence.text}</p>
+              {(evidence.files ?? []).length > 0 ? (
+                <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+                  {evidence.files!.map((file) => (
+                    <li key={file} className="truncate" title={file}>
+                      {file}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {verdict !== null ? (
+                <p className="text-muted-foreground">
+                  <span className="font-medium text-foreground">The Pivot's verdict: </span>
+                  {verdict}
+                </p>
+              ) : null}
+            </div>
+          </PopoverPopup>
+        </Popover>
+      ) : null}
+      {props.review.tryIt ? (
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={(event) => {
+            event.stopPropagation();
+            props.onTryIt();
+          }}
+        >
+          Try it
+        </Button>
+      ) : null}
+    </span>
+  );
+}
+
 /** Teammate states as subagent states; the dot takes the teammate's thread status color. */
 const SUBAGENT_STATUS: Record<TeammateStatus, OrchestrationV2TurnItem["status"]> = {
   working: "running",
@@ -220,6 +284,7 @@ function TeammateCardBody(props: TeammateCardProps) {
         SUBAGENT_ROW_CLASS,
         SUBAGENT_ROW_INTERACTIVE_CLASS,
         "relative w-72 rounded-lg border bg-background/90",
+        card.review !== null && "flex-wrap",
         card.attention ? "border-warning/60" : "border-border",
       )}
     >
@@ -245,6 +310,12 @@ function TeammateCardBody(props: TeammateCardProps) {
         wrapTitle
         chevron={false}
       />
+      {card.review !== null ? (
+        <TeammateReview
+          review={card.review}
+          onTryIt={() => props.onOpen("preview", card.threadId)}
+        />
+      ) : null}
       {/* Over the card's corner, beside the short status line, shown on hover or focus. */}
       <span className="absolute right-1.5 bottom-1.5 inline-flex opacity-0 group-hover/subagent:opacity-100 focus-within:opacity-100 has-data-[popup-open]:opacity-100">
         <Menu>

@@ -107,3 +107,16 @@ export function userAnswerLabel(userApproved: boolean | null): string {
       ? "You commented"
       : "You answered";
 }
+
+/** A ship batch's PRs in merge order, each its lead and the members merging into it. */
+export function shipBatchLines(
+  decision: PivotDecision,
+  titleOf: (threadId: string) => string,
+): ReadonlyArray<string> {
+  return (decision.escalation?.shipGroups ?? []).map(
+    (group, index) =>
+      `${index + 1}. ${titleOf(group.lead)}${
+        group.members.length === 0 ? "" : `, with ${group.members.map(titleOf).join(", ")}`
+      }`,
+  );
+}

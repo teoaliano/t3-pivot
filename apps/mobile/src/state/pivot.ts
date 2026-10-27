@@ -18,7 +18,7 @@ const NO_PIVOT_MODE = Atom.make(AsyncResult.success(EMPTY_PIVOT_STATE)).pipe(
 export function useRetiredPivot(
   environmentId: EnvironmentId | null,
   threadId: ThreadId,
-): { readonly successorThreadId: ThreadId | null } | null {
+): { readonly successorThreadId: ThreadId | null; readonly hasHandoff: boolean } | null {
   const supported = useEnvironmentServerConfig(environmentId)?.environment.capabilities.pivotMode;
   const result = useAtomValue(
     supported === true && environmentId !== null
@@ -28,5 +28,5 @@ export function useRetiredPivot(
   const pivot = Option.getOrNull(AsyncResult.value(result))?.pivots[threadId];
   return pivot === undefined || pivot.retiredAt === null
     ? null
-    : { successorThreadId: pivot.successorThreadId };
+    : { successorThreadId: pivot.successorThreadId, hasHandoff: pivot.handoff != null };
 }

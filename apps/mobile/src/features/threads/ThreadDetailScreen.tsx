@@ -1578,6 +1578,7 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
                       }}
                     >
                       <RetiredPivotBar
+                        hasHandoff={retiredPivot.hasHandoff}
                         onOpenSuccessor={
                           retiredPivot.successorThreadId === null
                             ? null
