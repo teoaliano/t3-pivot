@@ -15,7 +15,9 @@ import {
   PIVOT_HISTORY_MAX_LIMIT,
   type PivotCreateResult,
   type PivotDecision,
+  type PivotDecisionEscalation,
   type PivotDecisionId,
+  type PivotShipGroup,
   type PivotMcpAddIntentInput,
   type PivotMcpAnswerDecisionInput,
   type PivotMcpControlResult,
@@ -64,7 +66,12 @@ import * as Stream from "effect/Stream";
 
 import * as ServerSettings from "../serverSettings.ts";
 import { defaultPivotTeammateCap } from "../process/agentScope.ts";
-import { BRIEF_TEXTS, definitionOfDoneText, opensWithSpeakerLabel } from "./pivotBrief.ts";
+import {
+  BRIEF_TEXTS,
+  definitionOfDoneText,
+  opensWithSpeakerLabel,
+  renderShipOrder,
+} from "./pivotBrief.ts";
 import { mergeRefusals, PIVOT_MERGE_PROVIDERS } from "./pivotDelivery.ts";
 import type { PivotEvent, StoredPivotEvent } from "./PivotEvents.ts";
 import * as PivotGit from "./PivotGit.ts";
@@ -489,6 +496,36 @@ export const make = Effect.gen(function* () {
       return decisions.toReversed();
     });
 
+  /**
+   * Tells each lead of an approved ship batch to merge its members' branches and ship. The
+   * order is already recorded; a send that fails is logged, and the Pivot can resend it.
+   */
+  const sendShipOrders = (decision: PivotDecision) =>
+    Effect.forEach(decision.escalation?.shipGroups ?? [], (group) =>
+      Effect.gen(function* () {
+        const lead = yield* store.getTeammate(group.lead);
+        if (lead === null || lead.tornDownAt !== null) return;
+        const members: Array<{ branch: string; title: string }> = [];
+        for (const threadId of group.members) {
+          const member = yield* store.getTeammate(threadId);
+          if (member !== null) members.push({ branch: member.branch, title: member.title });
+        }
+        const message = renderShipOrder(yield* text(BRIEF_TEXTS.shipOrder), {
+          members,
+          definitionOfDone: yield* text(definitionOfDoneText("ship", lead.deliveryMode, true)),
+        });
+        yield* (yield* hostOf("decision.record-user-answer", lead)).send({
+          threadId: lead.threadId,
+          senderThreadId: decision.pivotThreadId,
+          text: message,
+        });
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("A ship order did not reach its lead", { lead: group.lead, cause }),
+        ),
+      ),
+    );
+
   const recordUserAnswer: PivotService["Service"]["recordUserAnswer"] = ({
     decisionId,
     answer,
@@ -510,6 +547,7 @@ export const make = Effect.gen(function* () {
           `Decision ${decisionId} was not found.`,
         );
       }
+      if (decision.userApproved === true) yield* sendShipOrders(decision);
       return decision;
     });
 
@@ -889,10 +927,66 @@ export const make = Effect.gen(function* () {
       return yield* decisionResult("open_decision", opened.event.decisionId);
     });
 
+  /**
+   * A ship batch's escalation as the user approves it: every teammate named once, a ship of
+   * the Pivot's that reported done, and the merge order the leads' branches.
+   */
+  const shipBatchEscalation = (
+    command: string,
+    pivot: PivotStore.PivotRow,
+    escalation: PivotDecisionEscalation & { readonly shipGroups: ReadonlyArray<PivotShipGroup> },
+  ) =>
+    Effect.gen(function* () {
+      if (escalation.shipGroups.length === 0) {
+        return yield* refuse(command, "A ship batch names at least one PR group.");
+      }
+      const seen = new Set<string>();
+      const branches = new Map<string, string>();
+      for (const threadId of escalation.shipGroups.flatMap((group) => [
+        group.lead,
+        ...group.members,
+      ])) {
+        if (seen.has(threadId)) {
+          return yield* refuse(command, `${threadId} is named twice in the ship batch.`);
+        }
+        seen.add(threadId);
+        const teammate = yield* ownTeammate(command, pivot, threadId);
+        if (teammate.kind !== "ship") {
+          return yield* refuse(command, `"${teammate.title}" is a scout; only ships ship.`);
+        }
+        if (teammate.report?.status !== "done") {
+          return yield* refuse(
+            command,
+            `"${teammate.title}" has not reported done, so its work cannot ship yet.`,
+          );
+        }
+        branches.set(threadId, teammate.branch);
+      }
+      const mergeOrder = escalation.shipGroups.map((group) => branches.get(group.lead)!);
+      if (
+        escalation.mergeOrder !== undefined &&
+        escalation.mergeOrder.join("\n") !== mergeOrder.join("\n")
+      ) {
+        return yield* refuse(
+          command,
+          "A ship batch merges in the order of its groups; leave mergeOrder out or match it.",
+        );
+      }
+      return { ...escalation, asksApproval: true, mergeOrder };
+    });
+
   const escalateDecision: PivotService["Service"]["escalateDecision"] = (caller, input) =>
     Effect.gen(function* () {
-      const pivot = yield* activePivot("escalate_decision", caller);
-      const { decisionId, ...escalation } = input;
+      const command = "escalate_decision";
+      const pivot = yield* activePivot(command, caller);
+      const { decisionId, ...requested } = input;
+      const escalation =
+        requested.shipGroups === undefined
+          ? requested
+          : yield* shipBatchEscalation(command, pivot, {
+              ...requested,
+              shipGroups: requested.shipGroups,
+            });
       yield* store.dispatch({
         type: "decision.escalate",
         pivotThreadId: pivot.threadId,
@@ -1121,7 +1215,6 @@ export const make = Effect.gen(function* () {
 
   // --- Delivery ---
 
-  /** A decision about this teammate that the user answered: their recorded word. */
   /** The Pivot's decision about this teammate. */
   const teammateDecision = (
     command: string,
@@ -1139,6 +1232,32 @@ export const make = Effect.gen(function* () {
         return yield* refuse(command, `Decision ${decisionId} is not about this teammate.`);
       }
       return decision;
+    });
+
+  /**
+   * The decision that delivers this ship: one about it, or a ship batch it leads, whose
+   * merge order covers every group.
+   */
+  const deliveryDecision = (
+    command: string,
+    pivot: PivotStore.PivotRow,
+    teammate: PivotStore.TeammateRow,
+    decisionId: PivotDecisionId,
+  ) =>
+    Effect.gen(function* () {
+      const decision = yield* store.getDecision(decisionId);
+      const leads =
+        decision?.escalation?.shipGroups?.some((group) => group.lead === teammate.threadId) ===
+        true;
+      if (
+        decision !== null &&
+        decision.pivotThreadId === pivot.threadId &&
+        decision.teammateThreadId === null &&
+        leads
+      ) {
+        return decision;
+      }
+      return yield* teammateDecision(command, pivot, teammate, decisionId);
     });
 
   /** Why a decision does not carry the user's approval, or null when it does. */
@@ -1308,7 +1427,7 @@ export const make = Effect.gen(function* () {
           "This project has no remote; land the branch with land_teammate.",
         );
       }
-      const decision = yield* teammateDecision(command, pivot, teammate, input.decisionId);
+      const decision = yield* deliveryDecision(command, pivot, teammate, input.decisionId);
       const link = yield* linkedPullRequest(teammate);
       if (link === null) return yield* refuse(command, "The teammate has no linked PR.");
       const ref = {
@@ -1367,7 +1486,9 @@ export const make = Effect.gen(function* () {
       if (teammate.deliveryMode !== "local-only") {
         return yield* refuse(command, "This project delivers PRs; merge with merge_teammate.");
       }
-      const decision = yield* userApproval(command, pivot, teammate, input.decisionId, "Landing");
+      const decision = yield* deliveryDecision(command, pivot, teammate, input.decisionId);
+      const unapproved = notApproved(decision, "Landing");
+      if (unapproved !== null) return yield* refuse(command, unapproved);
       const outOfOrder = yield* mergeOrderRefusals(command, pivot, teammate, decision);
       if (outOfOrder.length > 0) {
         return yield* refuse(
@@ -1394,6 +1515,43 @@ export const make = Effect.gen(function* () {
         defaultBranch: result.defaultBranch,
         landedHead: result.head,
       };
+    });
+
+  /**
+   * The lead of an approved ship batch group this ship is a member of, once the lead's work
+   * landed: its PR merged, or its branch landed in a project with no remote. Null otherwise.
+   */
+  const landedGroup = (
+    command: string,
+    pivot: PivotStore.PivotRow,
+    member: PivotStore.TeammateRow,
+  ) =>
+    Effect.gen(function* () {
+      const decisions = yield* store.listDecisions({
+        pivotThreadId: pivot.threadId,
+        openOnly: false,
+      });
+      for (const decision of decisions) {
+        if (decision.userApproved !== true) continue;
+        for (const group of decision.escalation?.shipGroups ?? []) {
+          if (!group.members.includes(member.threadId)) continue;
+          const lead = yield* store.getTeammate(group.lead);
+          if (lead === null) continue;
+          if (lead.deliveryMode === "local-only") {
+            const verdict = yield* (yield* hostOf(command, lead)).landed(command, {
+              projectId: lead.projectId,
+              worktreePath: lead.worktreePath,
+              branch: lead.branch,
+              mergedPullRequestHead: null,
+            });
+            if (verdict.landed) return lead;
+            continue;
+          }
+          const link = yield* linkedPullRequest(yield* withRecordedWorktree(lead));
+          if (link !== null && (yield* pullRequestMerged(command, lead, link))) return lead;
+        }
+      }
+      return null;
     });
 
   /**
@@ -1473,7 +1631,14 @@ export const make = Effect.gen(function* () {
 
       let reason: string;
       let landedHead: string | null = null;
-      {
+      const group = yield* landedGroup(command, pivot, teammate);
+      if (group !== null) {
+        // A squash merge leaves no trace of a member's branch in git, so its group says it landed.
+        if (worktreeExists && !(yield* host.worktreeClean(teammate.worktreePath))) {
+          return yield* refuse(command, "Not torn down: its worktree has uncommitted changes.");
+        }
+        reason = `Its work landed with its group's PR, led by "${group.title}".`;
+      } else {
         const link = yield* linkedPullRequest(teammate);
         let mergedHead: string | null = null;
         if (link?.snapshot?.state === "merged") {

@@ -1073,6 +1073,18 @@ export const make = Effect.gen(function* () {
           },
           true,
         );
+        // An approved ship batch tells each lead to ship, in the same commit as the approval.
+        if (asksApproval && command.approved === true) {
+          for (const group of decision.escalation?.shipGroups ?? []) {
+            const lead = yield* readTeammate(group.lead);
+            if (lead === null || lead.tornDownAt !== null) continue;
+            emit({
+              type: "teammate.ship-ordered",
+              threadId: lead.threadId,
+              decisionId: decision.decisionId,
+            });
+          }
+        }
         break;
       }
       case "decision.answer": {

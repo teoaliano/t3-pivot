@@ -12,6 +12,7 @@ export const BRIEF_TEXTS = {
   shipPr: "definition-of-done.ship-pr",
   shipLocal: "definition-of-done.ship-local",
   shipReview: "definition-of-done.ship-review",
+  shipOrder: "ship-order",
 } as const;
 
 /** A ship waits for review unless it was told to ship, at dispatch or by a ship batch. */
@@ -61,6 +62,21 @@ export const renderBrief = (template: string, values: BriefValues) =>
     branch: values.branch,
     baseBranch: values.baseBranch,
     worktreePath: values.worktreePath,
+    definitionOfDone: stripTemplateNote(values.definitionOfDone),
+  });
+
+export const renderShipOrder = (
+  template: string,
+  values: {
+    readonly members: ReadonlyArray<{ readonly branch: string; readonly title: string }>;
+    readonly definitionOfDone: string;
+  },
+) =>
+  fill(template, {
+    members:
+      values.members.length === 0
+        ? "None: your PR carries your own work."
+        : values.members.map((member) => `- \`${member.branch}\`: ${member.title}`).join("\n"),
     definitionOfDone: stripTemplateNote(values.definitionOfDone),
   });
 

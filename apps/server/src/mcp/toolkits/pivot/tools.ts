@@ -78,7 +78,7 @@ const OpenDecisionTool = Tool.make("open_decision", {
 
 const EscalateDecisionTool = Tool.make("escalate_decision", {
   ...pivotTool,
-  description: `${PIVOT_ONLY} Hold an open decision for the user, with its questions, evidence, consequence, options and recommendation. Set asksApproval when it needs the user's yes or no, as merging, landing and discarding do. For a merge or landing, mergeOrder lists the branches in the order they merge, every unmerged PR of yours included, so the user approves the order. It notifies the user.`,
+  description: `${PIVOT_ONLY} Hold an open decision for the user, with its questions, evidence, consequence, options and recommendation. Set asksApproval when it needs the user's yes or no, as merging, landing and discarding do. For a merge or landing, mergeOrder lists the branches in the order they merge, every unmerged PR of yours included, so the user approves the order. To ship finished work, propose one ship batch on a decision of your own: shipGroups lists the PRs in merge order, each a lead teammate and the members whose branches merge into the lead's; every teammate named must have reported done. It asks for approval, and the merge order is the leads' branches. When the user approves, each lead is told to ship. It notifies the user.`,
   parameters: PivotMcpEscalateDecisionInput,
   success: PivotMcpDecisionResult,
 }).annotate(Tool.Title, "Escalate a decision");
@@ -142,7 +142,7 @@ const RelaunchTeammateTool = Tool.make("relaunch_teammate", {
 
 const MergeTeammateTool = Tool.make("merge_teammate", {
   ...pivotTool,
-  description: `${PIVOT_ONLY} Squash-merge a ship's PR on GitHub or GitLab once the user approved its asksApproval decision. Reads live state and refuses a closed, draft or unmergeable PR and any check not green, naming every failing condition; waivedChecks only for checks the user's answer names. Also refuses out of order: a PR stacked on unlanded work, one whose predecessors in the decision's mergeOrder have not merged, or while an unmerged PR of yours is missing from that order. Pinned to the head it checked.`,
+  description: `${PIVOT_ONLY} Squash-merge a ship's PR on GitHub or GitLab once the user approved its asksApproval decision, or the ship batch it leads. Reads live state and refuses a closed, draft or unmergeable PR and any check not green, naming every failing condition; waivedChecks only for checks the user's answer names. Also refuses out of order: a PR stacked on unlanded work, one whose predecessors in the decision's mergeOrder have not merged, or while an unmerged PR of yours is missing from that order. Pinned to the head it checked.`,
   parameters: PivotMcpMergeTeammateInput,
   success: PivotMcpMergeTeammateResult,
 })
@@ -151,7 +151,7 @@ const MergeTeammateTool = Tool.make("merge_teammate", {
 
 const LandTeammateTool = Tool.make("land_teammate", {
   ...pivotTool,
-  description: `${PIVOT_ONLY} In a project with no remote, fast-forward the default branch to a ship's ready branch once the user approved its asksApproval decision. A diverged branch refuses; the teammate rebases. Refuses out of order like merge_teammate.`,
+  description: `${PIVOT_ONLY} In a project with no remote, fast-forward the default branch to a ship's ready branch once the user approved its asksApproval decision, or the ship batch it leads. A diverged branch refuses; the teammate rebases. Refuses out of order like merge_teammate.`,
   parameters: PivotMcpLandTeammateInput,
   success: PivotMcpLandTeammateResult,
 })

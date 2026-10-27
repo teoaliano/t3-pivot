@@ -99,6 +99,16 @@ export type PivotDeliveryMode = typeof PivotDeliveryMode.Type;
 export const PivotDecisionId = TrimmedNonEmptyString.pipe(Schema.brand("PivotDecisionId"));
 export type PivotDecisionId = typeof PivotDecisionId.Type;
 
+/**
+ * One PR of a ship batch: the lead merges its members' branches into its own and opens
+ * the PR. When it merges, every member counts as landed.
+ */
+export const PivotShipGroup = Schema.Struct({
+  lead: ThreadId,
+  members: Schema.Array(ThreadId),
+});
+export type PivotShipGroup = typeof PivotShipGroup.Type;
+
 /** What the Pivot hands the user when a decision needs their authority. */
 export const PivotDecisionEscalation = Schema.Struct({
   questions: Schema.NonEmptyArray(TrimmedNonEmptyString),
@@ -116,6 +126,11 @@ export const PivotDecisionEscalation = Schema.Struct({
    * order with the merge. Every unmerged PR of the Pivot's has to be in it.
    */
   mergeOrder: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  /**
+   * A ship batch: the PRs to open, in the order they merge. Approving it tells each lead
+   * to ship; the merge order is the leads' branches.
+   */
+  shipGroups: Schema.optional(Schema.Array(PivotShipGroup)),
 });
 export type PivotDecisionEscalation = typeof PivotDecisionEscalation.Type;
 

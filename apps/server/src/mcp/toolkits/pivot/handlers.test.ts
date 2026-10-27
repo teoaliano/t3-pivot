@@ -1419,6 +1419,301 @@ describe("delivery and teardown", () => {
       yield* pivots.recordUserAnswer({ decisionId: decisionId as never, answer, approved });
     });
 
+  describe("ship batches", () => {
+    /** Ships that committed their work and reported done, as the batch finds them. */
+    const doneShips = (workspaceRoot: string, pivot: ThreadId, titles: ReadonlyArray<string>) =>
+      Effect.forEach(titles, (title) =>
+        Effect.gen(function* () {
+          const ship = yield* dispatch(pivot, { title });
+          addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
+          NodeFS.writeFileSync(
+            NodePath.join(ship.worktreePath, `${ship.branch.slice(6)}.txt`),
+            "x\n",
+          );
+          sh(ship.worktreePath, "git add -A && git commit -q -m work");
+          expectOk(
+            yield* call(ship.threadId, "report_status", {
+              status: "done",
+              summary: "Ready for review",
+              evidence: { text: "Tests pass." },
+            }),
+          );
+          return ship;
+        }),
+      );
+    const proposeBatch = (
+      pivot: ThreadId,
+      shipGroups: ReadonlyArray<{ lead: ThreadId; members: ReadonlyArray<ThreadId> }>,
+      key = "ship",
+    ) =>
+      Effect.gen(function* () {
+        const pivots = yield* PivotService.PivotService;
+        const { decision } = yield* pivots.openDecision(pivot, { key, question: "Ship it?" });
+        return {
+          decisionId: decision.decisionId,
+          outcome: yield* call(pivot, "escalate_decision", {
+            decisionId: decision.decisionId,
+            questions: ["Ship these PRs in this order?"],
+            evidence: "Reviewed; the user tried it.",
+            consequence: "The PRs open and merge in order.",
+            options: [],
+            recommendation: "Ship",
+            asksApproval: true,
+            shipGroups,
+          }),
+        };
+      });
+
+    it.effect("opens a batch of PR groups in order, and refuses one naming unfinished work", () => {
+      const { workspaceRoot, layer } = setup({ remote: true });
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const [api, ui, docs] = yield* doneShips(workspaceRoot, pivot, [
+          "Add the API",
+          "Add the UI",
+          "Write the docs",
+        ]);
+        const wip = yield* dispatch(pivot, { title: "Add the logout" });
+
+        const { outcome } = yield* proposeBatch(pivot, [
+          { lead: api!.threadId, members: [ui!.threadId] },
+          { lead: docs!.threadId, members: [] },
+        ]);
+        const decision = expectOk(outcome).decision;
+        assert.deepStrictEqual(decision.escalation.mergeOrder, [api!.branch, docs!.branch]);
+        assert.isTrue(decision.escalation.asksApproval);
+
+        const refused = yield* proposeBatch(pivot, [{ lead: wip.threadId, members: [] }], "ship-2");
+        expectRefused(refused.outcome, "invalid_request", '"Add the logout" has not reported done');
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("tells each lead to ship once the user approves, then needs its PR at done", () => {
+      const { fake, workspaceRoot, layer } = setup({ remote: true });
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const [api, ui] = yield* doneShips(workspaceRoot, pivot, ["Add the API", "Add the UI"]);
+        const declined = yield* proposeBatch(
+          pivot,
+          [{ lead: api!.threadId, members: [ui!.threadId] }],
+          "first",
+        );
+        const pivots = yield* PivotService.PivotService;
+        yield* pivots.recordUserAnswer({
+          decisionId: declined.decisionId,
+          answer: "Not yet.",
+          approved: false,
+        });
+        assert.strictEqual(lastMessage(fake, api!.threadId)!.mode, "launch");
+
+        const { decisionId } = yield* proposeBatch(pivot, [
+          { lead: api!.threadId, members: [ui!.threadId] },
+        ]);
+        yield* pivots.recordUserAnswer({ decisionId, answer: "Ship it.", approved: true });
+
+        const order = lastMessage(fake, api!.threadId)!;
+        assert.strictEqual(order.senderThreadId, pivot);
+        assert.include(order.text, ui!.branch);
+        assert.include(order.text, "This task delivers a pull request.");
+        assertNoHardWraps(order.text);
+        // A member's work goes in through its lead; it is not told anything.
+        assert.strictEqual(lastMessage(fake, ui!.threadId)!.mode, "launch");
+        const lines = expectOk(yield* call(pivot, "list_teammates", {})).teammates as Array<{
+          threadId: ThreadId;
+          shipOrdered: boolean;
+        }>;
+        assert.deepStrictEqual(
+          lines.map((line) => [line.threadId, line.shipOrdered]),
+          [
+            [api!.threadId, true],
+            [ui!.threadId, false],
+          ],
+        );
+        expectRefused(
+          yield* call(api!.threadId, "report_status", {
+            status: "done",
+            summary: "Merged the UI in",
+            evidence: { text: "Tests pass." },
+          }),
+          "invalid_request",
+          "linked PR",
+        );
+      }).pipe(Effect.provide(layer));
+    });
+
+    /** Links a green PR from the lead's branch, as the lead does once told to ship. */
+    const openPr = (
+      fake: FakeV2,
+      lead: PivotMcpDispatchTeammateResult,
+      number: number,
+      detail: Partial<typeof greenPr> = {},
+    ) => {
+      const url = `https://github.com/o/r/pull/${number}`;
+      const thread = fake.threads.get(lead.threadId)!;
+      thread.shell = {
+        ...thread.shell,
+        pullRequests: [
+          {
+            ...link(),
+            number,
+            url,
+            snapshot: { ...link().snapshot, headBranch: lead.branch, baseBranch: "main" },
+          },
+        ],
+      } as typeof thread.shell;
+      fake.pullRequests.set(url, { ...greenPr, ...detail });
+      return url;
+    };
+
+    it.effect("merges the groups in order, and holds a later one while an earlier is red", () => {
+      const { fake, workspaceRoot, layer } = setup({ remote: true });
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const [api, docs] = yield* doneShips(workspaceRoot, pivot, [
+          "Add the API",
+          "Write the docs",
+        ]);
+        const { decisionId } = yield* proposeBatch(pivot, [
+          { lead: api!.threadId, members: [] },
+          { lead: docs!.threadId, members: [] },
+        ]);
+        const pivots = yield* PivotService.PivotService;
+        yield* pivots.recordUserAnswer({ decisionId, answer: "Ship it.", approved: true });
+        const apiPr = openPr(fake, api!, 21, {
+          checks: [{ name: "ci", status: "failure" as never, description: null, url: null }],
+        });
+        const docsPr = openPr(fake, docs!, 22);
+
+        // CI failed on the first PR: it does not merge, and nothing merges after it.
+        expectRefused(
+          yield* call(pivot, "merge_teammate", { threadId: api!.threadId, decisionId }),
+          "invalid_request",
+          'Check "ci" is failure',
+        );
+        expectRefused(
+          yield* call(pivot, "merge_teammate", { threadId: docs!.threadId, decisionId }),
+          "invalid_request",
+          `${api!.branch} comes before it`,
+        );
+        assert.deepStrictEqual(fake.merges, []);
+
+        fake.pullRequests.set(apiPr, greenPr);
+        expectOk(yield* call(pivot, "merge_teammate", { threadId: api!.threadId, decisionId }));
+        const thread = fake.threads.get(api!.threadId)!;
+        thread.shell = {
+          ...thread.shell,
+          pullRequests: thread.shell.pullRequests!.map((pr) => ({
+            ...pr,
+            snapshot: { ...pr.snapshot!, state: "merged" as const },
+          })),
+        } as typeof thread.shell;
+        expectOk(yield* call(pivot, "merge_teammate", { threadId: docs!.threadId, decisionId }));
+        assert.deepStrictEqual(
+          fake.merges.map((merge) => merge.url),
+          [apiPr, docsPr],
+        );
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("merges a lead whose head moved after the approval, at its new head", () => {
+      const { fake, workspaceRoot, layer } = setup({ remote: true });
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const [api] = yield* doneShips(workspaceRoot, pivot, ["Add the API"]);
+        const { decisionId } = yield* proposeBatch(pivot, [{ lead: api!.threadId, members: [] }]);
+        const pivots = yield* PivotService.PivotService;
+        yield* pivots.recordUserAnswer({ decisionId, answer: "Ship it.", approved: true });
+        // The lead fixed a conflict after an earlier merge and pushed again.
+        const url = openPr(fake, api!, 31, { headSha: "def456" });
+
+        const merged = expectOk(
+          yield* call(pivot, "merge_teammate", { threadId: api!.threadId, decisionId }),
+        );
+        assert.strictEqual(merged.mergedHead, "def456");
+        assert.deepStrictEqual(fake.merges, [{ url, expectedHeadSha: "def456" }]);
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("counts every member landed once its group's PR squash-merges", () => {
+      const { fake, workspaceRoot, layer } = setup({ remote: true });
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const [api, ui] = yield* doneShips(workspaceRoot, pivot, ["Add the API", "Add the UI"]);
+        const { decisionId } = yield* proposeBatch(pivot, [
+          { lead: api!.threadId, members: [ui!.threadId] },
+        ]);
+        const pivots = yield* PivotService.PivotService;
+        expectRefused(
+          yield* call(pivot, "teardown_teammate", { threadId: ui!.threadId }),
+          "invalid_request",
+          "has not landed",
+        );
+        yield* pivots.recordUserAnswer({ decisionId, answer: "Ship it.", approved: true });
+        // The lead merged the member in, and the forge squashed the PR onto main.
+        sh(api!.worktreePath, `git merge -q --no-edit ${ui!.branch}`);
+        // Resolving the merge reworked the member's change, so main never holds its exact tree.
+        NodeFS.writeFileSync(NodePath.join(api!.worktreePath, "add-the-ui.txt"), "reworked\n");
+        sh(api!.worktreePath, "git add -A && git commit -q -m rework");
+        sh(
+          workspaceRoot,
+          `git merge -q --squash ${api!.branch} && git commit -q -m "Add the API (#41)"`,
+        );
+        sh(workspaceRoot, "git push -q origin main");
+        const url = openPr(fake, api!, 41, { state: "merged" as never });
+        const thread = fake.threads.get(api!.threadId)!;
+        thread.shell = {
+          ...thread.shell,
+          pullRequests: thread.shell.pullRequests!.map((pr) => ({
+            ...pr,
+            snapshot: { ...pr.snapshot!, state: "merged" as const },
+          })),
+        } as typeof thread.shell;
+        assert.include(url, "/41");
+
+        const torn = expectOk(yield* call(pivot, "teardown_teammate", { threadId: ui!.threadId }));
+        assert.include(torn.reason, '"Add the API"');
+        assert.isFalse(NodeFS.existsSync(ui!.worktreePath));
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("lands an approved batch in order where the project has no remote", () => {
+      const { fake, workspaceRoot, layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const [api, docs] = yield* doneShips(workspaceRoot, pivot, [
+          "Add the API",
+          "Write the docs",
+        ]);
+        const { decisionId } = yield* proposeBatch(pivot, [
+          { lead: api!.threadId, members: [] },
+          { lead: docs!.threadId, members: [] },
+        ]);
+        const pivots = yield* PivotService.PivotService;
+        yield* pivots.recordUserAnswer({ decisionId, answer: "Land them.", approved: true });
+        assert.include(
+          lastMessage(fake, api!.threadId)!.text,
+          "This task delivers a ready branch.",
+        );
+
+        expectRefused(
+          yield* call(pivot, "land_teammate", { threadId: docs!.threadId, decisionId }),
+          "invalid_request",
+          `${api!.branch} comes before it`,
+        );
+        const first = expectOk(
+          yield* call(pivot, "land_teammate", { threadId: api!.threadId, decisionId }),
+        );
+        assert.strictEqual(sh(workspaceRoot, "git rev-parse main"), first.landedHead);
+        // The second lead catches up with the default branch, as its ship order says.
+        sh(docs!.worktreePath, "git rebase -q main");
+        const second = expectOk(
+          yield* call(pivot, "land_teammate", { threadId: docs!.threadId, decisionId }),
+        );
+        assert.strictEqual(sh(workspaceRoot, "git rev-parse main"), second.landedHead);
+      }).pipe(Effect.provide(layer));
+    });
+  });
+
   it.effect("merges only on the user's approval, not on any answer", () => {
     const { fake, layer } = setup({ remote: true });
     return Effect.gen(function* () {
