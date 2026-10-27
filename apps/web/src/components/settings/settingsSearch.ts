@@ -263,22 +263,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["new thread project provider reasoning effort"],
   },
   {
-    id: "pivot-model",
-    title: "Pivot model",
-    to: "/settings/threads",
-    scope: "project-defaults",
-    searchTerms: ["new pivot supervisor provider reasoning effort"],
-  },
-  {
-    id: "teammate-models",
-    title: "Teammate models",
-    to: "/settings/threads",
-    scope: "project-defaults",
-    searchTerms: [
-      "pivot teammates dispatch research fixes coding provider reasoning effort ship scout",
-    ],
-  },
-  {
     id: "default-permissions",
     title: "Permissions",
     to: "/settings/threads",

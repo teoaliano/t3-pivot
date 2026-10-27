@@ -6,7 +6,7 @@ import { Kbd } from "../ui/kbd";
 
 /**
  * One choice in a question attached to the composer: a radio, or a checkbox when more
- * than one can be picked, and its 1–9 shortcut. Used by provider questions and by Pivot decisions.
+ * than one can be picked, and its 1–9 shortcut.
  */
 export function ComposerOptionRow(props: {
   label: string;

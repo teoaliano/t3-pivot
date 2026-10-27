@@ -101,12 +101,7 @@ export function SidebarDragBoundary(props: {
 // The tab bar replaces the section headers; they stay as invisible markers
 // because they bound the drag sections.
 export function SidebarSectionMarker(props: {
-  marker:
-    | "pivots-header"
-    | "threads-header"
-    | "working-header"
-    | "snoozed-header"
-    | "settled-header";
+  marker: "working-header" | "snoozed-header" | "settled-header";
 }) {
   return (
     <SortableSidebarMarker

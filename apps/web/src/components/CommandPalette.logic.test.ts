@@ -58,20 +58,6 @@ describe("linked pull request thread navigation", () => {
 });
 
 describe("reduceCommandPaletteUiState", () => {
-  it("opens the New Pivot project picker from another overlay", () => {
-    expect(
-      reduceCommandPaletteUiState(
-        { open: true, mode: "files", openIntent: null, session: 0 },
-        { _tag: "OpenNewPivotIn" },
-      ),
-    ).toEqual({
-      open: true,
-      mode: "command",
-      openIntent: { kind: "new-pivot-in" },
-      session: 1,
-    });
-  });
-
   it("opens PR search from another overlay and replaces an earlier search", () => {
     const first = reduceCommandPaletteUiState(
       { open: true, mode: "files", openIntent: null, session: 0 },

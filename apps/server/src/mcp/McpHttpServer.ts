@@ -26,8 +26,6 @@ import * as DeviceService from "../device/DeviceService.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
-import * as PivotHandlers from "./toolkits/pivot/handlers.ts";
-import { PivotToolkit, TeammateToolkit } from "./toolkits/pivot/tools.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as AnalyticsService from "../telemetry/AnalyticsService.ts";
 import {
@@ -1057,12 +1055,6 @@ export const layerDeviceToolkit = Layer.mergeAll(
   layerDeviceScreenshotRegistration,
 );
 
-// Every caller sees these; each call checks the caller is the active Pivot or a teammate.
-const layerPivotToolkit = Layer.mergeAll(
-  toolkitRegistration(PivotToolkit, PivotHandlers.layerPivot),
-  toolkitRegistration(TeammateToolkit, PivotHandlers.layerTeammate),
-);
-
 export const layerMcpTransport = McpServer.layerHttp({
   name: "T3 Code",
   version: packageJson.version,
@@ -1083,5 +1075,4 @@ export const layer = Layer.mergeAll(
   layerPullRequestsToolkit,
   layerDeviceToolkit,
   layerHtmlToolkit,
-  layerPivotToolkit,
 ).pipe(Layer.provideMerge(layerMcpTransport));

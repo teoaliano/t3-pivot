@@ -1,6 +1,5 @@
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
-import * as ThreadToolRestrictions from "./ThreadToolRestrictions.ts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   isOrchestrationV2WorkActive,
@@ -424,13 +423,8 @@ export const layerWithOptions = (
               threadId,
               Effect.gen(function* () {
                 // Live providers build MCP clients once; reuse credentials across workspace handoffs.
-                const access = yield* agentAccessSettings(threadId);
-                const restricted =
-                  yield* (yield* ThreadToolRestrictions.ThreadToolRestrictions).withoutBrowserOrDevice(
-                    threadId,
-                  );
-                const browserToolsAvailable = access.browser && !restricted;
-                const deviceToolsAvailable = access.device && !restricted;
+                const { browser: browserToolsAvailable, device: deviceToolsAvailable } =
+                  yield* agentAccessSettings(threadId);
                 const capabilities = new Set<
                   import("../mcp/McpInvocationContext.ts").McpCapability
                 >(["orchestration", "worktree", "pull-requests"]);

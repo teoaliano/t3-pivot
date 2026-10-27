@@ -5,10 +5,8 @@ import {
 } from "@t3tools/client-runtime/state/models";
 import { pendingSubagentRequestsByThread } from "@t3tools/client-runtime/state/threads";
 import type { AnyRouter } from "@tanstack/react-router";
-import type { PivotState } from "@t3tools/client-runtime/pivot-state";
 import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
 import type { ClientSettings } from "@t3tools/contracts/settings";
-import { pivotTurnAnswersUser } from "@t3tools/shared/teammateStatus";
 import * as Option from "effect/Option";
 import type { AtomRegistry } from "effect/reactivity";
 import {
@@ -17,12 +15,10 @@ import {
   MessageCircleQuestionIcon,
   ShieldQuestionIcon,
 } from "lucide-react";
-import type { ReactNode } from "react";
 
 import { getClientSettings, subscribeClientSettings } from "../hooks/useSettings";
 import { isWindowsPlatform } from "../lib/utils";
 import { environmentSummaries } from "../state/presentation";
-import { pivotStateAtom } from "../state/pivot";
 import { environmentShell } from "../state/shell";
 import {
   hasDesktopNotifications,
@@ -33,8 +29,6 @@ import {
   unlockNotificationAudio,
 } from "../threadNotifications";
 import { resolveSidebarThreadStatus, type SidebarThreadStatus } from "./Sidebar.logic";
-import { pivotNoticesBetween } from "./pivot/pivotNotifications.logic";
-import { threadNotifiesUser } from "./sidebar/pivotNesting.logic";
 import {
   createThreadNotificationGate,
   type ThreadNotificationKind,
@@ -52,7 +46,6 @@ interface NotificationState extends ThreadNotificationObservation {
 interface WatchedEnvironment {
   unsubscribe: () => void;
   previous: Map<ThreadId, NotificationState>;
-  pivotState: PivotState | null;
   readonly gate: ReturnType<typeof createThreadNotificationGate<ThreadId>>;
 }
 
@@ -78,25 +71,30 @@ export function startThreadNotifications(
     setNotificationBadge(0);
   };
 
-  // Plays the sound, then shows a toast while focused elsewhere, or a desktop notification.
   // Completions fire from a timer, so read settings, focus and route when presenting.
-  const emit = (
+  const present = (
     environmentId: EnvironmentId,
-    notice: {
-      readonly kind: ThreadNotificationKind;
-      readonly title: string;
-      readonly threadId: ThreadId;
-      readonly description: string;
-      readonly tone: "success" | "error" | "warning";
-      readonly icon: ReactNode;
-    },
+    state: NotificationState,
+    kind: ThreadNotificationKind,
   ) => {
-    const { kind, title, threadId } = notice;
+    const { thread, status } = state;
     const { notificationMode: mode, inAppNotificationsEnabled } = getClientSettings();
     const active = (router.state.matches.at(-1)?.params ?? {}) as {
       environmentId?: string;
       threadId?: string;
     };
+    const title =
+      kind === "completion"
+        ? "Thread completed"
+        : status === "approval"
+          ? "Approval needed"
+          : status === "limited"
+            ? "Usage limit reached"
+            : status === "failed"
+              ? "Thread failed"
+              : status === "request"
+                ? "Guest request"
+                : "Input needed";
     if (hasNotificationSound(mode)) {
       void playNotificationSound(kind, () =>
         hasNotificationSound(getClientSettings().notificationMode),
@@ -106,20 +104,32 @@ export function startThreadNotifications(
       inAppNotificationsEnabled &&
       document.visibilityState === "visible" &&
       document.hasFocus() &&
-      (active.environmentId !== environmentId || active.threadId !== threadId)
+      (active.environmentId !== environmentId || active.threadId !== thread.id)
     ) {
       const toastId = toastManager.add({
-        type: notice.tone,
+        type: kind === "completion" ? "success" : status === "failed" ? "error" : "warning",
         title,
-        description: notice.description,
-        data: { hideCopyButton: true, leadingIcon: notice.icon },
+        description: thread.title,
+        data: {
+          hideCopyButton: true,
+          leadingIcon:
+            kind === "completion" ? (
+              <CircleCheckIcon aria-hidden className="size-4 text-success-foreground" />
+            ) : status === "approval" ? (
+              <ShieldQuestionIcon aria-hidden className="size-4 text-warning-foreground" />
+            ) : status === "failed" ? (
+              <CircleAlertIcon aria-hidden className="size-4 text-destructive-foreground" />
+            ) : (
+              <MessageCircleQuestionIcon aria-hidden className="size-4 text-info-foreground" />
+            ),
+        },
         actionProps: {
           children: "Open thread",
           onClick: () => {
             toastManager.close(toastId);
             void router.navigate({
               to: "/$environmentId/$threadId",
-              params: { environmentId, threadId },
+              params: { environmentId, threadId: thread.id },
             });
           },
         },
@@ -135,8 +145,8 @@ export function startThreadNotifications(
       return;
     try {
       const notification = new Notification(title, {
-        body: notice.description,
-        tag: threadNotificationTag(environmentId, threadId),
+        body: thread.title,
+        tag: threadNotificationTag(environmentId, thread.id),
         silent: true,
         // Windows drops clicks after a toast moves into Notification Center.
         requireInteraction: kind === "completion" && isWindowsPlatform(navigator.platform),
@@ -148,90 +158,11 @@ export function startThreadNotifications(
         void window.desktopBridge?.revealWindow?.().catch(() => undefined);
         void router.navigate({
           to: "/$environmentId/$threadId",
-          params: { environmentId, threadId },
+          params: { environmentId, threadId: thread.id },
         });
       });
     } catch {
       // Some browsers expose Notification but reject desktop presentation.
-    }
-  };
-
-  const present = (
-    environmentId: EnvironmentId,
-    state: NotificationState,
-    kind: ThreadNotificationKind,
-    pivotState: PivotState | null,
-  ) => {
-    const { thread, status } = state;
-    // A teammate's news reaches the user through its Pivot, unless it holds for them.
-    if (!threadNotifiesUser(thread.id, pivotState, kind === "completion" ? "ready" : status))
-      return;
-    // A Pivot finishing a turn the user did not start (a teammate wake) is not news.
-    if (
-      kind === "completion" &&
-      pivotState?.pivots[thread.id] !== undefined &&
-      !pivotTurnAnswersUser(state.raw)
-    )
-      return;
-    emit(environmentId, {
-      kind,
-      threadId: thread.id,
-      description: thread.title,
-      title:
-        kind === "completion"
-          ? "Thread completed"
-          : status === "approval"
-            ? "Approval needed"
-            : status === "limited"
-              ? "Usage limit reached"
-              : status === "failed"
-                ? "Thread failed"
-                : status === "request"
-                  ? "Guest request"
-                  : "Input needed",
-      tone: kind === "completion" ? "success" : status === "failed" ? "error" : "warning",
-      icon:
-        kind === "completion" ? (
-          <CircleCheckIcon aria-hidden className="size-4 text-success-foreground" />
-        ) : status === "approval" ? (
-          <ShieldQuestionIcon aria-hidden className="size-4 text-warning-foreground" />
-        ) : status === "failed" ? (
-          <CircleAlertIcon aria-hidden className="size-4 text-destructive-foreground" />
-        ) : (
-          <MessageCircleQuestionIcon aria-hidden className="size-4 text-info-foreground" />
-        ),
-    });
-  };
-
-  // A Pivot also speaks up when it holds a decision for the user or a scout's findings are in.
-  const presentPivotNotices = (
-    environmentId: EnvironmentId,
-    entry: WatchedEnvironment,
-    notices: ReturnType<typeof pivotNoticesBetween>,
-  ) => {
-    for (const notice of notices) {
-      emit(
-        environmentId,
-        notice.kind === "decision"
-          ? {
-              kind: "input",
-              title: "The Pivot needs you",
-              threadId: notice.pivotThreadId,
-              description: entry.previous.get(notice.pivotThreadId)?.thread.title ?? "Pivot",
-              tone: "warning",
-              icon: (
-                <MessageCircleQuestionIcon aria-hidden className="size-4 text-info-foreground" />
-              ),
-            }
-          : {
-              kind: "completion",
-              title: "Scout findings ready",
-              threadId: notice.pivotThreadId,
-              description: notice.teammateTitle,
-              tone: "success",
-              icon: <CircleCheckIcon aria-hidden className="size-4 text-success-foreground" />,
-            },
-      );
     }
   };
 
@@ -290,11 +221,10 @@ export function startThreadNotifications(
   const watchEnvironment = (environmentId: EnvironmentId): WatchedEnvironment => {
     const entry: WatchedEnvironment = {
       previous: new Map(),
-      pivotState: null,
       unsubscribe: () => {},
       gate: createThreadNotificationGate<ThreadId>((threadId, kind) => {
         const state = entry.previous.get(threadId);
-        if (state) present(environmentId, state, kind, entry.pivotState);
+        if (state) present(environmentId, state, kind);
       }),
     };
     const unsubscribeShell = registry.subscribe(
@@ -313,23 +243,8 @@ export function startThreadNotifications(
       },
       { immediate: true },
     );
-    const unsubscribePivot = registry.subscribe(
-      pivotStateAtom(environmentId),
-      (pivotState) => {
-        const previousPivotState = entry.pivotState;
-        entry.pivotState = pivotState;
-        if (pivotState === null) return;
-        presentPivotNotices(
-          environmentId,
-          entry,
-          pivotNoticesBetween(previousPivotState, pivotState),
-        );
-      },
-      { immediate: true },
-    );
     entry.unsubscribe = () => {
       unsubscribeShell();
-      unsubscribePivot();
       entry.gate.clear();
     };
     return entry;
