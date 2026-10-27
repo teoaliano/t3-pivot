@@ -97,7 +97,7 @@ describe("TeammateHost (local)", () => {
         assert.include(thread.messages[0]?.text, launchInput.intent);
         assert.include(thread.messages[0]?.text, result.branch);
         assert.include(thread.messages[0]?.text, "timeout -k 30 <seconds> <command>");
-        assert.include(thread.messages[0]?.text, "stop every dev server");
+        assert.include(thread.messages[0]?.text, "stop it with `preview_stop_server`");
         assert.strictEqual(result.runId, fake.threads.get(result.threadId)!.shell.latestRunId);
       }).pipe(Effect.provide(layer));
     },
