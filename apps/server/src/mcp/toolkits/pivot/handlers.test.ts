@@ -196,6 +196,32 @@ describe("Pivot and teammate tools", () => {
     }).pipe(Effect.provide(layer));
   });
 
+  it.effect("reads back the predecessor's handoff and thread", () => {
+    const { layer } = setup();
+    return Effect.gen(function* () {
+      const first = yield* createPivot;
+      expectOk(yield* call(first, "read_handoff", {}));
+      assert.deepStrictEqual(expectOk(yield* call(first, "read_handoff", {})), {
+        predecessorThreadId: null,
+        handoff: null,
+      });
+      const pivots = yield* PivotService.PivotService;
+      const successor = (yield* pivots.create({ projectId, modelSelection, takeover: true }))
+        .threadId;
+      const store = yield* PivotStore.PivotStore;
+      yield* store.dispatch({
+        type: "pivot.record-handoff",
+        threadId: first,
+        text: "Goals: login fixed before Friday.",
+      });
+      assert.deepStrictEqual(expectOk(yield* call(successor, "read_handoff", {})), {
+        predecessorThreadId: first,
+        handoff: "Goals: login fixed before Friday.",
+      });
+      expectRefused(yield* call(first, "read_handoff", {}), "capability_denied", "retired");
+    }).pipe(Effect.provide(layer));
+  });
+
   describe("dispatch_teammate", () => {
     it.effect("launches a ship with the brief as the Pivot's first message on pivot/<slug>", () => {
       const { fake, layer } = setup({ remote: true });

@@ -168,6 +168,17 @@ export const PivotMcpListTeammatesResult = Schema.Struct({
 });
 export type PivotMcpListTeammatesResult = typeof PivotMcpListTeammatesResult.Type;
 
+export const PivotMcpReadHandoffInput = Schema.Struct({});
+export type PivotMcpReadHandoffInput = typeof PivotMcpReadHandoffInput.Type;
+
+export const PivotMcpReadHandoffResult = Schema.Struct({
+  /** The retired Pivot you took over from; null for a Pivot that took over from none. */
+  predecessorThreadId: Schema.NullOr(ThreadId),
+  /** What it wrote for you as it retired; null when it wrote none. */
+  handoff: Schema.NullOr(Schema.String),
+});
+export type PivotMcpReadHandoffResult = typeof PivotMcpReadHandoffResult.Type;
+
 export const PIVOT_HISTORY_DEFAULT_LIMIT = 20;
 export const PIVOT_HISTORY_MAX_LIMIT = 100;
 

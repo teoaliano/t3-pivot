@@ -36,6 +36,8 @@ import {
   type PivotMcpPromoteScoutInput,
   type PivotMcpRecordScoutReportInput,
   type PivotMcpRecordScoutReportResult,
+  type PivotMcpReadHandoffInput,
+  type PivotMcpReadHandoffResult,
   type PivotMcpRecordVerdictInput,
   type PivotMcpRecordVerdictResult,
   type PivotMcpReportStatusInput,
@@ -198,6 +200,11 @@ export class PivotService extends Context.Service<
       caller: ThreadId,
       input: PivotMcpListTeammatesInput,
     ) => Result<PivotMcpListTeammatesResult>;
+    /** The predecessor's handoff and thread, to read again after a compaction. */
+    readonly readHandoff: (
+      caller: ThreadId,
+      input: PivotMcpReadHandoffInput,
+    ) => Result<PivotMcpReadHandoffResult>;
     readonly teammateHistory: (
       caller: ThreadId,
       input: PivotMcpTeammateHistoryInput,
@@ -1109,6 +1116,16 @@ export const make = Effect.gen(function* () {
       return { teammates: yield* Effect.forEach(teammates, teammateLine) };
     });
 
+  const readHandoff: PivotService["Service"]["readHandoff"] = (caller) =>
+    Effect.gen(function* () {
+      const pivot = yield* activePivot("read_handoff", caller);
+      const predecessor = yield* store.getPredecessor(pivot.threadId);
+      return {
+        predecessorThreadId: predecessor?.threadId ?? null,
+        handoff: predecessor?.handoff ?? null,
+      };
+    });
+
   const teammateHistory: PivotService["Service"]["teammateHistory"] = (caller, input) =>
     Effect.gen(function* () {
       const command = "teammate_history";
@@ -1857,6 +1874,7 @@ export const make = Effect.gen(function* () {
     markDecisionMoot,
     recordVerdict,
     listTeammates,
+    readHandoff,
     teammateHistory,
     stopTeammate,
     relaunchTeammate,

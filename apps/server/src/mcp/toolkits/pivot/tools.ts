@@ -18,6 +18,8 @@ import {
   PivotMcpPromoteScoutInput,
   PivotMcpRecordScoutReportInput,
   PivotMcpRecordScoutReportResult,
+  PivotMcpReadHandoffInput,
+  PivotMcpReadHandoffResult,
   PivotMcpRecordVerdictInput,
   PivotMcpRecordVerdictResult,
   PivotMcpReportStatusInput,
@@ -113,6 +115,15 @@ const ListTeammatesTool = Tool.make("list_teammates", {
   .annotate(Tool.Title, "List teammates")
   .annotate(Tool.Readonly, true);
 
+const ReadHandoffTool = Tool.make("read_handoff", {
+  ...pivotTool,
+  description: `${PIVOT_ONLY} The handoff the retired Pivot you took over from wrote as it retired, and its thread, for when your first wake fell out of your context. Null handoff when it wrote none.`,
+  parameters: PivotMcpReadHandoffInput,
+  success: PivotMcpReadHandoffResult,
+})
+  .annotate(Tool.Title, "Read the handoff")
+  .annotate(Tool.Readonly, true);
+
 const TeammateHistoryTool = Tool.make("teammate_history", {
   ...pivotTool,
   description: `${PIVOT_ONLY} A teammate's status reports, status changes and decisions, newest first. Page back with beforeSequence.`,
@@ -177,6 +188,7 @@ export const PivotToolkit = Toolkit.make(
   MarkDecisionMootTool,
   RecordVerdictTool,
   ListTeammatesTool,
+  ReadHandoffTool,
   TeammateHistoryTool,
   StopTeammateTool,
   RelaunchTeammateTool,

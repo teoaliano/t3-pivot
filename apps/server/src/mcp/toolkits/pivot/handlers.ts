@@ -64,6 +64,9 @@ const pivotHandlers = {
   list_teammates: McpToolAccess.readsAsCaller((input) =>
     asCaller((service, caller) => service.listTeammates(caller, input)),
   ),
+  read_handoff: McpToolAccess.readsAsCaller((input) =>
+    asCaller((service, caller) => service.readHandoff(caller, input)),
+  ),
   teammate_history: McpToolAccess.readsAsCaller((input) =>
     asCaller((service, caller) => service.teammateHistory(caller, input)),
   ),
