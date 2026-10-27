@@ -1643,6 +1643,7 @@ export const make = Effect.gen(function* () {
 
       let reason: string;
       let landedHead: string | null = null;
+      let discarding = false;
       const group = yield* landedGroup(command, pivot, teammate);
       if (group !== null) {
         // A squash merge leaves no trace of a member's branch in git, so its group says it landed.
@@ -1675,6 +1676,7 @@ export const make = Effect.gen(function* () {
           landedHead = verdict.head;
         } else if (input.discardDecisionId !== undefined) {
           yield* userApproval(command, pivot, teammate, input.discardDecisionId, "Discarding work");
+          discarding = true;
           reason = `Discarded on the user's word: ${verdict.reason}`;
         } else {
           return yield* refuse(
@@ -1683,7 +1685,6 @@ export const make = Effect.gen(function* () {
           );
         }
       }
-      const discarding = reason.startsWith("Discarded");
       // Landed work's branch goes while it is still at the verified tip; discarded work keeps it.
       const branchDisposal =
         discarding || landedHead === null ? ("keep" as const) : { tip: landedHead };

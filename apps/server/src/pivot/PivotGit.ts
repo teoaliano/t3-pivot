@@ -134,6 +134,8 @@ export const make = Effect.gen(function* () {
   const branchExists = (cwd: string, branch: string) =>
     succeeds(cwd, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
 
+  const currentBranch = (cwd: string) => git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+
   const defaultBranch = Effect.fn("PivotGit.defaultBranch")(function* (cwd: string) {
     if (yield* hasRemote(cwd)) {
       const head = yield* run(cwd, [
@@ -149,7 +151,7 @@ export const make = Effect.gen(function* () {
     for (const candidate of ["main", "master"]) {
       if (yield* branchExists(cwd, candidate)) return candidate;
     }
-    return yield* git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+    return yield* currentBranch(cwd);
   });
 
   const commitOf = (cwd: string, revision: string) =>
@@ -339,8 +341,7 @@ export const make = Effect.gen(function* () {
 
   return PivotGit.of({
     checkoutState,
-    currentBranch: (cwd) =>
-      git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]).pipe(Effect.map((out) => out.trim())),
+    currentBranch,
     isRepository: (cwd) =>
       succeeds(cwd, ["rev-parse", "--is-inside-work-tree"]).pipe(Effect.orElseSucceed(() => false)),
     hasRemote,

@@ -13,7 +13,6 @@ import {
   CommandId,
   MessageId,
   type ModelSelection,
-  type OrchestrationV2RunStatus,
   type OrchestrationV2ThreadShell,
   type ProjectId,
   type OrchestrationV2DomainEvent,
@@ -106,14 +105,6 @@ export const setupScriptOutcome = (snapshot: WorktreeSetupSnapshot | null): Setu
       };
   }
 };
-
-const ENDED_RUN_STATUSES: ReadonlySet<OrchestrationV2RunStatus> = new Set([
-  "completed",
-  "interrupted",
-  "failed",
-  "cancelled",
-  "rolled_back",
-]);
 
 /** What the supervisor hears from V2, already narrowed to what Pivot mode acts on. */
 export type PivotThreadEvent =
@@ -524,7 +515,7 @@ export const make = Effect.gen(function* () {
       threads.getThreadRecords(threadId, ["runs", "messages"], { runIds: [runId] }).pipe(
         Effect.map((records) => {
           const run = records.runs.find((candidate) => candidate.id === runId);
-          if (run !== undefined && !ENDED_RUN_STATUSES.has(run.status)) {
+          if (run !== undefined && !ThreadManagement.isTerminalRunStatus(run.status)) {
             return { type: "pending" as const };
           }
           const reply = records.messages

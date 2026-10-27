@@ -23,10 +23,10 @@ export interface WakeTeammate {
   readonly resume: TeammateResumeState | null;
   readonly tornDown: boolean;
   /** Where it works, and the user's first words for it: what a digest names for each teammate. */
-  readonly branch?: string;
-  readonly worktreePath?: string;
-  readonly goal?: string | null;
-  readonly verdict?: string | null;
+  readonly branch: string;
+  readonly worktreePath: string;
+  readonly goal: string | null;
+  readonly verdict: string | null;
 }
 
 /** A wake that tells the whole state, not only what changed. */
@@ -72,13 +72,9 @@ const digestNotes = (teammate: WakeTeammate): ReadonlyArray<string> =>
   teammate.tornDown
     ? []
     : [
-        ...(teammate.branch === undefined
-          ? []
-          : [
-              `On ${teammate.branch}${teammate.worktreePath === undefined ? "" : ` in ${teammate.worktreePath}`}.`,
-            ]),
-        ...(teammate.goal == null ? [] : [`Goal: ${quote(teammate.goal)}`]),
-        ...(teammate.verdict == null ? [] : [`Your verdict: ${quote(teammate.verdict)}`]),
+        `On ${teammate.branch} in ${teammate.worktreePath}.`,
+        ...(teammate.goal === null ? [] : [`Goal: ${quote(teammate.goal)}`]),
+        ...(teammate.verdict === null ? [] : [`Your verdict: ${quote(teammate.verdict)}`]),
       ];
 
 const teammateLine = (teammate: WakeTeammate) => {
