@@ -795,7 +795,10 @@ export const make = Effect.gen(function* () {
               title: input.title,
               branch: launched.branch,
               baseBranch: launched.baseBranch,
-              worktreePath: launched.runId === null ? null : launched.worktreePath,
+              worktreePath:
+                launched.runId === null && launched.start === undefined
+                  ? null
+                  : launched.worktreePath,
               deliveryMode: launched.deliveryMode,
               intent: input.intent,
               spec: input.spec,
@@ -818,10 +821,11 @@ export const make = Effect.gen(function* () {
               ),
             );
           }
+          const runId = launched.start === undefined ? launched.runId : yield* launched.start;
           const start =
-            launched.runId === null
+            runId === null
               ? ({ type: "failed", runId: null, detail: "The launch created no run." } as const)
-              : yield* host.awaitStart(launched.threadId, launched.runId);
+              : yield* host.awaitStart(launched.threadId, runId);
           // A failing setup script still starts the teammate; the result says so.
           const setup = yield* host.setupOutcome(launched.threadId);
           return {
@@ -1547,6 +1551,9 @@ export const make = Effect.gen(function* () {
           const lead = yield* store.getTeammate(group.lead);
           if (lead === null) continue;
           if (lead.deliveryMode === "local-only") {
+            // land_teammate records the landing; once the lead is torn down its branch is gone.
+            const history = yield* store.teammateHistory({ threadId: lead.threadId, limit: 500 });
+            if (history.some((stored) => stored.event.type === "teammate.landed")) return lead;
             const verdict = yield* (yield* hostOf(command, lead)).landed(command, {
               projectId: lead.projectId,
               worktreePath: lead.worktreePath,

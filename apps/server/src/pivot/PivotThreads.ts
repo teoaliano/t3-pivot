@@ -158,19 +158,17 @@ export class PivotThreads extends Context.Service<
       readonly text: string;
     }) => Effect.Effect<TeammateLaunch, PivotThreadsError>;
     /**
-     * Starts a teammate in a checkout that already exists, with `text` as its first message
-     * from the Pivot: a worktree on its branch, or with both null, the project's own
-     * checkout. Nothing is prepared: no worktree, no setup script.
+     * Creates a teammate's thread in a checkout that already exists, with no message yet: a
+     * worktree on its branch, or with both null, the project's own checkout. Nothing is
+     * prepared: no worktree, no setup script. `request` sends its brief.
      */
-    readonly startTeammate: (input: {
+    readonly createTeammateThread: (input: {
       readonly projectId: ProjectId;
-      readonly pivotThreadId: ThreadId;
       readonly title: string;
       readonly branch: string | null;
       readonly worktreePath: string | null;
       readonly modelSelection: ModelSelection;
-      readonly text: string;
-    }) => Effect.Effect<TeammateLaunch, PivotThreadsError>;
+    }) => Effect.Effect<ThreadId, PivotThreadsError>;
     /** Waits until a run leaves preparation: started, or failed with V2's last error. */
     readonly awaitStart: (
       threadId: ThreadId,
@@ -390,8 +388,8 @@ export const make = Effect.gen(function* () {
         return threadId;
       }).pipe(Effect.mapError(fail("create the Pivot thread"))),
 
-    startTeammate: (input) =>
-      Effect.gen(function* () {
+    createTeammateThread: Effect.fn("PivotThreads.createTeammateThread")(
+      function* (input) {
         const threadId = ThreadId.make(`thread-teammate-${yield* randomUuidV4}`);
         // Created directly rather than launched: a launch prepares its workspace and runs the
         // setup script, and this checkout is already prepared and in use.
@@ -409,21 +407,10 @@ export const make = Effect.gen(function* () {
           createdBy: "agent",
           creationSource: "mcp",
         });
-        yield* threads.sendToThread({
-          projectId: input.projectId,
-          commandId: yield* commandId("teammate-brief"),
-          threadId,
-          messageId: yield* messageId,
-          senderThreadId: input.pivotThreadId,
-          text: input.text,
-          attachments: [],
-          mode: "queue",
-          createdBy: "agent",
-          creationSource: "mcp",
-        });
-        const shell = yield* threads.getThreadShell(threadId);
-        return { threadId, runId: shell?.latestRunId ?? null };
-      }).pipe(Effect.mapError(fail("start the teammate"))),
+        return threadId;
+      },
+      Effect.mapError(fail("create the teammate thread")),
+    ),
 
     launchTeammate: (input) =>
       Effect.gen(function* () {

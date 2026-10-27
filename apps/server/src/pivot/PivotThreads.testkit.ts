@@ -210,10 +210,9 @@ export const layer = (fake: FakeV2) =>
           fake.starts.set(threadId, outcome.start);
           return { threadId, runId: outcome.start.runId };
         }),
-      startTeammate: (input) =>
+      createTeammateThread: (input) =>
         Effect.sync(() => {
           const threadId = allocate(fake, "teammate");
-          const start: RunStart = { type: "started", runId: RunId.make(`run-${threadId}`) };
           fake.threads.set(threadId, {
             threadId,
             projectId: input.projectId,
@@ -227,11 +226,10 @@ export const layer = (fake: FakeV2) =>
             settled: false,
             stops: 0,
             relaunches: 0,
-            messages: [{ senderThreadId: input.pivotThreadId, text: input.text, mode: "launch" }],
-            shell: { latestRunId: start.runId },
+            messages: [],
+            shell: {},
           });
-          fake.starts.set(threadId, start);
-          return { threadId, runId: start.runId };
+          return threadId;
         }),
       awaitStart: (threadId) =>
         Effect.sync(
@@ -278,7 +276,13 @@ export const layer = (fake: FakeV2) =>
       request: ({ threadId, senderThreadId, text }) =>
         Effect.map(thread(fake, threadId, "request"), (found) => {
           found.messages.push({ senderThreadId, text, mode: "queue" });
-          return RunId.make(`run-request-${threadId}-${found.messages.length}`);
+          const runId = RunId.make(`run-request-${threadId}-${found.messages.length}`);
+          // A first message starts the thread's first run.
+          if (!fake.starts.has(threadId)) {
+            fake.starts.set(threadId, { type: "started", runId });
+            found.shell = { ...found.shell, latestRunId: runId };
+          }
+          return runId;
         }),
       runReply: (threadId) =>
         Effect.sync(() =>

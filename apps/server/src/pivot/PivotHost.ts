@@ -310,6 +310,10 @@ export const make = Effect.gen(function* () {
       if (input.baseBranch !== undefined && !isBranchName(input.baseBranch)) {
         return yield* refuse(command, "The base branch is not a valid branch name.");
       }
+      // A scout reads the project's own checkout, which on a host belongs to someone else.
+      if (input.kind === "scout") {
+        return yield* refuse(command, "Scouts run on the Pivot's own environment.");
+      }
       return yield* dispatchLocks.withLock(
         `${first.grantId}\u0000${input.dispatchId}`,
         host.withProjectLock(
@@ -480,15 +484,9 @@ export const make = Effect.gen(function* () {
       yield* host.project(command, teammate.projectId);
       const worktreePath = yield* worktreeOf(teammate);
       const worktreeExists = yield* host.worktreeExists(worktreePath);
-      const inMainCheckout = teammate.kind === "scout";
       // Refused before anything stops: tearing down stops the session first, and removing a
       // dirty worktree then fails, leaving a stopped teammate behind a vague failure.
-      if (
-        !inMainCheckout &&
-        !input.force &&
-        worktreeExists &&
-        !(yield* host.worktreeClean(worktreePath))
-      ) {
+      if (!input.force && worktreeExists && !(yield* host.worktreeClean(worktreePath))) {
         return yield* new PivotHostRefusedError({
           code: "worktree-not-clean",
           reason:
@@ -505,7 +503,8 @@ export const make = Effect.gen(function* () {
         // The host cannot tell whether the home merged the work, so git decides: an unmerged
         // branch stays, and discarded work keeps its branch.
         branchDisposal: input.force ? "keep" : "safe",
-        inMainCheckout,
+        // Hosted scouts, from before hosts refused them, have worktrees of their own.
+        inMainCheckout: false,
       });
       yield* store.markTornDown(teammate.threadId);
     });

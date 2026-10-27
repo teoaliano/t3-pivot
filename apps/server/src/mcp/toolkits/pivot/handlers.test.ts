@@ -1702,6 +1702,38 @@ describe("delivery and teardown", () => {
       }).pipe(Effect.provide(layer));
     });
 
+    it.effect(
+      "counts a member landed after its lead landed and was torn down, with no remote",
+      () => {
+        const { workspaceRoot, layer } = setup();
+        return Effect.gen(function* () {
+          const pivot = yield* createPivot;
+          const [api, ui] = yield* doneShips(workspaceRoot, pivot, ["Add the API", "Add the UI"]);
+          const { decisionId } = yield* proposeBatch(pivot, [
+            { lead: api!.threadId, members: [ui!.threadId] },
+          ]);
+          const pivots = yield* PivotService.PivotService;
+          yield* pivots.recordUserAnswer({ decisionId, answer: "Land it.", approved: true });
+          sh(api!.worktreePath, `git merge -q --no-edit ${ui!.branch}`);
+          NodeFS.writeFileSync(NodePath.join(api!.worktreePath, "add-the-ui.txt"), "reworked\n");
+          sh(api!.worktreePath, "git add -A && git commit -q -m rework");
+          // The default branch moved meanwhile, so the lead rebases, rewriting the member's commits.
+          NodeFS.writeFileSync(NodePath.join(workspaceRoot, "other.txt"), "other\n");
+          sh(workspaceRoot, "git add -A && git commit -q -m other");
+          sh(api!.worktreePath, "git rebase -q main");
+          expectOk(yield* call(pivot, "land_teammate", { threadId: api!.threadId, decisionId }));
+          // The lead goes first, and its branch with it.
+          expectOk(yield* call(pivot, "teardown_teammate", { threadId: api!.threadId }));
+          assert.strictEqual(sh(workspaceRoot, `git branch --list ${api!.branch}`), "");
+
+          const torn = expectOk(
+            yield* call(pivot, "teardown_teammate", { threadId: ui!.threadId }),
+          );
+          assert.include(torn.reason, '"Add the API"');
+        }).pipe(Effect.provide(layer));
+      },
+    );
+
     it.effect("lands an approved batch in order where the project has no remote", () => {
       const { fake, workspaceRoot, layer } = setup();
       return Effect.gen(function* () {

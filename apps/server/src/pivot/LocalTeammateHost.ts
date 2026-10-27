@@ -83,16 +83,22 @@ export const make = Effect.gen(function* () {
               definitionOfDoneText(input.kind, deliveryMode, input.shipDirectly === true),
             ),
           });
-          const attached = yield* threads.startTeammate({
+          const threadId = yield* threads.createTeammateThread({
             projectId: input.projectId,
-            pivotThreadId: input.pivotThreadId,
             title: input.title,
             branch,
             worktreePath,
             modelSelection: input.modelSelection,
-            text: brief,
           });
-          return { ...attached, branch, baseBranch, worktreePath, deliveryMode };
+          return {
+            threadId,
+            runId: null,
+            start: threads.request({ threadId, senderThreadId: input.pivotThreadId, text: brief }),
+            branch,
+            baseBranch,
+            worktreePath,
+            deliveryMode,
+          };
         }
         if (input.kind === "scout") {
           // A scout reads the user's own checkout as it stands; it has no worktree or branch.
@@ -107,17 +113,17 @@ export const make = Effect.gen(function* () {
             worktreePath: project.workspaceRoot,
             definitionOfDone: yield* text(definitionOfDoneText(input.kind, deliveryMode)),
           });
-          const started = yield* threads.startTeammate({
+          const threadId = yield* threads.createTeammateThread({
             projectId: input.projectId,
-            pivotThreadId: input.pivotThreadId,
             title: input.title,
             branch: null,
             worktreePath: null,
             modelSelection: input.modelSelection,
-            text: brief,
           });
           return {
-            ...started,
+            threadId,
+            runId: null,
+            start: threads.request({ threadId, senderThreadId: input.pivotThreadId, text: brief }),
             branch,
             baseBranch: branch,
             worktreePath: project.workspaceRoot,

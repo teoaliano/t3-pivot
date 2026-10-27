@@ -868,13 +868,35 @@ describe("hosted teammate tools", () => {
     },
   );
 
-  it.effect("records a scout's report in the log, and only a scout's", () => {
+  it.effect("refuses a scout, and logs the report of one an older release hosted", () => {
     const { layer } = hostSetup();
     return Effect.gen(function* () {
       const host = yield* PivotHost.PivotHost;
       const pivots = yield* PivotService.PivotService;
       const home = yield* newHome();
-      const scout = yield* launch(home, { kind: "scout" });
+      // A scout reads the project's own checkout, which on a host is someone else's machine.
+      const refused = yield* host
+        .launchTeammate(home.caller, launchInput(home, { kind: "scout" }))
+        .pipe(Effect.flip);
+      assert.include(refused.message, "Scouts run on the Pivot's own environment");
+      const hostStore = yield* PivotHostStore.PivotHostStore;
+      const scout = { threadId: ThreadId.make("thread-old-scout") };
+      yield* hostStore.recordTeammate({
+        threadId: scout.threadId,
+        grantId: home.grantId,
+        dispatchId: "dispatch-old-scout",
+        projectId,
+        pivotThreadId: ThreadId.make("pivot-on-the-home"),
+        pivotLabel: "Pivot on Mac",
+        kind: "scout",
+        title: "Why is it slow",
+        branch: "pivot/why-is-it-slow",
+        baseBranch: "main",
+        worktreePath: "/worktrees/why-is-it-slow",
+        deliveryMode: "local-only",
+        firstRunId: null,
+        shipDirectly: false,
+      });
       const ship = yield* launch(home, { dispatchId: "dispatch-2" });
 
       assert.deepStrictEqual(

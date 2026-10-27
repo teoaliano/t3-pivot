@@ -61,8 +61,13 @@ export interface LaunchTeammateInput {
 /** A launched teammate: V2 accepted it, and the worktree is still being prepared. */
 export interface LaunchedTeammate {
   readonly threadId: ThreadId;
-  /** The first run. Null when the launch created none. */
+  /** The first run. Null when the launch created none, or `start` has yet to send the brief. */
   readonly runId: RunId | null;
+  /**
+   * For a thread made without a message: sends its brief once the caller recorded the
+   * teammate, so its first run already finds the record, and with it the write scope.
+   */
+  readonly start?: Result<RunId | null> | undefined;
   readonly branch: string;
   readonly baseBranch: string;
   readonly worktreePath: string;
