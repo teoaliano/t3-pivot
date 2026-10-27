@@ -37,7 +37,7 @@ and teammate run is small.
 
 | #   | Story | Steps                                                                                         | Expect                                                                                                               |
 | --- | ----- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| 1.1 | 1, 2  | On an existing pivot-demo thread, click the sidebar's **New Pivot** icon.                     | The palette opens on "New Pivot in..." with projects only, pivot-demo first. No model picker.                        |
+| 1.1 | 1, 2  | On the sidebar's **Pivots** tab, click the new button.                                        | The palette opens on "New Pivot in..." with projects only, pivot-demo first. No model picker.                        |
 | 1.2 | 1     | Press **⌥⌘P**, then Escape. Open the command palette (⌘K) and type "pivot".                   | The shortcut opens the same picker. The palette shows "New Pivot in pivot-demo" and "New Pivot in...".               |
 | 1.3 | 1     | Pick pivot-demo.                                                                              | You land in the new Pivot's chat, not on a blank draft. The sidebar shows the Pivot row with a Pivot strip under it. |
 | 1.4 | 5     | Start another Pivot in pivot-demo, cancel the confirmation, then start one again and confirm. | Cancel creates nothing. Confirm replaces it: the old Pivot retires and its teammates and decisions move over.        |

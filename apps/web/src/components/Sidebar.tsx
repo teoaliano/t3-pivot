@@ -9,7 +9,6 @@ import {
   type SidebarPivotGroup,
   sidebarPivotGroup,
 } from "./sidebar/pivotNesting.logic";
-import { SidebarNewPivotButton } from "./pivot/SidebarNewPivotButton";
 import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
 import {
   dropThreadContext,
@@ -366,15 +365,6 @@ function resolveDraggedOrders(input: {
   };
 }
 
-function routeThreadOnly(
-  threads: readonly EnvironmentThreadShell[],
-  routeThreadKey: string | null,
-): readonly EnvironmentThreadShell[] {
-  if (routeThreadKey === null) return EMPTY_THREADS;
-  const routeThread = threads.find((thread) => threadShellKey(thread) === routeThreadKey);
-  return routeThread === undefined ? EMPTY_THREADS : [routeThread];
-}
-
 // Separate hooks cache maps independently of later Sidebar hooks and preserve dnd-kit inputs.
 function useSidebarThreads(input: {
   readonly projectScopeKey: string | null;
@@ -449,12 +439,8 @@ function useSidebarThreads(input: {
     (thread) => pivotStatesByEnvironment[thread.environmentId]?.pivots[thread.id] === undefined,
   );
   const visibleActiveThreads = [
-    ...(pivotsSectionExpanded
-      ? activePivotThreads
-      : routeThreadOnly(activePivotThreads, routeRowThreadKey)),
-    ...(threadsSectionExpanded
-      ? activeNormalThreads
-      : routeThreadOnly(activeNormalThreads, routeRowThreadKey)),
+    ...(pivotsSectionExpanded ? activePivotThreads : EMPTY_THREADS),
+    ...(threadsSectionExpanded ? activeNormalThreads : EMPTY_THREADS),
   ];
   // Older settled threads load in pages; the shelf lists them only as far as they are loaded.
   const olderSettledShelf = useOlderSettledShelf({
@@ -479,15 +465,9 @@ function useSidebarThreads(input: {
     }
     return visible.length === settledThreads.length ? settledThreads : visible;
   })();
-  const renderedSettledThreads = settledShelfExpanded
-    ? visibleSettledThreads
-    : routeThreadOnly(visibleSettledThreads, routeRowThreadKey);
-  const visibleSnoozedThreads = snoozedShelfExpanded
-    ? snoozedThreads
-    : routeThreadOnly(snoozedThreads, routeRowThreadKey);
-  const visibleWorkingThreads = workingShelfExpanded
-    ? workingThreads
-    : routeThreadOnly(workingThreads, routeRowThreadKey);
+  const renderedSettledThreads = settledShelfExpanded ? visibleSettledThreads : EMPTY_THREADS;
+  const visibleSnoozedThreads = snoozedShelfExpanded ? snoozedThreads : EMPTY_THREADS;
+  const visibleWorkingThreads = workingShelfExpanded ? workingThreads : EMPTY_THREADS;
   const orderedThreads = [
     ...pinnedThreads,
     ...visibleActiveThreads,
@@ -2751,6 +2731,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const showJumpHints = useThreadJumpHintsVisible(shouldShowJumpHintsNow);
 
   const handleNewThreadClick = (event?: ReactMouseEvent) => {
+    if (sidebarTab === "pivots") {
+      if (isMobile) setOpenMobile(false);
+      openCommandPalette({ open: "new-pivot-in" });
+      return;
+    }
     if (shouldCreateNewThreadInCurrentProject(event?.shiftKey ?? false, projectGroups.length)) {
       if (isMobile) setOpenMobile(false);
       void startNewThreadFromContext({
@@ -2766,8 +2751,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   };
 
   const newThreadShortcutLabel =
-    shortcutLabelForCommand(keybindings, "chat.new") ??
-    (projectGroups.length <= 1 ? shortcutLabelForCommand(keybindings, "chat.newLocal") : undefined);
+    sidebarTab === "pivots"
+      ? shortcutLabelForCommand(keybindings, "pivot.new")
+      : (shortcutLabelForCommand(keybindings, "chat.new") ??
+        (projectGroups.length <= 1
+          ? shortcutLabelForCommand(keybindings, "chat.newLocal")
+          : undefined));
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
   return (
     <>
@@ -2907,13 +2896,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               onNewProject={openAddProjectCommandPalette}
               onNewThread={handleNewThreadClick}
               newThreadDisabled={projects.length === 0}
-              newPivot={
-                <SidebarNewPivotButton
-                  onOpen={() => {
-                    if (isMobile) setOpenMobile(false);
-                  }}
-                />
-              }
+              newItemIsPivot={sidebarTab === "pivots"}
               newThreadShortcutLabel={newThreadShortcutLabel}
               newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
               showNewThreadInProjectHint={projectGroups.length > 1}
