@@ -82,6 +82,7 @@ import {
 import {
   deriveProviderSubagentStatus,
   deriveReportedModelSelection,
+  runAsProviderSubagentStatus,
   formatModelSelectionEffort,
   deriveRunlessWorkStartedAt,
   deriveThreadActivityRun,
@@ -273,6 +274,8 @@ import { useCitedHistory } from "./chat/citationProcedure";
 import type { MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
 import { ThreadTimeline } from "./chat/ThreadTimeline";
 import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
+import { PivotComposerBar, PivotDecisionsStrip, usePivotChatRole } from "./pivot/PivotChatChrome";
+import { useInPivotView } from "./pivot/pivotViewContext";
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import {
   overlayComposerIsResting,
@@ -422,6 +425,7 @@ export default function ChatView(props: ChatViewProps) {
   } = props;
   const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const canOperateTerminal = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
+  const pivotRole = usePivotChatRole(environmentId, threadId);
   const draftId = routeKind === "draft" ? props.draftId : null;
   const handleNewThread = useNewThreadHandler();
   const routeThreadRef = scopeThreadRef(environmentId, threadId);
@@ -810,10 +814,13 @@ export default function ChatView(props: ChatViewProps) {
       ? run.id
       : null;
   })();
+  // A Pivot teammate reads like a subagent of its Pivot: it runs on its own,
+  // so its chat leads back to the Pivot instead of taking messages.
+  const pivotTeammateOf = pivotRole.kind === "teammate" ? pivotRole.pivotThreadId : null;
   const parentSubagentThreadId =
     activeThread?.lineage.relationshipToParent === "subagent"
       ? activeThread.lineage.parentThreadId
-      : null;
+      : pivotTeammateOf;
   const parentSubagentEnvironmentId = activeThread?.environmentId ?? null;
   const parentSubagentThreadRef = (() => {
     if (parentSubagentEnvironmentId === null || parentSubagentThreadId === null) {
@@ -849,6 +856,10 @@ export default function ChatView(props: ChatViewProps) {
       : {
           threadId: parentSubagentThreadRef.threadId,
           title: parentSubagentThread?.title ?? "Parent thread",
+          relation:
+            activeThread?.lineage.relationshipToParent !== "subagent" && pivotTeammateOf !== null
+              ? ("Teammate of" as const)
+              : ("Subagent of" as const),
         };
   const threadError = isServerThread
     ? (localServerError ?? serverRuntime?.lastError ?? null)
@@ -980,7 +991,10 @@ export default function ChatView(props: ChatViewProps) {
   );
   const canReuseTerminal = activeThreadKnownSessionsRaw !== null;
   const previewPanelOpen = activeRightPanelKind === "preview" && browserAvailable;
-  const rightPanelOpen = rightPanelState.isOpen;
+  // The Pivot view lays out its own panes. The window-level right panel, terminal drawer, and
+  // their titlebar controls belong to Chat mode, so a chat embedded in a pane renders none of them.
+  const inPivotView = useInPivotView();
+  const rightPanelOpen = rightPanelState.isOpen && !inPivotView;
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   const rightPanelPresenceValue = {
@@ -1643,8 +1657,17 @@ export default function ChatView(props: ChatViewProps) {
   }, [environmentId, gitStatusCwd, liveIsGitRepo]);
   const isGitRepo = liveIsGitRepo ?? recallCheckoutIsRepo(environmentId, gitStatusCwd) ?? true;
   // Provider-native subagents cannot take messages; approvals and questions go to the top-level parent.
-  const showProviderSubagentBar = isProviderSubagent;
-  const composerMounted = !showProviderSubagentBar;
+  // A Pivot teammate gets the same bar, but its approvals and questions arrive in its own
+  // thread, so the composer returns only to answer them.
+  const showProviderSubagentBar =
+    isProviderSubagent ||
+    (pivotTeammateOf !== null && pendingApprovals.length === 0 && pendingUserInputs.length === 0);
+  const subagentBarStatus = isProviderSubagent
+    ? providerSubagentStatus
+    : runAsProviderSubagentStatus(activeActivityRun);
+  // T3 Pivot: a retired Pivot is read-only history.
+  const showPivotComposerBar = pivotRole.kind === "pivot" && pivotRole.retired;
+  const composerMounted = !showProviderSubagentBar && !showPivotComposerBar;
   const providerSubagentModels = selectedProviderEntry?.models ?? EMPTY_PROVIDER_MODELS;
   // Providers can report dated model ids or aliases.
   const providerSubagentModelSlug = selectedProviderEntry
@@ -3155,7 +3178,11 @@ export default function ChatView(props: ChatViewProps) {
   const content = (
     <div
       ref={setWorkspaceLayoutElement}
-      className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
+      // In the Pivot view the chat sits on the view's own canvas, so it paints no backdrop.
+      className={cn(
+        "relative flex min-h-0 min-w-0 flex-1 overflow-hidden",
+        !inPivotView && "bg-background",
+      )}
     >
       <DeviceSetupDialogHost
         threadKey={activeThreadKey}
@@ -3174,6 +3201,7 @@ export default function ChatView(props: ChatViewProps) {
         <header
           ref={threadPanelPopoverAnchorRef}
           data-chat-header
+          hidden={inPivotView}
           className={cn(
             "relative bg-background [[data-panel-animations=true]_&]:motion-safe:transition-[padding-left] [[data-panel-animations=true]_&]:motion-safe:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:motion-safe:ease-out",
             isElectron
@@ -3184,7 +3212,8 @@ export default function ChatView(props: ChatViewProps) {
                     "wco:pr-(--workspace-native-controls-inset)",
                 )
               : "flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center pl-(--workspace-gutter-start) pr-(--workspace-gutter-end)",
-            COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
+            // A Pivot view pane sits below the Pivot view's own top bar, clear of the window controls.
+            !inPivotView && COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
           )}
         >
           {isElectron && rightPanelControlsAtRoot ? (
@@ -3193,7 +3222,9 @@ export default function ChatView(props: ChatViewProps) {
               className="pointer-events-none fixed top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)] h-[var(--workspace-topbar-height)] w-28 [-webkit-app-region:no-drag]"
             />
           ) : null}
-          {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
+          {!inPivotView && !rightPanelControlsAtRoot && !rightPanelControlsInPanel
+            ? panelLayoutControls
+            : null}
           {inlineRightPanelOwnsTitleBar ? threadPanelHeaderControl : null}
           <ChatHeader
             activeThreadEnvironmentId={activeThread.environmentId}
@@ -3249,7 +3280,12 @@ export default function ChatView(props: ChatViewProps) {
               setThreadError={setThreadError}
               setThreadErrorBannerDismissTick={setThreadErrorBannerDismissTick}
             />
-            <div className="relative flex min-h-0 flex-1 flex-col bg-background">
+            <div
+              className={cn(
+                "relative flex min-h-0 flex-1 flex-col",
+                !inPivotView && "bg-background",
+              )}
+            >
               <ThreadTimeline
                 threadDetailRef={routeThreadDetailRef}
                 entriesInput={timelineEntriesInput}
@@ -3384,7 +3420,9 @@ export default function ChatView(props: ChatViewProps) {
                 onFooterGrow={onTimelineFooterGrowStable}
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
                 emptyPlaceholderInset={composerReservedHeight}
-                topFadeEnabled={!hasTimelineTopBanner}
+                // In the Pivot view the fade is the seam under the teammate cards, so a
+                // banner over the timeline doesn't turn it off.
+                topFadeEnabled={inPivotView || !hasTimelineTopBanner}
                 {...(paintOnlyDisplayedTimeline || threadHistoryControls === undefined
                   ? {}
                   : { historyControls: threadHistoryControls })}
@@ -3447,6 +3485,9 @@ export default function ChatView(props: ChatViewProps) {
                         : undefined
                     }
                   >
+                    {pivotRole.kind === "pivot" && !pivotRole.retired ? (
+                      <PivotDecisionsStrip environmentId={environmentId} pivotThreadId={threadId} />
+                    ) : null}
                     <ComposerSurface.Shell
                       contextStrip={showComposerContextStrip || showComposerModelStrip}
                     >
@@ -3467,12 +3508,18 @@ export default function ChatView(props: ChatViewProps) {
                               }
                               modelLabel={providerSubagentModelLabel}
                               effortLabel={providerSubagentEffortLabel}
-                              status={providerSubagentStatus}
+                              status={subagentBarStatus}
                               onOpenParent={
                                 parentThreadLink
                                   ? () => onOpenRelatedThread(parentThreadLink.threadId)
                                   : null
                               }
+                            />
+                          ) : null}
+                          {pivotRole.kind === "pivot" && pivotRole.retired ? (
+                            <PivotComposerBar
+                              environmentId={environmentId}
+                              successorThreadId={pivotRole.successorThreadId}
                             />
                           ) : null}
                           {!composerMounted ? null : (
@@ -3677,7 +3724,8 @@ export default function ChatView(props: ChatViewProps) {
                                 projectId={activeThread.projectId}
                                 worktreePath={activeThread.worktreePath}
                                 isServerThread={isServerThread}
-                                showGitControls={isGitRepo}
+                                // A Pivot runs in its own home, so the branch and worktree controls do not apply.
+                                showGitControls={isGitRepo && draftThread?.pivot !== true}
                                 {...(routeKind === "draft" && draftId ? { draftId } : {})}
                                 onEnvModeChange={onEnvModeChangeStable}
                                 startFromOrigin={startFromOrigin}
@@ -3743,67 +3791,71 @@ export default function ChatView(props: ChatViewProps) {
               onConfirm={handleSwitchCheckoutToThreadStable}
             />
 
-            <ThreadDetailsPanel
-              anchor={threadPanelPopoverAnchorRef}
-              handle={threadPanelPopoverHandle}
-              forceNewWorktree={multipleModelSelections !== null}
-              environmentId={activeThread.environmentId}
-              threadId={activeThread.id}
-              projectId={activeThread.projectId}
-              worktreePath={activeThread.worktreePath}
-              isServerThread={isServerThread}
-              {...(draftId ? { draftId } : {})}
-              activeProjectName={activeProject?.title}
-              activeProjectScripts={activeProject ? activeProjectScripts : undefined}
-              preferredScriptId={
-                activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
-              }
-              keybindings={keybindings}
-              availableEditors={availableEditors}
-              showOpenInPicker={showOpenInPicker}
-              openInShortcutEnabled={
-                !(
-                  rightPanelOpen &&
-                  renderedRightPanelSurface?.kind === "file" &&
-                  renderedRightPanelSurface.attachment === undefined
-                )
-              }
-              gitCwd={gitCwd}
-              isGitRepo={isGitRepo}
-              envLocked={envLocked}
-              availableEnvironments={logicalProjectEnvironments}
-              autoEnvironmentLabel={autoEnvironmentLabel}
-              onAutoEnvironment={
-                draftId &&
-                !envLocked &&
-                canAutoBalanceEnvironments &&
-                loadBalancingSettings.loadBalancingEnabled
-                  ? onAutoEnvironmentStable
-                  : undefined
-              }
-              {...(canChangeEnvironment ? { onEnvironmentChange: onEnvironmentChangeStable } : {})}
-              onEnvModeChange={onEnvModeChangeStable}
-              envMode={envMode}
-              {...(canOverrideServerThreadEnvMode
-                ? {
-                    activeThreadBranchOverride: activeThreadBranch,
-                    onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
-                  }
-                : {})}
-              startFromOrigin={startFromOrigin}
-              onStartFromOriginChange={onStartFromOriginChange}
-              {...(canCheckoutPullRequestIntoThread
-                ? { onCheckoutPullRequestRequest: openPullRequestDialogStable }
-                : {})}
-              onComposerFocusRequest={scheduleComposerFocusStable}
-              {...(isServerThread && isGitRepo
-                ? { onOpenChanges: openChangesFromThreadPanelStable }
-                : {})}
-              onRunProjectScript={runProjectScriptStable}
-              onAddProjectScript={saveProjectScriptStable}
-              onUpdateProjectScript={updateProjectScriptStable}
-              onDeleteProjectScript={deleteProjectScriptStable}
-            />
+            {inPivotView ? null : (
+              <ThreadDetailsPanel
+                anchor={threadPanelPopoverAnchorRef}
+                handle={threadPanelPopoverHandle}
+                forceNewWorktree={multipleModelSelections !== null}
+                environmentId={activeThread.environmentId}
+                threadId={activeThread.id}
+                projectId={activeThread.projectId}
+                worktreePath={activeThread.worktreePath}
+                isServerThread={isServerThread}
+                {...(draftId ? { draftId } : {})}
+                activeProjectName={activeProject?.title}
+                activeProjectScripts={activeProject ? activeProjectScripts : undefined}
+                preferredScriptId={
+                  activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
+                }
+                keybindings={keybindings}
+                availableEditors={availableEditors}
+                showOpenInPicker={showOpenInPicker}
+                openInShortcutEnabled={
+                  !(
+                    rightPanelOpen &&
+                    renderedRightPanelSurface?.kind === "file" &&
+                    renderedRightPanelSurface.attachment === undefined
+                  )
+                }
+                gitCwd={gitCwd}
+                isGitRepo={isGitRepo}
+                envLocked={envLocked}
+                availableEnvironments={logicalProjectEnvironments}
+                autoEnvironmentLabel={autoEnvironmentLabel}
+                onAutoEnvironment={
+                  draftId &&
+                  !envLocked &&
+                  canAutoBalanceEnvironments &&
+                  loadBalancingSettings.loadBalancingEnabled
+                    ? onAutoEnvironmentStable
+                    : undefined
+                }
+                {...(canChangeEnvironment
+                  ? { onEnvironmentChange: onEnvironmentChangeStable }
+                  : {})}
+                onEnvModeChange={onEnvModeChangeStable}
+                envMode={envMode}
+                {...(canOverrideServerThreadEnvMode
+                  ? {
+                      activeThreadBranchOverride: activeThreadBranch,
+                      onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
+                    }
+                  : {})}
+                startFromOrigin={startFromOrigin}
+                onStartFromOriginChange={onStartFromOriginChange}
+                {...(canCheckoutPullRequestIntoThread
+                  ? { onCheckoutPullRequestRequest: openPullRequestDialogStable }
+                  : {})}
+                onComposerFocusRequest={scheduleComposerFocusStable}
+                {...(isServerThread && isGitRepo
+                  ? { onOpenChanges: openChangesFromThreadPanelStable }
+                  : {})}
+                onRunProjectScript={runProjectScriptStable}
+                onAddProjectScript={saveProjectScriptStable}
+                onUpdateProjectScript={updateProjectScriptStable}
+                onDeleteProjectScript={deleteProjectScriptStable}
+              />
+            )}
 
             <PullRequestThreadDialogHost
               threadKey={activeThreadKey}
@@ -3815,18 +3867,20 @@ export default function ChatView(props: ChatViewProps) {
           </ThreadFindCanvas>
         </div>
 
-        <ChatTerminalDrawers
-          activeThreadKey={activeThreadKey}
-          activeTerminalOpen={Boolean(terminalUiState.terminalOpen)}
-          composerHeight={composerReservedHeight}
-          launchContext={activeTerminalLaunchContext ?? null}
-          splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
-          splitVerticalShortcutLabel={splitTerminalVerticalShortcutLabel ?? undefined}
-          newShortcutLabel={newTerminalShortcutLabel ?? undefined}
-          closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
-          keybindings={keybindings}
-          onAddTerminalContext={addTerminalContextToDraftStable}
-        />
+        {inPivotView ? null : (
+          <ChatTerminalDrawers
+            activeThreadKey={activeThreadKey}
+            activeTerminalOpen={Boolean(terminalUiState.terminalOpen)}
+            composerHeight={composerReservedHeight}
+            launchContext={activeTerminalLaunchContext ?? null}
+            splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
+            splitVerticalShortcutLabel={splitTerminalVerticalShortcutLabel ?? undefined}
+            newShortcutLabel={newTerminalShortcutLabel ?? undefined}
+            closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
+            keybindings={keybindings}
+            onAddTerminalContext={addTerminalContextToDraftStable}
+          />
+        )}
       </div>
 
       {rightPanelPresent && activeThreadRef ? (

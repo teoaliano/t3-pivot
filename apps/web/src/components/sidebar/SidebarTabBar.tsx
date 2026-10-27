@@ -2,6 +2,7 @@ import {
   AlarmClockIcon,
   CheckIcon,
   CircleDashedIcon,
+  LayoutDashboardIcon,
   type LucideIcon,
   MessageSquareIcon,
 } from "lucide-react";
@@ -10,10 +11,11 @@ import * as Schema from "effect/Schema";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-export const SidebarTab = Schema.Literals(["threads", "working", "snoozed", "settled"]);
+export const SidebarTab = Schema.Literals(["pivots", "threads", "working", "snoozed", "settled"]);
 export type SidebarTab = typeof SidebarTab.Type;
 
 const SIDEBAR_TABS = [
+  { value: "pivots", label: "Pivots", icon: LayoutDashboardIcon },
   { value: "threads", label: "Threads", icon: MessageSquareIcon },
   { value: "working", label: "Working", icon: CircleDashedIcon },
   { value: "snoozed", label: "Snoozed", icon: AlarmClockIcon },

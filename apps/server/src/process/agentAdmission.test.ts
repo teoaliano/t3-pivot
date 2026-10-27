@@ -18,8 +18,10 @@ import {
 } from "./agentAdmission.ts";
 
 const timing = {
+  spacingMs: 30_000,
   staleMs: 20_000,
   timeoutMs: 600_000,
+  spacedTimeoutMs: 7_200_000,
 };
 const free: MemoryProbe = { state: "ok", currentBytes: 2e9, highBytes: 9e9, psiSomeAvg10: 0 };
 const GiB = 1024 ** 3;
@@ -30,15 +32,16 @@ const starved: MemoryProbe = {
   psiSomeAvg10: 20,
 };
 
-const empty: AdmissionQueue = { tickets: [] };
+const empty: AdmissionQueue = { tickets: [], lastAdmittedAt: undefined };
 
 const attempt = (
   queue: AdmissionQueue,
-  input: { id: string; now: number; memory: MemoryState | undefined },
+  input: { id: string; now: number; memory: MemoryState | undefined; spaced?: boolean },
 ) =>
   tryAdmit(queue, {
     id: input.id,
     threadId: `thread-${input.id}`,
+    spaced: input.spaced ?? false,
     now: input.now,
     memory: input.memory,
     timing,
@@ -56,6 +59,38 @@ describe("tryAdmit", () => {
     expect(held.queue.tickets.map((ticket) => ticket.id)).toEqual(["a"]);
   });
 
+  it("starts a teammate only with memory to spare", () => {
+    expect(attempt(empty, { id: "a", now: 0, memory: "tight", spaced: true }).outcome._tag).toBe(
+      "waiting",
+    );
+    expect(attempt(empty, { id: "a", now: 0, memory: "ok", spaced: true }).outcome._tag).toBe(
+      "admitted",
+    );
+  });
+
+  it("starts teammates resumed together one at a time, spaced out, in order", () => {
+    // Three teammates resume at once while memory still reads ok.
+    let queue = attempt(empty, { id: "a", now: 0, memory: "ok", spaced: true }).queue;
+    const b = attempt(queue, { id: "b", now: 1, memory: "ok", spaced: true });
+    expect(b.outcome).toEqual({ _tag: "waiting", position: 1 });
+    queue = attempt(b.queue, { id: "c", now: 2, memory: "ok", spaced: true }).queue;
+    expect(attempt(queue, { id: "c", now: 3, memory: "ok", spaced: true }).outcome).toEqual({
+      _tag: "waiting",
+      position: 2,
+    });
+    const second = attempt(queue, { id: "b", now: timing.spacingMs, memory: "ok", spaced: true });
+    expect(second.outcome._tag).toBe("admitted");
+    expect(
+      attempt(second.queue, { id: "c", now: timing.spacingMs + 1, memory: "ok", spaced: true })
+        .outcome._tag,
+    ).toBe("waiting");
+  });
+
+  it("never holds a user's agent behind a teammate waiting for its turn", () => {
+    const queue = attempt(empty, { id: "teammate", now: 0, memory: "tight", spaced: true }).queue;
+    expect(attempt(queue, { id: "chat", now: 1, memory: "tight" }).outcome._tag).toBe("admitted");
+  });
+
   it("drops a ticket whose caller stopped asking, so nobody waits behind it", () => {
     const queue = attempt(empty, { id: "gone", now: 0, memory: "starved" }).queue;
     const next = attempt(queue, { id: "b", now: timing.staleMs + 1, memory: "ok" });
@@ -63,13 +98,13 @@ describe("tryAdmit", () => {
     expect(next.queue.tickets).toEqual([]);
   });
 
-  it("keeps a start's place in line while its caller keeps asking", () => {
+  it("keeps a teammate's place in line while its caller keeps asking", () => {
     const ask = (queue: AdmissionQueue, id: string, now: number) =>
-      attempt(queue, { id, now, memory: "starved" }).queue;
+      attempt(queue, { id, now, memory: "starved", spaced: true }).queue;
     let queue = ask(ask(empty, "a", 0), "b", 1);
     for (let now = 5_000; now < 60_000; now += 5_000) queue = ask(ask(queue, "a", now), "b", now);
     expect(queue.tickets.map((ticket) => ticket.id)).toEqual(["a", "b"]);
-    expect(attempt(queue, { id: "b", now: 60_000, memory: "starved" }).outcome).toEqual({
+    expect(attempt(queue, { id: "b", now: 60_000, memory: "ok", spaced: true }).outcome).toEqual({
       _tag: "waiting",
       position: 2,
     });
@@ -143,12 +178,12 @@ const memoryFileSystem = () => {
           }),
     stat: (path) =>
       directories.has(path)
-        ? Effect.succeed({ mtime: Option.some(new Date(0)) } as FileSystem.File.Info)
+        ? Effect.succeed({ mtime: Option.some(new Date(Date.now())) } as FileSystem.File.Info)
         : Effect.fail(systemError("NotFound", "stat", path)),
     remove: (path) =>
       Effect.sync(() => {
         directories.delete(path);
-        for (const file of files.keys()) {
+        for (const file of [...files.keys()]) {
           if (file === path || file.startsWith(`${path}/`)) files.delete(file);
         }
       }),
@@ -162,7 +197,7 @@ const withQueueDir = <A, E>(
 const ask = (
   fs: FileSystem.FileSystem,
   queuePath: string,
-  input: { ticketId: string; token: string; probe: MemoryProbe | undefined },
+  input: { ticketId: string; token: string; probe: MemoryProbe | undefined; spaced?: boolean },
 ) =>
   admitAgent({
     fs,
@@ -170,24 +205,25 @@ const ask = (
     token: input.token,
     ticketId: input.ticketId,
     threadId: `thread-${input.ticketId}`,
+    spaced: input.spaced ?? false,
     probe: Effect.succeed(input.probe),
     timing,
   });
 
 describe("admitAgent", () => {
-  it.effect("lets two servers share one queue in order, and says why one waits", () =>
+  it.effect("lets two servers share one queue, first in first out, and says why one waits", () =>
     withQueueDir((queuePath) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        // Two servers queue agents on the same file.
-        const start = (ticketId: string, token: string, probe: MemoryProbe) =>
-          ask(fs, queuePath, { ticketId, token, probe });
-        expect(yield* start("a", "one", starved)).toEqual({
+        // Two servers (two Pivots on different projects) queue teammates on the same file.
+        const teammate = (ticketId: string, token: string, probe: MemoryProbe) =>
+          ask(fs, queuePath, { ticketId, token, probe, spaced: true });
+        expect(yield* teammate("a", "one", starved)).toEqual({
           _tag: "waiting",
           status: "Waiting for memory: agents use 9.7 of 9.4 GB",
         });
         yield* TestClock.adjust("1 second");
-        expect(yield* start("b", "two", starved)).toEqual({
+        expect(yield* teammate("b", "two", starved)).toEqual({
           _tag: "waiting",
           status: "Waiting for memory: agents use 9.7 of 9.4 GB, 2 in line",
         });
@@ -195,9 +231,12 @@ describe("admitAgent", () => {
           ...(yield* queuedThreads(fs, queuePath, yield* Clock.currentTimeMillis, timing)),
         ]).toEqual(["thread-a", "thread-b"]);
 
-        // Memory is back: both start.
-        expect((yield* start("a", "one", free))._tag).toBe("admitted");
-        expect((yield* start("b", "two", free))._tag).toBe("admitted");
+        // Memory is back: "b" asks first but "a" is ahead of it, and "b" then waits its spacing.
+        expect((yield* teammate("b", "two", free))._tag).toBe("waiting");
+        expect((yield* teammate("a", "one", free))._tag).toBe("admitted");
+        expect((yield* teammate("b", "two", free))._tag).toBe("waiting");
+        yield* TestClock.adjust(timing.spacingMs);
+        expect((yield* teammate("b", "two", free))._tag).toBe("admitted");
         expect([
           ...(yield* queuedThreads(fs, queuePath, yield* Clock.currentTimeMillis, timing)),
         ]).toEqual([]);

@@ -2478,3 +2478,42 @@ describe("composerDraftStore attachment references", () => {
     );
   });
 });
+
+describe("composerDraftStore pivot drafts", () => {
+  const projectId = ProjectId.make("pivot-project");
+  const logicalProjectKey = "logical-pivot-project";
+
+  beforeEach(resetComposerDraftStore);
+  afterEach(resetComposerDraftStore);
+
+  it("opens a pivot draft that no logical project resolves to", () => {
+    const draftId = useComposerDraftStore
+      .getState()
+      .createPivotDraft(scopeProjectRef(TEST_ENVIRONMENT_ID, projectId), logicalProjectKey);
+
+    expect(useComposerDraftStore.getState().getDraftSession(draftId)).toMatchObject({
+      environmentId: TEST_ENVIRONMENT_ID,
+      projectId,
+      pivot: true,
+    });
+    expect(
+      useComposerDraftStore.getState().getDraftThreadByLogicalProjectKey(logicalProjectKey),
+    ).toBeNull();
+  });
+
+  it("keeps the pivot flag when the composer moves it to another environment", () => {
+    const draftId = useComposerDraftStore
+      .getState()
+      .createPivotDraft(scopeProjectRef(TEST_ENVIRONMENT_ID, projectId), logicalProjectKey);
+
+    useComposerDraftStore.getState().setDraftThreadContext(draftId, {
+      projectRef: scopeProjectRef(OTHER_TEST_ENVIRONMENT_ID, projectId),
+    });
+
+    expect(useComposerDraftStore.getState().getDraftSession(draftId)).toMatchObject({
+      environmentId: OTHER_TEST_ENVIRONMENT_ID,
+      projectId,
+      pivot: true,
+    });
+  });
+});

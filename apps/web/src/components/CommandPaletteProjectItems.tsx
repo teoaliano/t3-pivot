@@ -93,6 +93,37 @@ export function buildNewThreadInProjectItems(input: ProjectItemsInput) {
   });
 }
 
+/**
+ * T3 Pivot: projects as targets of the "New Pivot in..." submenu. A grouped
+ * project starts its Pivot on `targetByKey`'s environment, so the description
+ * shows that environment rather than the picker row's own.
+ */
+export function buildNewPivotInProjectItems(
+  input: Omit<ProjectItemsInput, "projectGroupByTargetKey"> & {
+    readonly targetByKey: ReadonlyMap<string, { readonly environmentId: EnvironmentId }>;
+  },
+) {
+  return buildProjectActionItems({
+    projects: input.projects,
+    valuePrefix: "new-pivot-in",
+    searchTerms: (project) => {
+      const location = input.locationByEnvironmentId.get(project.environmentId);
+      return location ? [location.label] : [];
+    },
+    renderDescription: (project) => (
+      <ProjectLocationDescription
+        location={input.locationByEnvironmentId.get(
+          input.targetByKey.get(`${project.environmentId}:${project.id}`)?.environmentId ??
+            project.environmentId,
+        )}
+        workspaceRoot={project.workspaceRoot}
+      />
+    ),
+    icon: projectFaviconIcon,
+    runProject: input.runProject,
+  });
+}
+
 function ProjectLocationDescription(props: {
   readonly location: CommandPaletteProjectLocation | undefined;
   readonly workspaceRoot: string;

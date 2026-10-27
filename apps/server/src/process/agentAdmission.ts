@@ -1,9 +1,19 @@
 /**
- * One queue file shared by every server on this machine, so all agents see one line.
- * Writes take an atomic `mkdir` lock and replace the file by rename, so a crash never
- * leaves half a queue. Nothing waits: a ticket drops out a few polls after its caller stops.
+ * The admission queue: agents waiting for the agents slice to have memory again.
+ *
+ * Every server on this machine shares one queue, kept in a file in the user's
+ * runtime directory next to the slice it protects. A Pivot on another project
+ * is another server, so a file is what lets them see one line. Changes take a
+ * lock directory, which `mkdir` creates atomically, and the file is replaced by
+ * rename, so a crash mid-write never leaves half a queue.
+ *
+ * Nothing here waits. Each start asks once; a ticket that is not admitted stays
+ * in line while its caller keeps asking, and drops out a few polls after it stops
+ * (a stopped run, a server that died), so nobody is held behind it for long.
+ *
+ * @module agentAdmission
  */
-import type { MemoryProbe, MemoryState } from "@t3tools/shared/AgentScope";
+import type { AgentAdmission, MemoryProbe, MemoryState } from "@t3tools/shared/AgentScope";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -19,17 +29,23 @@ export interface Ticket {
   readonly queuedAt: number;
   /** When its caller last asked; a ticket nobody asks for goes stale. */
   readonly seenAt: number;
+  /** A Pivot teammate: starts only with memory to spare, spaced from the last start. */
+  readonly spaced: boolean;
 }
 
 export interface AdmissionQueue {
   readonly tickets: ReadonlyArray<Ticket>;
+  readonly lastAdmittedAt: number | undefined;
 }
 
 export interface AdmissionTiming {
+  /** Least time between a teammate's start and the start before it, so memory shows up first. */
+  readonly spacingMs: number;
   /** A ticket not asked for in this long belongs to a start that gave up, so it is dropped. */
   readonly staleMs: number;
-  /** How long a start may wait before it fails. */
+  /** How long a start may wait before it fails: other agents, then teammates. */
   readonly timeoutMs: number;
+  readonly spacedTimeoutMs: number;
 }
 
 const QueueFile = Schema.Struct({
@@ -39,12 +55,14 @@ const QueueFile = Schema.Struct({
       threadId: Schema.optionalKey(Schema.String),
       queuedAt: Schema.Number,
       seenAt: Schema.Number,
+      spaced: Schema.Boolean,
     }),
   ),
+  lastAdmittedAt: Schema.optionalKey(Schema.Number),
 });
 const decodeQueue = Schema.decodeUnknownOption(Schema.fromJsonString(QueueFile));
 
-export const emptyQueue: AdmissionQueue = { tickets: [] };
+export const emptyQueue: AdmissionQueue = { tickets: [], lastAdmittedAt: undefined };
 
 /** Reads the queue file, treating a missing or damaged file as an empty queue. */
 export function parseQueue(text: string): AdmissionQueue {
@@ -56,7 +74,9 @@ export function parseQueue(text: string): AdmissionQueue {
       threadId: ticket.threadId,
       queuedAt: ticket.queuedAt,
       seenAt: ticket.seenAt,
+      spaced: ticket.spaced,
     })),
+    lastAdmittedAt: decoded.value.lastAdmittedAt,
   };
 }
 
@@ -72,14 +92,17 @@ export type AttemptOutcome =
   | { readonly _tag: "expired" };
 
 /**
- * One attempt for ticket `id`. An agent starts unless memory is starved, so a ticket
- * ahead of it never holds it back once memory is fine.
+ * One attempt for ticket `id`. Other agents start unless memory is starved; a
+ * teammate starts only when memory is ok and the spacing since the last start has
+ * passed, so teammates resumed together start one at a time. Each kind keeps its own
+ * order, so a user's chat is never stuck behind a teammate waiting for its turn.
  */
 export function tryAdmit(
   queue: AdmissionQueue,
   input: {
     readonly id: string;
     readonly threadId: string | undefined;
+    readonly spaced: boolean;
     readonly now: number;
     /** undefined where memory is not measured, which never holds a start back. */
     readonly memory: MemoryState | undefined;
@@ -92,25 +115,50 @@ export function tryAdmit(
   const ticket: Ticket =
     prior !== undefined && now - prior.seenAt < timing.staleMs
       ? { ...prior, seenAt: now }
-      : { id: input.id, threadId: input.threadId, queuedAt: now, seenAt: now };
+      : {
+          id: input.id,
+          threadId: input.threadId,
+          queuedAt: now,
+          seenAt: now,
+          spaced: input.spaced,
+        };
   const inLine = [
     ...live(queue, now, timing.staleMs).filter((candidate) => candidate.id !== input.id),
     ticket,
   ].sort((a, b) => a.queuedAt - b.queuedAt);
-  const others = { tickets: inLine.filter((candidate) => candidate.id !== input.id) };
+  const sameKind = inLine.filter((candidate) => candidate.spaced === ticket.spaced);
+  const position = sameKind.findIndex((candidate) => candidate.id === input.id);
 
-  if (now - ticket.queuedAt >= timing.timeoutMs) {
-    return { queue: others, outcome: { _tag: "expired" } };
+  if (now - ticket.queuedAt >= (ticket.spaced ? timing.spacedTimeoutMs : timing.timeoutMs)) {
+    return {
+      queue: {
+        tickets: inLine.filter((candidate) => candidate.id !== input.id),
+        lastAdmittedAt: queue.lastAdmittedAt,
+      },
+      outcome: { _tag: "expired" },
+    };
   }
-  if (input.memory !== "starved") {
-    return { queue: others, outcome: { _tag: "admitted" } };
+  const memoryAllows = ticket.spaced
+    ? input.memory === undefined || input.memory === "ok"
+    : input.memory !== "starved";
+  const spacedOut =
+    !ticket.spaced ||
+    queue.lastAdmittedAt === undefined ||
+    now - queue.lastAdmittedAt >= timing.spacingMs;
+  // Teammates keep their order; another agent waits only while memory is starved, so a
+  // ticket ahead of it never holds it back once memory is fine.
+  if ((position === 0 || !ticket.spaced) && memoryAllows && spacedOut) {
+    return {
+      queue: {
+        tickets: inLine.filter((candidate) => candidate.id !== input.id),
+        lastAdmittedAt: now,
+      },
+      outcome: { _tag: "admitted" },
+    };
   }
   return {
-    queue: { tickets: inLine },
-    outcome: {
-      _tag: "waiting",
-      position: inLine.findIndex((candidate) => candidate.id === input.id) + 1,
-    },
+    queue: { tickets: inLine, lastAdmittedAt: queue.lastAdmittedAt },
+    outcome: { _tag: "waiting", position: position + 1 },
   };
 }
 
@@ -228,45 +276,48 @@ export const memoryWaitStatus = (probe: MemoryProbe | undefined, position?: numb
  * Asks once whether an agent may start now. A machine whose memory is not measured, or
  * a queue file that cannot be written, never holds a start back.
  */
-export const admitAgent = Effect.fn("agentAdmission.admitAgent")(function* (input: {
+export const admitAgent = (input: {
   readonly fs: FileSystem.FileSystem;
   readonly queuePath: string;
   readonly token: string;
   readonly ticketId: string;
   readonly threadId: string | undefined;
+  readonly spaced: boolean;
   readonly probe: Effect.Effect<MemoryProbe | undefined>;
   readonly timing: AdmissionTiming;
-}) {
-  const probe = yield* input.probe;
-  const now = yield* Clock.currentTimeMillis;
-  const outcome = yield* modifyQueue(input.fs, input.queuePath, input.token, (queue) => {
-    const next = tryAdmit(queue, {
-      id: input.ticketId,
-      threadId: input.threadId,
-      now,
-      memory: probe?.state,
-      timing: input.timing,
-    });
-    return { queue: next.queue, result: next.outcome };
-  }).pipe(
-    Effect.catch((error) =>
-      Effect.logWarning("Agent admission queue unavailable; starting without it", {
-        error: error.message,
-      }).pipe(Effect.as({ _tag: "admitted" } as AttemptOutcome)),
-    ),
-  );
-  switch (outcome._tag) {
-    case "admitted":
-      return { _tag: "admitted" } as const;
-    case "waiting":
-      return { _tag: "waiting", status: memoryWaitStatus(probe, outcome.position) } as const;
-    case "expired":
-      return {
-        _tag: "expired",
-        message:
-          probe === undefined
-            ? "Not started: the machine did not have memory for another agent in time. Retry once a running agent finishes."
-            : `Not started: the machine does not have memory for another agent (${memoryStatus(probe)}). Retry once a running agent finishes.`,
-      } as const;
-  }
-});
+}): Effect.Effect<AgentAdmission> =>
+  Effect.gen(function* () {
+    const probe = yield* input.probe;
+    const now = yield* Clock.currentTimeMillis;
+    const outcome = yield* modifyQueue(input.fs, input.queuePath, input.token, (queue) => {
+      const next = tryAdmit(queue, {
+        id: input.ticketId,
+        threadId: input.threadId,
+        spaced: input.spaced,
+        now,
+        memory: probe?.state,
+        timing: input.timing,
+      });
+      return { queue: next.queue, result: next.outcome };
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("Agent admission queue unavailable; starting without it", {
+          error: error.message,
+        }).pipe(Effect.as({ _tag: "admitted" } as AttemptOutcome)),
+      ),
+    );
+    switch (outcome._tag) {
+      case "admitted":
+        return { _tag: "admitted" } as const;
+      case "waiting":
+        return { _tag: "waiting", status: memoryWaitStatus(probe, outcome.position) } as const;
+      case "expired":
+        return {
+          _tag: "expired",
+          message:
+            probe === undefined
+              ? "Not started: the machine did not have memory for another agent in time. Retry once a running agent finishes."
+              : `Not started: the machine does not have memory for another agent (${memoryStatus(probe)}). Retry once a running agent finishes.`,
+        } as const;
+    }
+  });

@@ -48,6 +48,24 @@ describe("authorization grants", () => {
     },
   );
 
+  it("delegates pivot:host only to a host link, never through a default or legacy grant", () => {
+    expect(Schema.decodeSync(AuthGrantScopes)(["pivot:host"])).toEqual(["pivot:host"]);
+    expect(AuthStandardClientScopes).not.toContain("pivot:host");
+    // An old grant, however broad, implies nothing about it: not by parent, not by legacy scopes.
+    for (const scopes of [
+      ["orchestration:operate", "access:write"],
+      ["terminal:operate"],
+    ] as const) {
+      expect(sessionGrantsScope({ authenticated: true, scopes, auth: {} }, "pivot:host")).toBe(
+        false,
+      );
+    }
+    // Old clients see the grant only as a permission they ignore.
+    const response = authScopeResponse(["pivot:host"]);
+    expect(response.scopes).toEqual([]);
+    expect(response.permissions).toEqual(["pivot:host"]);
+  });
+
   it("keeps old clients able to decode grants with new permissions", () => {
     const response = authScopeResponse(AuthStandardClientScopes);
     expect(decodeOldScopes(response.scopes)).toEqual(response.scopes);

@@ -14,6 +14,8 @@ export interface PanelLayoutControlsProps {
   showThreadPanelControl?: boolean;
   showTerminalControl?: boolean;
   showRightPanelControl?: boolean;
+  /** Greys all three toggles, for a view that has none of these panels (the Pivot view). */
+  disabled?: boolean;
   terminalAvailable: boolean;
   terminalOpen: boolean;
   terminalShortcutLabel: string | null;
@@ -34,6 +36,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
   showThreadPanelControl = true,
   showTerminalControl = true,
   showRightPanelControl = true,
+  disabled = false,
   terminalAvailable,
   terminalOpen,
   terminalShortcutLabel,
@@ -56,6 +59,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
       aria-label="Toggle thread details panel"
       variant="ghost"
       size="sm"
+      disabled={disabled}
     >
       <SquareMenuIcon className="size-4" />
     </Toggle>
@@ -95,7 +99,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
               aria-label="Toggle terminal drawer"
               variant="ghost"
               size="sm"
-              disabled={!terminalAvailable}
+              disabled={disabled || !terminalAvailable}
             >
               <PanelBottomIcon className="size-4" />
             </Toggle>
@@ -118,7 +122,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
               data-right-panel-toggle
               variant="ghost"
               size="sm"
-              disabled={!rightPanelAvailable}
+              disabled={disabled || !rightPanelAvailable}
             >
               <PanelRightIcon className="size-4" />
             </Toggle>
