@@ -122,6 +122,35 @@ export const sweepOrphanScopes = Effect.fn("ScopeReaper.sweepOrphanScopes")(func
   }
 });
 
+const inside = (cwd: string, root: string) =>
+  cwd === root || cwd.startsWith(root.endsWith("/") ? root : `${root}/`);
+
+/**
+ * Stops the processes this server's agent and terminal scopes run inside the
+ * worktree: terminals, dev servers and anything they started there. A process
+ * outside this server's scopes is never touched, whatever its working directory,
+ * so a user's own shell or editor in the worktree survives. The server `self` and
+ * its ancestors are never stopped.
+ */
+export const stopWorktreeProcesses = Effect.fn("ScopeReaper.stopWorktreeProcesses")(function* (
+  host: ReaperHost,
+  input: { readonly worktreePath: string; readonly owner: string; readonly self: number },
+) {
+  const { worktreePath, owner, self } = input;
+  if (!worktreePath.startsWith("/") || worktreePath.replace(/\/+$/, "") === "") return;
+  const table = yield* host.snapshot;
+  const keep = serverLineage(table, self);
+  const targets = table.filter(
+    (process) =>
+      !keep.has(process.pid) &&
+      process.unit !== null &&
+      ownsUnit(owner, process.unit) &&
+      process.cwd !== null &&
+      inside(process.cwd, worktreePath),
+  );
+  yield* stopProcesses(host, targets, `worktree ${worktreePath}`);
+});
+
 const readProcess = async (pid: number): Promise<HostProcess | null> => {
   try {
     const dir = `/proc/${pid}`;
@@ -170,4 +199,15 @@ export const procHost: ReaperHost = {
         // already gone
       }
     }),
+};
+
+/** The server's own pid and its ancestors: never stopped by a worktree teardown. */
+export const serverLineage = (table: ReadonlyArray<HostProcess>, self: number) => {
+  const parents = new Map(table.map((process) => [process.pid, process.ppid]));
+  const lineage = new Set<number>();
+  for (let pid: number | undefined = self; pid !== undefined && pid > 1 && !lineage.has(pid);) {
+    lineage.add(pid);
+    pid = parents.get(pid);
+  }
+  return lineage;
 };

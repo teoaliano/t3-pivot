@@ -6,6 +6,32 @@ import { ORCHESTRATION_V2_WS_METHODS } from "./orchestrationV2.ts";
 import { WS_METHODS, WsRpcGroup } from "./rpc.ts";
 
 describe("WebSocket RPC contracts", () => {
+  it("makes every pivotHost method name the home environment it binds to", () => {
+    const hostMethods = [...WsRpcGroup.requests.entries()].filter(([method]) =>
+      method.startsWith("pivotHost."),
+    );
+    expect(hostMethods.map(([method]) => method).toSorted()).toEqual(
+      [
+        "describe",
+        "events",
+        "land",
+        "launchTeammate",
+        "mergePullRequest",
+        "pullRequestDetail",
+        "relaunch",
+        "retryLaunch",
+        "send",
+        "settle",
+        "stop",
+        "teardown",
+      ].map((name) => `pivotHost.${name}`),
+    );
+    for (const [method, rpc] of hostMethods) {
+      const fields = (rpc.payloadSchema as unknown as { readonly fields: object }).fields;
+      expect(Object.keys(fields), method).toContain("homeEnvironmentId");
+    }
+  });
+
   it("rejects server-internal commands sent to dispatchCommand", () => {
     const dispatchCommand = WsRpcGroup.requests.get(ORCHESTRATION_V2_WS_METHODS.dispatchCommand);
     if (dispatchCommand === undefined) throw new Error("dispatchCommand is not registered");

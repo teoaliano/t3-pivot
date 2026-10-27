@@ -45,6 +45,11 @@ export const AuthAccessReadScope = "access:read" as const;
 export const AuthAccessWriteScope = "access:write" as const;
 export const AuthRelayReadScope = "relay:read" as const;
 export const AuthRelayWriteScope = "relay:write" as const;
+/**
+ * Reaches only the `pivotHost.*` RPC group, so another environment's Pivot can host
+ * teammates here. It is delegated only by a Pivot host link, never by a default grant.
+ */
+export const AuthPivotHostScope = "pivot:host" as const;
 export const AuthEnvironmentScope = Schema.Literals([
   AuthOrchestrationReadScope,
   AuthOrchestrationOperateScope,
@@ -63,6 +68,7 @@ export const AuthEnvironmentScope = Schema.Literals([
   AuthAccessWriteScope,
   AuthRelayReadScope,
   AuthRelayWriteScope,
+  AuthPivotHostScope,
 ]);
 export type AuthEnvironmentScope = typeof AuthEnvironmentScope.Type;
 export const AuthEnvironmentScopes = Schema.Array(AuthEnvironmentScope);
@@ -108,10 +114,19 @@ const legacyParents: Partial<Record<AuthEnvironmentScope, AuthEnvironmentScope>>
   [AuthTerminalReadScope]: AuthTerminalOperateScope,
 };
 
+// Scopes with no legacy parent: no old grant implies them, but a denial naming one must
+// still decode in an old client. Used for denial responses only, never for grants.
+const legacyDenialScopes: Partial<Record<AuthEnvironmentScope, AuthEnvironmentScope>> = {
+  [AuthPivotHostScope]: AuthOrchestrationOperateScope,
+};
+
 /** Keep permission denials decodable by clients with the original scope enum. */
 export function authScopeRequiredResponse(requiredPermission: AuthEnvironmentScope) {
   return {
-    requiredScope: legacyParents[requiredPermission] ?? requiredPermission,
+    requiredScope:
+      legacyParents[requiredPermission] ??
+      legacyDenialScopes[requiredPermission] ??
+      requiredPermission,
     requiredPermission,
   };
 }

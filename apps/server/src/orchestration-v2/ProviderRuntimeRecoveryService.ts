@@ -1,5 +1,4 @@
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   CommandId,
   type OrchestrationV2DomainEvent,
@@ -21,8 +20,9 @@ import * as EffectOutbox from "./EffectOutbox.ts";
 import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProjectionStore from "./ProjectionStore.ts";
+import * as RestartCarryOn from "./RestartCarryOn.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { restartContinuationRun } from "./RestartContinuation.ts";
+import { continuesAfterRestart, restartContinuationRun } from "./RestartContinuation.ts";
 import { isBufferedProviderNotification } from "./NotificationMailbox.ts";
 import {
   endOrphanedNativeSubagent,
@@ -682,6 +682,7 @@ export const make = Effect.gen(function* () {
         stoppedSessions,
         closedRequests: requests.length,
         retiredEffects,
+        resuming: continuationRun !== undefined,
       };
     },
   );
@@ -689,6 +690,7 @@ export const make = Effect.gen(function* () {
   const reconcile = Effect.fn("ProviderRuntimeRecoveryService.reconcile")(function* (
     trigger: "startup" | "shutdown",
   ) {
+    const carryOn = yield* RestartCarryOn.RestartCarryOn;
     const continueAfterRestart = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
     const threadIds = yield* projections
       .getRecoveryThreadIds("runtime")
@@ -713,11 +715,14 @@ export const make = Effect.gen(function* () {
             }),
         ),
       );
-      const enabled =
-        continueAfterRestart !== null &&
-        resolveProjectSettings(continueAfterRestart, projection.thread.projectId).settings
-          .continueThreadsAfterServerUpdate;
+      const carriesOn = yield* carryOn.carriesOn(threadId);
+      const enabled = continuesAfterRestart(
+        carriesOn,
+        continueAfterRestart,
+        projection.thread.projectId,
+      );
       const result = yield* reconcileProjection(projection, trigger, enabled, stoppedThisPass);
+      if (result.resuming && carriesOn) yield* carryOn.resuming(threadId);
       for (const session of projection.providerSessions) {
         if (session.status !== "stopped" && session.status !== "error") {
           stoppedThisPass.set(session.id, session);
@@ -744,16 +749,13 @@ export const make = Effect.gen(function* () {
 
   const prepareForShutdown = Effect.gen(function* () {
     const enabled = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
-    if (!enabled) return;
+    const carryOn = yield* RestartCarryOn.RestartCarryOn;
     const threadIds = yield* projections.getRecoveryThreadIds("runtime");
     for (const threadId of threadIds) {
       yield* Effect.gen(function* () {
         const projection = yield* projections.getRuntimeRecoveryProjection(threadId);
-        if (
-          !resolveProjectSettings(enabled, projection.thread.projectId).settings
-            .continueThreadsAfterServerUpdate
-        )
-          return;
+        const carriesOn = yield* carryOn.carriesOn(threadId);
+        if (!continuesAfterRestart(carriesOn, enabled, projection.thread.projectId)) return;
         const run = restartContinuationRun(projection, yield* DateTime.now);
         if (!run) return;
         const commandId = CommandId.make(`command:restart-prepare:${run.id}`);

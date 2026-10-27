@@ -124,6 +124,18 @@ import * as PullRequestReadCache from "./pullRequest/PullRequestReadCache.ts";
 import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
+import * as PivotHome from "./pivot/PivotHome.ts";
+import * as PivotCarryOn from "./pivot/PivotCarryOn.ts";
+import * as PivotHost from "./pivot/PivotHost.ts";
+import * as PivotHostStore from "./pivot/PivotHostStore.ts";
+import * as PivotDatabase from "./pivot/PivotDatabase.ts";
+import * as PivotRelayAwareness from "./pivot/PivotRelayAwareness.ts";
+import * as PivotGit from "./pivot/PivotGit.ts";
+import * as PivotService from "./pivot/PivotService.ts";
+import * as PivotStore from "./pivot/PivotStore.ts";
+import * as PivotSupervisor from "./pivot/PivotSupervisor.ts";
+import * as PivotThreads from "./pivot/PivotThreads.ts";
+import * as PivotToolRestrictions from "./pivot/PivotToolRestrictions.ts";
 import * as Observability from "./observability/Observability.ts";
 import * as HeapSnapshot from "./observability/HeapSnapshot.ts";
 import * as EventLoopMonitor from "./observability/EventLoopMonitor.ts";
@@ -612,6 +624,32 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
     Layer.provide(layerPullRequestService),
     Layer.provide(ProjectionStoreV2.layer),
   ),
+  // Pivot mode: brings each active Pivot's home contract up to this release before
+  // any Pivot runs, then records teammate changes from V2's events and wakes each Pivot.
+  // The contract lists the teammate models from Settings, so changing them rewrites it.
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const pivots = yield* PivotService.PivotService;
+      yield* pivots.refreshHomes;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      yield* settings.streamChanges.pipe(
+        Stream.map((next) =>
+          JSON.stringify([
+            next.teammateModels,
+            Object.entries(next.projectSettingsOverrides).map(([projectId, overrides]) => [
+              projectId,
+              overrides.teammateModels,
+            ]),
+          ]),
+        ),
+        Stream.changes,
+        Stream.runForEach(() => pivots.refreshHomes),
+        Effect.forkScoped,
+      );
+      const supervisor = yield* PivotSupervisor.PivotSupervisor;
+      yield* supervisor.start;
+    }),
+  ).pipe(Layer.provide(PivotSupervisor.layer)),
   Layer.effectDiscard(
     Effect.gen(function* () {
       const service = yield* DelegatedTaskQuestionReactor.DelegatedTaskQuestionReactor;
@@ -625,6 +663,17 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   // Stops what an agent that already exited left in its scope.
   ScopeSweep.layer,
 ).pipe(
+  // Pivot mode: its service and the adapter it reaches V2 threads, PRs and
+  // checkouts through. Teardown stops a worktree's managed processes, so it
+  // sits inside them.
+  Layer.provideMerge(
+    PivotHost.layer.pipe(
+      // PivotService brings the local TeammateHost both services run through.
+      Layer.provideMerge(PivotService.layer),
+      Layer.provideMerge(PivotThreads.layer.pipe(Layer.provide(layerPullRequestService))),
+      Layer.provideMerge(PivotGit.layer.pipe(Layer.provide(ProcessRunner.layer))),
+    ),
+  ),
   // Storage cleanup stops a checkout's dev servers before removing it; the
   // RPC and MCP layers start and stop them.
   Layer.provideMerge(
@@ -633,6 +682,12 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
     ),
   ),
   Layer.provideMerge(layerOrchestrationApplication),
+  // Pivot mode: a Pivot and its teammates carry on after a restart, and the
+  // relay publishes teammates only when held for the user, and a Pivot's decisions as
+  // input needed.
+  Layer.provideMerge(
+    Layer.mergeAll(PivotCarryOn.layer, PivotRelayAwareness.layer, PivotToolRestrictions.layer),
+  ),
   Layer.provideMerge(RuntimeLayer.layerEventInfrastructure),
   Layer.provideMerge(Layer.merge(ProjectStore.layer, ThreadSearch.layer)),
   Layer.provideMerge(layerServerSettings),
@@ -681,6 +736,11 @@ const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
   Layer.provideMerge(layerWorkspace),
   Layer.provideMerge(ProjectEnrichmentService.layer),
   Layer.provideMerge(Layer.mergeAll(NativeAppIconResolver.layer, layerProjectFaviconResolver)),
+  Layer.provideMerge(PivotHome.layer.pipe(Layer.provide(ProcessRunner.layer))),
+  // The Pivot's records and the host links' share one database connection.
+  Layer.provideMerge(
+    Layer.mergeAll(PivotStore.layer, PivotHostStore.layer).pipe(Layer.provide(PivotDatabase.layer)),
+  ),
   Layer.provideMerge(layerRepositoryIdentityResolver),
   Layer.provideMerge(CodexManagedTokenBroker.layer),
   Layer.provideMerge(layerServerEnvironment),

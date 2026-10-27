@@ -51,6 +51,19 @@ export function agentSliceMemoryLimits(totalBytes: number) {
   };
 }
 
+/** About what one teammate takes at its peak: an agent, a typecheck and a test run. */
+const TEAMMATE_PEAK_BYTES = 3 * GiB;
+
+/** How many teammates the agents slice holds at once, at a teammate's peak. */
+export const teammateCapForMemory = (totalBytes: number) =>
+  Math.max(1, Math.floor(agentSliceMemoryLimits(totalBytes).high / TEAMMATE_PEAK_BYTES));
+
+/** The Pivot's teammate cap when Settings sets none: from memory on Linux, else none. */
+export const defaultPivotTeammateCap = Effect.gen(function* () {
+  if ((yield* HostProcess.Platform) !== "linux") return null;
+  return teammateCapForMemory(NodeOS.totalmem());
+});
+
 /**
  * Each agent scope gets a share of the slice limits, so one runaway child is
  * throttled, then OOM-killed, inside its own scope before it drags the slice
@@ -123,9 +136,12 @@ export function classifyMemory(input: {
 /** How often a start held for memory asks again; its ticket goes stale after a few misses. */
 export const ADMISSION_POLL_MS = 5_000;
 export const ADMISSION_TIMING: AdmissionTiming = {
+  spacingMs: 30_000,
   // Generous: a deferred start is asked again only once a busy effect worker claims it.
   staleMs: 12 * ADMISSION_POLL_MS,
   timeoutMs: 10 * 60_000,
+  // A teammate is background work: it waits for memory as long as the machine is busy.
+  spacedTimeoutMs: 2 * 60 * 60_000,
 };
 
 export interface ScopeState {
@@ -503,6 +519,7 @@ export const make = Effect.gen(function* () {
       token: admissionToken,
       ticketId: input.ticketId,
       threadId: input.threadId,
+      spaced: input.spaced,
       probe: Effect.flatMap(resolveSliceCgroup(scope), readMemory),
       timing: ADMISSION_TIMING,
     });

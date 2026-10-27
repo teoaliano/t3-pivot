@@ -55,6 +55,17 @@ describe("Codex runtime context", () => {
   });
 });
 
+describe("Codex Pivot project context", () => {
+  it("names the project's id and checkout in the runtime context", () => {
+    const value = buildCodexAdditionalContext({
+      model: "gpt-5.4",
+      reasoningEffort: "medium",
+      project: { projectId: "project-1", workspaceRoot: "/repos/checkout" },
+    }).t3_code_runtime!.value;
+    NodeAssert.match(value, /project's id is project-1 and its checkout is \/repos\/checkout\./);
+  });
+});
+
 describe("Codex orchestration context", () => {
   it("routes subagents native first, delegate_task for the rest", () => {
     const orchestration = Object.entries(buildCodexAdditionalContext({ model: "gpt-6.1-sol" }))

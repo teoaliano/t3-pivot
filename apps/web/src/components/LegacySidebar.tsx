@@ -213,6 +213,8 @@ import {
 } from "./Sidebar.logic";
 import { sortThreads } from "../lib/threadSort";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import { nestPivotTeammates } from "./sidebar/pivotNesting.logic";
+import { usePivotStatesStore } from "./pivot/pivotStatesStore";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { CommandDialogTrigger } from "./ui/command";
@@ -683,7 +685,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         data-size="sm"
         data-testid={`thread-row-${thread.id}`}
         className={cn(
-          "relative isolate flex h-8 w-full min-w-0 cursor-pointer select-none items-center gap-2 overflow-hidden rounded-md px-2 text-left text-xs outline-hidden focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring group-data-[collapsible=icon]:hidden [&>span:last-child]:truncate [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-muted-foreground",
+          "relative isolate flex h-8 w-full min-w-0 cursor-pointer select-none items-center gap-2 overflow-hidden rounded-md text-left text-xs outline-hidden focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring group-data-[collapsible=icon]:hidden [&>span:last-child]:truncate [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-muted-foreground",
+          "px-2",
           isActive
             ? "bg-sidebar-row-active font-medium text-sidebar-foreground hover:bg-sidebar-row-active"
             : isSelected
@@ -1124,6 +1127,7 @@ function useProjectThreads(project: SidebarProjectSnapshot) {
     (settings) => settings.sidebarThreadSortOrder,
   );
   const sidebarThreads = useThreadShellsForProjectRefs(project.memberProjectRefs);
+  const pivotStatesByEnvironment = usePivotStatesStore((store) => store.byEnvironment);
   const threadLastVisitedAts = useUiStateStore(
     useShallow((state) =>
       sidebarThreads.map(
@@ -1167,10 +1171,11 @@ function useProjectThreads(project: SidebarProjectSnapshot) {
       resolveThreadLastVisitedAt(thread.lastVisitedAt, threadLastVisitedAts[index] ?? undefined),
     ]),
   );
-  const visibleProjectThreads = sortThreads(
-    filterSidebarV2VisibleThreads(sidebarThreads, null),
-    threadSortOrder,
-  );
+  // T3 Pivot: a Pivot's teammates live in its right panel, not the project list.
+  const visibleProjectThreads = nestPivotTeammates(
+    sortThreads(filterSidebarV2VisibleThreads(sidebarThreads, null), threadSortOrder),
+    (environmentId) => pivotStatesByEnvironment[environmentId] ?? null,
+  ).topLevel;
   const projectStatus = resolveProjectStatusIndicator(
     visibleProjectThreads.map((thread) =>
       resolveProjectThreadStatus(thread, lastVisitedAtByThreadKey),

@@ -1,8 +1,16 @@
 #!/usr/bin/env node
 
-// Maintainer commands for T3 Pivot: sync, release, ios-release, nightly,
-// nightly-install and host-update (see docs/operations/pivot-releases.md).
-// All commands act as the fork owner's GitHub account, whatever gh's active account is.
+// Maintainer commands for T3 Pivot.
+//   sync         open a PR on the fork that merges upstream's newest nightly tag
+//   release      build, sign, notarize and publish T3 Pivot from main (release Mac)
+//   ios-release  upload the iPhone app for main's release to TestFlight (release Mac)
+//   nightly      publish whatever main has not released yet, desktop and iPhone, and
+//                install it on the release Mac
+//   nightly-install  schedule `nightly` with launchd, from the release Mac's clone
+//   host-update  merge upstream's newest nightly into main, with an agent finishing
+//                what the owner rules leave open, then rebuild and restart the host
+// All commands act as the fork owner's GitHub account, whatever gh's active
+// account is.
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -821,6 +829,8 @@ const PIVOT_OWNED_PATHS = [
   "scripts/pivot-release-plan.ts",
   "scripts/pivot-release-plan.test.ts",
   "docs/operations/pivot-releases.md",
+  "apps/server/src/pivot/",
+  ".scratch/pivot-mode/",
 ];
 const UPSTREAM_OWNED_PATHS = [".repos/"];
 
@@ -915,9 +925,12 @@ export const runMergeAgent: MergeAgent = Effect.fn("pivot.runMergeAgent")(functi
 });
 
 /**
- * Merges upstream `tag` and commits once it builds. Conflicts go to their owner paths
- * first, then to `agent`; anything the agent can't settle fails with PivotMergeError and
- * restores the checkout. Returns the agent's summary, empty when no agent was needed.
+ * Merges upstream `tag` into the checked-out branch in `cwd` and commits it once it
+ * builds. Conflicts go to their owner first (see PIVOT_OWNED_PATHS and
+ * UPSTREAM_OWNED_PATHS). Conflicts left over, or a merge that doesn't build, go to
+ * `agent`. Fails with PivotMergeError, the checkout restored to where it was, when the
+ * agent asks for the maintainer's decision, fails, or leaves a merge that still
+ * doesn't build. Returns the agent's summary, empty when the merge needed no agent.
  */
 export const mergeUpstreamTag = Effect.fn("pivot.mergeUpstreamTag")(function* (
   tag: string,

@@ -1,5 +1,14 @@
 import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
+import { usePivotStatesStore } from "./pivot/pivotStatesStore";
+import { teammateCardShellOf } from "./pivot/pivotCards.logic";
+import { SidebarPivotSummary } from "./pivot/SidebarPivotStrip";
+import {
+  nestPivotTeammates,
+  pivotNestingKey,
+  type SidebarPivotGroup,
+  sidebarPivotGroup,
+} from "./sidebar/pivotNesting.logic";
 import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
 import {
   dropThreadContext,
@@ -311,6 +320,9 @@ interface SidebarThreadPartitionInput {
   readonly serverConfigs: ReadonlyMap<EnvironmentId, EnvironmentServerConfig>;
   readonly optimisticDrop: SidebarOptimisticDrop | null;
   readonly workingShelfEnabled: boolean;
+  readonly pivotStatesByEnvironment: ReturnType<
+    typeof usePivotStatesStore.getState
+  >["byEnvironment"];
   // Snooze wakes, the queued-turn grace and the Working shelf's exit grace depend
   // on the clock, so the minute tick, the precise snooze-wake tick and the inbox
   // tracker's expiry version are inputs: a new key repartitions.
@@ -370,6 +382,7 @@ function useSidebarThreads(input: {
     threads,
     routeRowThreadKey,
   } = input;
+  const pivotStatesByEnvironment = usePivotStatesStore((store) => store.byEnvironment);
   const workingShelfEnabled = useClientSettings((s) => s.sidebarWorkingShelfEnabled);
   const inboxReturnsVersion = useSyncExternalStore(
     inboxReturns.subscribe,
@@ -385,6 +398,7 @@ function useSidebarThreads(input: {
   );
   // Without the Working shelf, working threads stay in Threads.
   const sidebarTab = storedTab === "working" && !workingShelfEnabled ? "threads" : storedTab;
+  const pivotsSectionExpanded = sidebarTab === "pivots";
   const threadsSectionExpanded = sidebarTab === "threads";
   const workingShelfExpanded = sidebarTab === "working";
   const snoozedShelfExpanded = sidebarTab === "snoozed";
@@ -405,12 +419,29 @@ function useSidebarThreads(input: {
     serverConfigs,
     optimisticDrop,
     workingShelfEnabled,
+    pivotStatesByEnvironment,
     clockKey: `${nowMinute}:${snoozeWakeClock}:${inboxReturnsVersion}`,
   });
 
-  const { pinnedThreads, activeThreads, workingThreads, snoozedThreads, settledThreads } =
-    partition;
-  const visibleActiveThreads = threadsSectionExpanded ? activeThreads : EMPTY_THREADS;
+  const {
+    pinnedThreads,
+    activeThreads,
+    workingThreads,
+    snoozedThreads,
+    settledThreads,
+    pivotTeammatesByKey,
+  } = partition;
+  // Pivots are long-lived and come first; teammates already sit under theirs.
+  const activePivotThreads = activeThreads.filter(
+    (thread) => pivotStatesByEnvironment[thread.environmentId]?.pivots[thread.id] !== undefined,
+  );
+  const activeNormalThreads = activeThreads.filter(
+    (thread) => pivotStatesByEnvironment[thread.environmentId]?.pivots[thread.id] === undefined,
+  );
+  const visibleActiveThreads = [
+    ...(pivotsSectionExpanded ? activePivotThreads : EMPTY_THREADS),
+    ...(threadsSectionExpanded ? activeNormalThreads : EMPTY_THREADS),
+  ];
   // Older settled threads load in pages; the shelf lists them only as far as they are loaded.
   const olderSettledShelf = useOlderSettledShelf({
     scopes: olderSettledScopes([...serverConfigs.keys()], scopedProjectKeys),
@@ -464,7 +495,11 @@ function useSidebarThreads(input: {
       ...workingThreads,
       ...snoozedThreads,
       ...settledThreads,
+      // Nested under their Pivot, but still found by search.
+      ...[...pivotTeammatesByKey.values()].flat(),
     ],
+    activePivotThreads,
+    activeNormalThreads,
     visibleActiveThreads,
     sidebarTab,
     setSidebarTab,
@@ -498,9 +533,21 @@ function useSidebarThreads(input: {
 }
 
 function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
-  const { threads, scopedProjectKeys, serverConfigs, optimisticDrop, workingShelfEnabled } = input;
+  const {
+    threads,
+    scopedProjectKeys,
+    serverConfigs,
+    optimisticDrop,
+    workingShelfEnabled,
+    pivotStatesByEnvironment,
+  } = input;
   const preciseNow = new Date().toISOString();
-  const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys);
+  // T3 Pivot: teammates leave the shelves; their Pivot's right panel lists them.
+  const pivotNesting = nestPivotTeammates(
+    filterSidebarV2VisibleThreads(threads, scopedProjectKeys),
+    (environmentId) => pivotStatesByEnvironment[environmentId] ?? null,
+  );
+  const visible = pivotNesting.topLevel;
   const inboxObservation = inboxReturns.observe(workingShelfEnabled ? threads : null);
   const pinned: EnvironmentThreadShell[] = [];
   const active: EnvironmentThreadShell[] = [];
@@ -589,6 +636,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
     settledThreads: sortSettledThreads(settled),
     visibleThreads: visible,
     snoozeNow: preciseNow,
+    pivotTeammatesByKey: pivotNesting.teammatesByPivotKey,
   };
 }
 
@@ -850,6 +898,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     },
   });
   const newThreadContext = useHandleNewThread();
+  const pivotStatesByEnvironment = usePivotStatesStore((store) => store.byEnvironment);
   // Row callbacks capture only the handler; the rest of the context changes with the route.
   const { handleNewThread } = newThreadContext;
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -1081,6 +1130,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     draggableThreadKeys,
     activeReorderableThreadKeys,
     activeThreads,
+    activePivotThreads,
+    activeNormalThreads,
     visibleActiveThreads,
     sidebarTab,
     setSidebarTab,
@@ -1115,6 +1166,23 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     threads,
     routeRowThreadKey,
   });
+  // T3 Pivot: each Pivot's row counts its teammates by state, read from the Pivot records.
+  const pivotGroupsByKey = (() => {
+    const shellByKey = new Map(threads.map((shell) => [pivotNestingKey(shell), shell] as const));
+    const groups = new Map<string, SidebarPivotGroup>();
+    for (const [environmentId, pivotState] of Object.entries(pivotStatesByEnvironment)) {
+      if (pivotState == null) continue;
+      for (const pivot of Object.values(pivotState.pivots)) {
+        const key = `${environmentId}:${pivot.threadId}`;
+        const group = sidebarPivotGroup(pivotState, pivot.threadId, (threadId) => {
+          const shell = shellByKey.get(`${environmentId}:${threadId}`);
+          return shell === undefined ? null : teammateCardShellOf(shell.source, shell.pullRequests);
+        });
+        if (group !== null) groups.set(key, group);
+      }
+    }
+    return groups;
+  })();
 
   // Ranked across environments as the palette ranks them, so one
   // environment's list does not sit above another's better matches; rows
@@ -1690,8 +1758,22 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     const pinnedRows = rowsOf(pinnedThreads, "pinned");
     items.push(...pinnedRows);
     items.push({ kind: "marker", marker: "pinned-divider" });
+    const pivotSet = new Set(activePivotThreads);
+    const isActivePivot = (thread: EnvironmentThreadShell) => pivotSet.has(thread);
     items.push({ kind: "marker", marker: "active-placeholder" });
-    items.push(...rowsOf(visibleActiveThreads, "active"));
+    if (activePivotThreads.length > 0) {
+      items.push({ kind: "marker", marker: "pivots-header" });
+      items.push(...rowsOf(visibleActiveThreads.filter(isActivePivot), "active"));
+    }
+    if (activeNormalThreads.length > 0) {
+      items.push({ kind: "marker", marker: "threads-header" });
+      items.push(
+        ...rowsOf(
+          visibleActiveThreads.filter((thread) => !isActivePivot(thread)),
+          "active",
+        ),
+      );
+    }
     if (workingThreads.length > 0) {
       items.push({ kind: "marker", marker: "working-header" });
       items.push(...rowsOf(visibleWorkingThreads, "working"));
@@ -1772,6 +1854,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     settledVisibleCount,
     routeThreadKey: routeRowThreadKey,
     snoozedThreadCount: snoozedThreads.length,
+    pivotKeys: new Set(activePivotThreads.map(threadShellKey)),
   });
   const draggedThreadKey = dragState?.activeKey;
   const draggedFromSection = dragState?.activeSection;
@@ -2648,6 +2731,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const showJumpHints = useThreadJumpHintsVisible(shouldShowJumpHintsNow);
 
   const handleNewThreadClick = (event?: ReactMouseEvent) => {
+    if (sidebarTab === "pivots") {
+      if (isMobile) setOpenMobile(false);
+      openCommandPalette({ open: "new-pivot-in" });
+      return;
+    }
     if (shouldCreateNewThreadInCurrentProject(event?.shiftKey ?? false, projectGroups.length)) {
       if (isMobile) setOpenMobile(false);
       void startNewThreadFromContext({
@@ -2663,8 +2751,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   };
 
   const newThreadShortcutLabel =
-    shortcutLabelForCommand(keybindings, "chat.new") ??
-    (projectGroups.length <= 1 ? shortcutLabelForCommand(keybindings, "chat.newLocal") : undefined);
+    sidebarTab === "pivots"
+      ? shortcutLabelForCommand(keybindings, "pivot.new")
+      : (shortcutLabelForCommand(keybindings, "chat.new") ??
+        (projectGroups.length <= 1
+          ? shortcutLabelForCommand(keybindings, "chat.newLocal")
+          : undefined));
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
   return (
     <>
@@ -2804,6 +2896,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               onNewProject={openAddProjectCommandPalette}
               onNewThread={handleNewThreadClick}
               newThreadDisabled={projects.length === 0}
+              newItemIsPivot={sidebarTab === "pivots"}
               newThreadShortcutLabel={newThreadShortcutLabel}
               newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
               showNewThreadInProjectHint={projectGroups.length > 1}
@@ -2905,7 +2998,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                   onValueChange={setSidebarTab}
                   workingShelfEnabled={workingShelfEnabled}
                   counts={{
-                    threads: activeThreads.length,
+                    pivots: activePivotThreads.length,
+                    threads: activeNormalThreads.length,
                     working: workingThreads.length,
                     snoozed: snoozedThreads.length,
                     settled: settledCount,
@@ -2934,6 +3028,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                     )}
                   >
                     {(() => {
+                      const renderPivotSummary = (thread: EnvironmentThreadShell) => {
+                        const group = pivotGroupsByKey.get(pivotNestingKey(thread));
+                        return group === undefined ? null : <SidebarPivotSummary group={group} />;
+                      };
                       const renderThreadRow = (
                         thread: EnvironmentThreadShell,
                         section: SidebarSection,
@@ -3001,6 +3099,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             }
                             isRouteThread={routeThreadKey === threadKey}
                             openPullRequestsInRightPanel={routeThreadRef !== null}
+                            pivotSummary={renderPivotSummary(thread)}
                             jumpLabel={
                               showJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null
                             }
@@ -3104,6 +3203,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               />,
                             );
                             break;
+                          case "pivots-header":
+                          case "threads-header":
                           case "working-header":
                           case "snoozed-header":
                           case "settled-header":
