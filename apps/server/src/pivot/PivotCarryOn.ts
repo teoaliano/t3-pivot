@@ -19,15 +19,17 @@ export const layer = Layer.effect(
     const store = yield* PivotStore.PivotStore;
     const hostStore = yield* PivotHostStore.PivotHostStore;
     return {
-      carriesOn: (threadId) =>
-        Effect.gen(function* () {
+      carriesOn: Effect.fn("PivotCarryOn.carriesOn")(
+        function* (threadId) {
           const pivot = yield* store.getPivot(threadId);
           if (pivot !== null) return pivot.retiredAt === null;
           const teammate = yield* store.getTeammate(threadId);
           if (teammate !== null) return teammate.tornDownAt === null;
           return yield* hostStore.isLive(threadId);
-        }).pipe(Effect.orElseSucceed(() => false)),
-      resuming: (threadId) =>
+        },
+        Effect.orElseSucceed(() => false),
+      ),
+      resuming: Effect.fn("PivotCarryOn.resuming")((threadId) =>
         store.getTeammate(threadId).pipe(
           Effect.flatMap((teammate) =>
             teammate === null
@@ -36,6 +38,7 @@ export const layer = Layer.effect(
           ),
           Effect.ignore,
         ),
+      ),
     };
   }),
 );

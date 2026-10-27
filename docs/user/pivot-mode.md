@@ -79,7 +79,7 @@ and its card is marked **Inline**. One runs at a time per project. When it isn't
 whether a change is small enough, the Pivot asks you.
 
 The Pivot runs at most a few teammates at once and queues the rest. Set the number in
-**Settings → General → Teammates at once**; left on Auto, it follows your machine's memory on
+**Settings → Threads → Teammates at once**; left on Auto, it follows your machine's memory on
 Linux and has no cap elsewhere.
 
 ## When the machine is short of memory

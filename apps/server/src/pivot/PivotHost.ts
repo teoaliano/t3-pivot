@@ -223,14 +223,17 @@ export const make = Effect.gen(function* () {
     );
 
   /** A teammate that can still be acted on. A torn-down one refuses. */
-  const liveTeammate = (command: string, caller: PivotHostCaller, input: TeammateInput) =>
-    Effect.gen(function* () {
-      const target = yield* authorizeTeammate(caller, input);
-      if (target.teammate.tornDownAt !== null) {
-        return yield* refuse(command, `Teammate ${input.threadId} was torn down.`);
-      }
-      return target.teammate;
-    });
+  const liveTeammate = Effect.fn("PivotHost.liveTeammate")(function* (
+    command: string,
+    caller: PivotHostCaller,
+    input: TeammateInput,
+  ) {
+    const target = yield* authorizeTeammate(caller, input);
+    if (target.teammate.tornDownAt !== null) {
+      return yield* refuse(command, `Teammate ${input.threadId} was torn down.`);
+    }
+    return target.teammate;
+  });
 
   /** Where the teammate's worktree is: the path V2 recorded once it exists, else the one launched with. */
   const worktreeOf = (teammate: PivotHostStore.HostedTeammate) =>
@@ -245,31 +248,33 @@ export const make = Effect.gen(function* () {
     detail: start.type === "failed" ? redactDetail(start.detail) : null,
   });
 
-  const describe: PivotHost["Service"]["describe"] = (caller, input) =>
-    Effect.gen(function* () {
-      const grant = yield* authorize(caller, input);
-      const settings = yield* serverSettings.getSettings;
-      const projects: Array<PivotHostDescription["projects"][number]> = [];
-      for (const projectId of grant.allowedProjectIds) {
-        // A project that is gone or is not a git repository cannot host a teammate.
-        const project = yield* host.project("pivotHost.describe", projectId).pipe(Effect.option);
-        if (Option.isNone(project)) continue;
-        const hasRemote = yield* git
-          .hasRemote(project.value.workspaceRoot)
-          .pipe(Effect.orElseSucceed(() => false));
-        projects.push({
-          projectId,
-          title: project.value.title,
-          repositoryKey:
-            project.value.repositoryIdentity === null
-              ? null
-              : repositoryGroupingKeyOf(project.value.repositoryIdentity),
-          hasRemote,
-          teammateModels: resolveProjectSettings(settings, projectId).settings.teammateModels,
-        });
-      }
-      return { projects, teammateModels: settings.teammateModels };
-    });
+  const describe = Effect.fn("PivotHost.describe")(function* (
+    caller: PivotHostCaller,
+    input: { readonly homeEnvironmentId: EnvironmentId },
+  ) {
+    const grant = yield* authorize(caller, input);
+    const settings = yield* serverSettings.getSettings;
+    const projects: Array<PivotHostDescription["projects"][number]> = [];
+    for (const projectId of grant.allowedProjectIds) {
+      // A project that is gone or is not a git repository cannot host a teammate.
+      const project = yield* host.project("pivotHost.describe", projectId).pipe(Effect.option);
+      if (Option.isNone(project)) continue;
+      const hasRemote = yield* git
+        .hasRemote(project.value.workspaceRoot)
+        .pipe(Effect.orElseSucceed(() => false));
+      projects.push({
+        projectId,
+        title: project.value.title,
+        repositoryKey:
+          project.value.repositoryIdentity === null
+            ? null
+            : repositoryGroupingKeyOf(project.value.repositoryIdentity),
+        hasRemote,
+        teammateModels: resolveProjectSettings(settings, projectId).settings.teammateModels,
+      });
+    }
+    return { projects, teammateModels: settings.teammateModels };
+  });
 
   const launchResult = (
     teammate: PivotHostStore.HostedTeammate,
@@ -289,133 +294,136 @@ export const make = Effect.gen(function* () {
   });
 
   /** Where the first run stands, for a launch just made or one being retried. */
-  const firstRun = (teammate: PivotHostStore.HostedTeammate) =>
-    Effect.gen(function* () {
-      const start: PivotThreads.RunStart =
-        teammate.firstRunId === null
-          ? { type: "failed", runId: null, detail: "The launch created no run." }
-          : yield* host.awaitStart(teammate.threadId, teammate.firstRunId);
-      // A failing setup script still starts the teammate; the result says so.
-      return launchResult(teammate, start, yield* host.setupOutcome(teammate.threadId));
-    });
+  const firstRun = Effect.fn("PivotHost.firstRun")(function* (
+    teammate: PivotHostStore.HostedTeammate,
+  ) {
+    const start: PivotThreads.RunStart =
+      teammate.firstRunId === null
+        ? { type: "failed", runId: null, detail: "The launch created no run." }
+        : yield* host.awaitStart(teammate.threadId, teammate.firstRunId);
+    // A failing setup script still starts the teammate; the result says so.
+    return launchResult(teammate, start, yield* host.setupOutcome(teammate.threadId));
+  });
 
   const differentLaunch = (command: string) =>
     refuse(command, "That dispatchId was used for a different launch.");
 
-  const launchTeammate: PivotHost["Service"]["launchTeammate"] = (caller, input) =>
-    Effect.gen(function* () {
-      const command = "pivotHost.launchTeammate";
-      const first = yield* authorize(caller, input);
-      // It reaches git, so a value that is not a plausible ref name is refused, not passed on.
-      if (input.baseBranch !== undefined && !isBranchName(input.baseBranch)) {
-        return yield* refuse(command, "The base branch is not a valid branch name.");
-      }
-      // An inline task works in its Pivot's own workspace, which lives with that Pivot.
-      if (input.kind === "inline") {
-        return yield* refuse(command, "Inline tasks run on the Pivot's own environment.");
-      }
-      return yield* dispatchLocks.withLock(
-        `${first.grantId}\u0000${input.dispatchId}`,
-        host.withProjectLock(
-          input.projectId,
-          Effect.gen(function* () {
-            // The link may have been revoked, or the project taken off it, while this waited.
-            const grant = yield* authorize(caller, input);
-            const existing = yield* store.findByDispatch(grant.grantId, input.dispatchId);
-            if (existing !== null) {
-              if (existing.projectId !== input.projectId) return yield* differentLaunch(command);
-              if (existing.tornDownAt !== null) {
-                return yield* refuse(command, "The teammate that dispatch launched was torn down.");
-              }
-              return yield* firstRun(existing);
+  const launchTeammate = Effect.fn("PivotHost.launchTeammate")(function* (
+    caller: PivotHostCaller,
+    input: PivotHostLaunchInput,
+  ) {
+    const command = "pivotHost.launchTeammate";
+    const first = yield* authorize(caller, input);
+    // It reaches git, so a value that is not a plausible ref name is refused, not passed on.
+    if (input.baseBranch !== undefined && !isBranchName(input.baseBranch)) {
+      return yield* refuse(command, "The base branch is not a valid branch name.");
+    }
+    // An inline task works in its Pivot's own workspace, which lives with that Pivot.
+    if (input.kind === "inline") {
+      return yield* refuse(command, "Inline tasks run on the Pivot's own environment.");
+    }
+    return yield* dispatchLocks.withLock(
+      `${first.grantId}\u0000${input.dispatchId}`,
+      host.withProjectLock(
+        input.projectId,
+        Effect.gen(function* () {
+          // The link may have been revoked, or the project taken off it, while this waited.
+          const grant = yield* authorize(caller, input);
+          const existing = yield* store.findByDispatch(grant.grantId, input.dispatchId);
+          if (existing !== null) {
+            if (existing.projectId !== input.projectId) return yield* differentLaunch(command);
+            if (existing.tornDownAt !== null) {
+              return yield* refuse(command, "The teammate that dispatch launched was torn down.");
             }
-            if ((yield* store.countLive(grant.grantId)) >= PIVOT_HOST_MAX_LIVE_TEAMMATES) {
-              return yield* refuse(
-                command,
-                `This host link already runs ${PIVOT_HOST_MAX_LIVE_TEAMMATES} teammates, the most it may. Tear one down first.`,
-              );
-            }
-            const capReached = refuse(
+            return yield* firstRun(existing);
+          }
+          if ((yield* store.countLive(grant.grantId)) >= PIVOT_HOST_MAX_LIVE_TEAMMATES) {
+            return yield* refuse(
               command,
               `This host link already runs ${PIVOT_HOST_MAX_LIVE_TEAMMATES} teammates, the most it may. Tear one down first.`,
             );
-            // From launching to recording is one step that nothing may interrupt, such as a home
-            // that drops its connection: a thread launched and left unrecorded would run
-            // full-access with no record, uncounted, and out of a revoke's reach. Recorded
-            // before the first run gets going, so its first report finds it. The link is checked
-            // once more first: launching took a while, and a revoke or an allowlist edit in that
-            // time ends the launch. The insert itself re-checks only that the link is not revoked,
-            // so an edit landing between that check and the insert is not caught. Any way out but
-            // success stops the thread, then archives it: archiving alone leaves a run still
-            // preparing to go on and start its agent.
-            const { launched, recorded } = yield* Effect.uninterruptible(
-              Effect.gen(function* () {
-                const launched = yield* host.launch({
-                  projectId: input.projectId,
-                  pivotThreadId: hostedSenderOf(input.pivotThreadId),
-                  title: input.title,
-                  kind: input.kind,
-                  intent: input.intent,
-                  spec: input.spec,
-                  baseBranch: input.baseBranch,
-                  modelSelection: input.modelSelection,
-                });
-                const { runId } = launched;
-                const recorded = yield* Effect.gen(function* () {
-                  yield* authorize(caller, input);
-                  if (runId === null) return yield* refuse(command, "The launch created no run.");
-                  const result = yield* store.recordTeammate(
-                    {
-                      threadId: launched.threadId,
-                      grantId: grant.grantId,
-                      dispatchId: input.dispatchId,
-                      projectId: input.projectId,
-                      pivotThreadId: input.pivotThreadId,
-                      pivotLabel: input.pivotLabel,
-                      kind: input.kind,
-                      title: input.title,
-                      branch: launched.branch,
-                      baseBranch: launched.baseBranch,
-                      worktreePath: launched.worktreePath,
-                      deliveryMode: launched.deliveryMode,
-                      firstRunId: runId,
-                    },
-                    { maxLive: PIVOT_HOST_MAX_LIVE_TEAMMATES },
-                  );
-                  if (result !== null) return result;
-                  // Nothing was written: the link was revoked, the project left its allowlist,
-                  // or another launch filled the cap.
-                  const current = yield* store.getGrant(grant.grantId);
-                  if (current === null || current.revokedAt !== null) {
-                    return yield* new PivotHostRefusedError({
-                      code: "revoked",
-                      reason: "This Pivot host link was revoked.",
-                    });
-                  }
-                  yield* authorize(caller, input);
-                  return yield* capReached;
-                }).pipe(
-                  Effect.onExit((exit) =>
-                    Exit.isSuccess(exit)
-                      ? Effect.void
-                      : host.discard(launched.threadId).pipe(Effect.ignore),
-                  ),
+          }
+          const capReached = refuse(
+            command,
+            `This host link already runs ${PIVOT_HOST_MAX_LIVE_TEAMMATES} teammates, the most it may. Tear one down first.`,
+          );
+          // From launching to recording is one step that nothing may interrupt, such as a home
+          // that drops its connection: a thread launched and left unrecorded would run
+          // full-access with no record, uncounted, and out of a revoke's reach. Recorded
+          // before the first run gets going, so its first report finds it. The link is checked
+          // once more first: launching took a while, and a revoke or an allowlist edit in that
+          // time ends the launch. The insert itself re-checks only that the link is not revoked,
+          // so an edit landing between that check and the insert is not caught. Any way out but
+          // success stops the thread, then archives it: archiving alone leaves a run still
+          // preparing to go on and start its agent.
+          const { launched, recorded } = yield* Effect.uninterruptible(
+            Effect.gen(function* () {
+              const launched = yield* host.launch({
+                projectId: input.projectId,
+                pivotThreadId: hostedSenderOf(input.pivotThreadId),
+                title: input.title,
+                kind: input.kind,
+                intent: input.intent,
+                spec: input.spec,
+                baseBranch: input.baseBranch,
+                modelSelection: input.modelSelection,
+              });
+              const { runId } = launched;
+              const recorded = yield* Effect.gen(function* () {
+                yield* authorize(caller, input);
+                if (runId === null) return yield* refuse(command, "The launch created no run.");
+                const result = yield* store.recordTeammate(
+                  {
+                    threadId: launched.threadId,
+                    grantId: grant.grantId,
+                    dispatchId: input.dispatchId,
+                    projectId: input.projectId,
+                    pivotThreadId: input.pivotThreadId,
+                    pivotLabel: input.pivotLabel,
+                    kind: input.kind,
+                    title: input.title,
+                    branch: launched.branch,
+                    baseBranch: launched.baseBranch,
+                    worktreePath: launched.worktreePath,
+                    deliveryMode: launched.deliveryMode,
+                    firstRunId: runId,
+                  },
+                  { maxLive: PIVOT_HOST_MAX_LIVE_TEAMMATES },
                 );
-                return { launched, recorded };
-              }),
-            );
-            if (!recorded.created) {
-              // Another launch with this dispatchId won while this one ran; keep that one.
-              yield* host.discard(launched.threadId).pipe(Effect.ignore);
-              if (recorded.teammate.projectId !== input.projectId) {
-                return yield* differentLaunch(command);
-              }
+                if (result !== null) return result;
+                // Nothing was written: the link was revoked, the project left its allowlist,
+                // or another launch filled the cap.
+                const current = yield* store.getGrant(grant.grantId);
+                if (current === null || current.revokedAt !== null) {
+                  return yield* new PivotHostRefusedError({
+                    code: "revoked",
+                    reason: "This Pivot host link was revoked.",
+                  });
+                }
+                yield* authorize(caller, input);
+                return yield* capReached;
+              }).pipe(
+                Effect.onExit((exit) =>
+                  Exit.isSuccess(exit)
+                    ? Effect.void
+                    : host.discard(launched.threadId).pipe(Effect.ignore),
+                ),
+              );
+              return { launched, recorded };
+            }),
+          );
+          if (!recorded.created) {
+            // Another launch with this dispatchId won while this one ran; keep that one.
+            yield* host.discard(launched.threadId).pipe(Effect.ignore);
+            if (recorded.teammate.projectId !== input.projectId) {
+              return yield* differentLaunch(command);
             }
-            return yield* firstRun(recorded.teammate);
-          }),
-        ),
-      );
-    });
+          }
+          return yield* firstRun(recorded.teammate);
+        }),
+      ),
+    );
+  });
 
   // A revoke or an allowlist edit can land while a send or a relaunch runs, and revoke
   // stops the link's threads only once. So the link is checked again afterwards, and a
@@ -431,139 +439,156 @@ export const make = Effect.gen(function* () {
       Effect.asVoid,
     );
 
-  const send: PivotHost["Service"]["send"] = (caller, input) =>
-    Effect.gen(function* () {
-      const teammate = yield* liveTeammate("pivotHost.send", caller, input);
-      yield* host.send({
-        threadId: teammate.threadId,
-        senderThreadId: hostedSenderOf(teammate.pivotThreadId),
-        text: input.text,
+  const send = Effect.fn("PivotHost.send")(function* (
+    caller: PivotHostCaller,
+    input: PivotHostSendInput,
+  ) {
+    const teammate = yield* liveTeammate("pivotHost.send", caller, input);
+    yield* host.send({
+      threadId: teammate.threadId,
+      senderThreadId: hostedSenderOf(teammate.pivotThreadId),
+      text: input.text,
+    });
+    yield* recheck("pivotHost.send", caller, input, teammate.threadId);
+  });
+
+  const stop = Effect.fn("PivotHost.stop")(function* (
+    caller: PivotHostCaller,
+    input: TeammateInput,
+  ) {
+    yield* host.stop((yield* liveTeammate("pivotHost.stop", caller, input)).threadId);
+  });
+
+  const relaunch = Effect.fn("PivotHost.relaunch")(function* (
+    caller: PivotHostCaller,
+    input: PivotHostSendInput,
+  ) {
+    const teammate = yield* liveTeammate("pivotHost.relaunch", caller, input);
+    const started = yield* host.relaunch({
+      threadId: teammate.threadId,
+      senderThreadId: hostedSenderOf(teammate.pivotThreadId),
+      text: input.text,
+    });
+    yield* recheck("pivotHost.relaunch", caller, input, teammate.threadId);
+    return runStart(started);
+  });
+
+  const retryLaunch = Effect.fn("PivotHost.retryLaunch")(function* (
+    caller: PivotHostCaller,
+    input: TeammateInput,
+  ) {
+    const teammate = yield* liveTeammate("pivotHost.retryLaunch", caller, input);
+    const started = yield* host.retryLaunch(teammate.threadId);
+    yield* recheck("pivotHost.retryLaunch", caller, input, teammate.threadId);
+    return runStart(started);
+  });
+
+  const settle = Effect.fn("PivotHost.settle")(function* (
+    caller: PivotHostCaller,
+    input: TeammateInput,
+  ) {
+    const teammate = yield* liveTeammate("pivotHost.settle", caller, input);
+    yield* threads.settle(teammate.threadId);
+  });
+
+  const teardown = Effect.fn("PivotHost.teardown")(function* (
+    caller: PivotHostCaller,
+    input: PivotHostTeardownInput,
+  ) {
+    const command = "pivotHost.teardown";
+    const { teammate } = yield* authorizeTeammate(caller, input);
+    // A retry after a lost response finds it already done.
+    if (teammate.tornDownAt !== null) return;
+    yield* host.project(command, teammate.projectId);
+    const worktreePath = yield* worktreeOf(teammate);
+    const worktreeExists = yield* host.worktreeExists(worktreePath);
+    // Refused before anything stops: tearing down stops the session first, and removing a
+    // dirty worktree then fails, leaving a stopped teammate behind a vague failure.
+    if (!input.force && worktreeExists && !(yield* host.worktreeClean(worktreePath))) {
+      return yield* new PivotHostRefusedError({
+        code: "worktree-not-clean",
+        reason:
+          "The teammate's worktree has uncommitted changes. Tear it down with force to discard them.",
       });
-      yield* recheck("pivotHost.send", caller, input, teammate.threadId);
+    }
+    yield* host.teardown(command, {
+      projectId: teammate.projectId,
+      threadId: teammate.threadId,
+      worktreePath,
+      branch: teammate.branch,
+      worktreeExists,
+      force: input.force,
+      // The host cannot tell whether the home merged the work, so git decides: an unmerged
+      // branch stays, and discarded work keeps its branch.
+      branchDisposal: input.force ? "keep" : "safe",
     });
-
-  const stop: PivotHost["Service"]["stop"] = (caller, input) =>
-    Effect.gen(function* () {
-      yield* host.stop((yield* liveTeammate("pivotHost.stop", caller, input)).threadId);
-    });
-
-  const relaunch: PivotHost["Service"]["relaunch"] = (caller, input) =>
-    Effect.gen(function* () {
-      const teammate = yield* liveTeammate("pivotHost.relaunch", caller, input);
-      const started = yield* host.relaunch({
-        threadId: teammate.threadId,
-        senderThreadId: hostedSenderOf(teammate.pivotThreadId),
-        text: input.text,
-      });
-      yield* recheck("pivotHost.relaunch", caller, input, teammate.threadId);
-      return runStart(started);
-    });
-
-  const retryLaunch: PivotHost["Service"]["retryLaunch"] = (caller, input) =>
-    Effect.gen(function* () {
-      const teammate = yield* liveTeammate("pivotHost.retryLaunch", caller, input);
-      const started = yield* host.retryLaunch(teammate.threadId);
-      yield* recheck("pivotHost.retryLaunch", caller, input, teammate.threadId);
-      return runStart(started);
-    });
-
-  const settle: PivotHost["Service"]["settle"] = (caller, input) =>
-    Effect.gen(function* () {
-      const teammate = yield* liveTeammate("pivotHost.settle", caller, input);
-      yield* threads.settle(teammate.threadId);
-    });
-
-  const teardown: PivotHost["Service"]["teardown"] = (caller, input) =>
-    Effect.gen(function* () {
-      const command = "pivotHost.teardown";
-      const { teammate } = yield* authorizeTeammate(caller, input);
-      // A retry after a lost response finds it already done.
-      if (teammate.tornDownAt !== null) return;
-      yield* host.project(command, teammate.projectId);
-      const worktreePath = yield* worktreeOf(teammate);
-      const worktreeExists = yield* host.worktreeExists(worktreePath);
-      // Refused before anything stops: tearing down stops the session first, and removing a
-      // dirty worktree then fails, leaving a stopped teammate behind a vague failure.
-      if (!input.force && worktreeExists && !(yield* host.worktreeClean(worktreePath))) {
-        return yield* new PivotHostRefusedError({
-          code: "worktree-not-clean",
-          reason:
-            "The teammate's worktree has uncommitted changes. Tear it down with force to discard them.",
-        });
-      }
-      yield* host.teardown(command, {
-        projectId: teammate.projectId,
-        threadId: teammate.threadId,
-        worktreePath,
-        branch: teammate.branch,
-        worktreeExists,
-        force: input.force,
-        // The host cannot tell whether the home merged the work, so git decides: an unmerged
-        // branch stays, and discarded work keeps its branch.
-        branchDisposal: input.force ? "keep" : "safe",
-      });
-      yield* store.markTornDown(teammate.threadId);
-    });
+    yield* store.markTornDown(teammate.threadId);
+  });
 
   /**
    * The ref of a pull request linked to the teammate's own thread. The home names one
    * of the teammate's PRs, never another one in the repository.
    */
-  const linkedPullRequestRef = (
+  const linkedPullRequestRef = Effect.fn("PivotHost.linkedPullRequestRef")(function* (
     command: string,
     teammate: PivotHostStore.HostedTeammate,
     input: PivotHostPullRequestInput,
-  ) =>
-    Effect.gen(function* () {
-      const shell = yield* threads.shell(teammate.threadId);
-      const project = yield* host.project(command, teammate.projectId);
-      const link = (shell?.pullRequests ?? []).find(
-        (candidate) =>
-          candidate.source !== "stack-dismissed" &&
-          candidate.repository === input.repository &&
-          candidate.number === input.number &&
-          (input.host === undefined || candidate.host === input.host),
-      );
-      // Linked to the teammate's thread, and in the repository the allowlisted project lives in.
-      if (link === undefined || !repositoryMatchesProject(project.repositoryIdentity, link)) {
-        return yield* refuse(command, "That pull request is not linked to this teammate.");
-      }
-      return {
-        projectId: teammate.projectId,
-        host: link.host,
-        repository: link.repository,
-        number: link.number,
-      };
-    });
+  ) {
+    const shell = yield* threads.shell(teammate.threadId);
+    const project = yield* host.project(command, teammate.projectId);
+    const link = (shell?.pullRequests ?? []).find(
+      (candidate) =>
+        candidate.source !== "stack-dismissed" &&
+        candidate.repository === input.repository &&
+        candidate.number === input.number &&
+        (input.host === undefined || candidate.host === input.host),
+    );
+    // Linked to the teammate's thread, and in the repository the allowlisted project lives in.
+    if (link === undefined || !repositoryMatchesProject(project.repositoryIdentity, link)) {
+      return yield* refuse(command, "That pull request is not linked to this teammate.");
+    }
+    return {
+      projectId: teammate.projectId,
+      host: link.host,
+      repository: link.repository,
+      number: link.number,
+    };
+  });
 
-  const pullRequestDetail: PivotHost["Service"]["pullRequestDetail"] = (caller, input) =>
-    Effect.gen(function* () {
-      const command = "pivotHost.pullRequestDetail";
-      const { teammate } = yield* authorizeTeammate(caller, input);
-      return yield* host.pullRequestDetail(yield* linkedPullRequestRef(command, teammate, input));
-    });
+  const pullRequestDetail = Effect.fn("PivotHost.pullRequestDetail")(function* (
+    caller: PivotHostCaller,
+    input: PivotHostPullRequestInput,
+  ) {
+    const command = "pivotHost.pullRequestDetail";
+    const { teammate } = yield* authorizeTeammate(caller, input);
+    return yield* host.pullRequestDetail(yield* linkedPullRequestRef(command, teammate, input));
+  });
 
-  const mergePullRequest: PivotHost["Service"]["mergePullRequest"] = (caller, input) =>
-    Effect.gen(function* () {
-      const command = "pivotHost.mergePullRequest";
-      const teammate = yield* liveTeammate(command, caller, input);
-      const ref = yield* linkedPullRequestRef(command, teammate, input);
-      yield* host.mergePullRequest({ ...ref, expectedHeadSha: input.expectedHeadSha });
-    });
+  const mergePullRequest = Effect.fn("PivotHost.mergePullRequest")(function* (
+    caller: PivotHostCaller,
+    input: PivotHostMergeInput,
+  ) {
+    const command = "pivotHost.mergePullRequest";
+    const teammate = yield* liveTeammate(command, caller, input);
+    const ref = yield* linkedPullRequestRef(command, teammate, input);
+    yield* host.mergePullRequest({ ...ref, expectedHeadSha: input.expectedHeadSha });
+  });
 
-  const land: PivotHost["Service"]["land"] = (caller, input) =>
-    Effect.gen(function* () {
-      const command = "pivotHost.land";
-      const teammate = yield* liveTeammate(command, caller, input);
-      const result = yield* host.land(command, {
-        projectId: teammate.projectId,
-        worktreePath: yield* worktreeOf(teammate),
-        branch: teammate.branch,
-      });
-      return result.type === "landed"
-        ? ({ _tag: "landed", head: result.head, defaultBranch: result.defaultBranch } as const)
-        : ({ _tag: "refused", reason: redactDetail(result.reason) ?? "" } as const);
+  const land = Effect.fn("PivotHost.land")(function* (
+    caller: PivotHostCaller,
+    input: TeammateInput,
+  ) {
+    const command = "pivotHost.land";
+    const teammate = yield* liveTeammate(command, caller, input);
+    const result = yield* host.land(command, {
+      projectId: teammate.projectId,
+      worktreePath: yield* worktreeOf(teammate),
+      branch: teammate.branch,
     });
+    return result.type === "landed"
+      ? ({ _tag: "landed", head: result.head, defaultBranch: result.defaultBranch } as const)
+      : ({ _tag: "refused", reason: redactDetail(result.reason) ?? "" } as const);
+  });
 
   const events: PivotHost["Service"]["events"] = (caller, input) =>
     Stream.unwrap(
@@ -663,45 +688,44 @@ export const make = Effect.gen(function* () {
       { discard: true },
     );
 
-  const createGrant: PivotHost["Service"]["createGrant"] = (input) =>
-    Effect.gen(function* () {
-      yield* checkProjects("pivotHost.createGrant", input.allowedProjectIds);
-      return yield* store.createGrant(input);
-    });
+  const createGrant = Effect.fn("PivotHost.createGrant")(function* (input: {
+    readonly allowedProjectIds: ReadonlyArray<ProjectId>;
+  }) {
+    yield* checkProjects("pivotHost.createGrant", input.allowedProjectIds);
+    return yield* store.createGrant(input);
+  });
 
-  const setGrantAllowlist: PivotHost["Service"]["setGrantAllowlist"] = (grantId, projectIds) =>
-    Effect.gen(function* () {
-      const command = "pivotHost.setGrantAllowlist";
-      yield* checkProjects(command, projectIds);
-      const result = yield* store.setAllowlist(grantId, projectIds);
-      if (result === null) {
-        return yield* refuse(command, `Host link ${grantId} does not exist or was revoked.`);
-      }
-      // A project that left the list takes its teammates out of the home's reach, so they
-      // stop the way a revoked link's do, keeping their worktrees.
-      yield* stopUnreachable(
-        result.dropped,
-        "Could not stop a hosted teammate of a removed project",
-      );
-      return result.grant;
-    });
+  const setGrantAllowlist = Effect.fn("PivotHost.setGrantAllowlist")(function* (
+    grantId: string,
+    projectIds: ReadonlyArray<ProjectId>,
+  ) {
+    const command = "pivotHost.setGrantAllowlist";
+    yield* checkProjects(command, projectIds);
+    const result = yield* store.setAllowlist(grantId, projectIds);
+    if (result === null) {
+      return yield* refuse(command, `Host link ${grantId} does not exist or was revoked.`);
+    }
+    // A project that left the list takes its teammates out of the home's reach, so they
+    // stop the way a revoked link's do, keeping their worktrees.
+    yield* stopUnreachable(result.dropped, "Could not stop a hosted teammate of a removed project");
+    return result.grant;
+  });
 
-  const revokeGrant: PivotHost["Service"]["revokeGrant"] = (grantId) =>
-    Effect.gen(function* () {
-      const grant = yield* store.getGrant(grantId);
-      if (grant === null) {
-        return yield* refuse("pivotHost.revokeGrant", `Host link ${grantId} does not exist.`);
-      }
-      yield* store.revokeGrant(grantId);
-      // The link's teammates keep their worktrees, but stop: nothing that refuses their home
-      // may leave them running full-access. Read after the revoke committed, so one recorded
-      // before it is included and none can be recorded after; and read again by a repeat call,
-      // so a stop that failed is tried again. Stopping a stopped thread is harmless.
-      yield* stopUnreachable(
-        yield* store.liveThreadIdsOf(grantId),
-        "Could not stop a hosted teammate of a revoked host link",
-      );
-    });
+  const revokeGrant = Effect.fn("PivotHost.revokeGrant")(function* (grantId: string) {
+    const grant = yield* store.getGrant(grantId);
+    if (grant === null) {
+      return yield* refuse("pivotHost.revokeGrant", `Host link ${grantId} does not exist.`);
+    }
+    yield* store.revokeGrant(grantId);
+    // The link's teammates keep their worktrees, but stop: nothing that refuses their home
+    // may leave them running full-access. Read after the revoke committed, so one recorded
+    // before it is included and none can be recorded after; and read again by a repeat call,
+    // so a stop that failed is tried again. Stopping a stopped thread is harmless.
+    yield* stopUnreachable(
+      yield* store.liveThreadIdsOf(grantId),
+      "Could not stop a hosted teammate of a revoked host link",
+    );
+  });
 
   return PivotHost.of({
     describe,

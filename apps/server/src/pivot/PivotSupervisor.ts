@@ -140,6 +140,7 @@ export const make = Effect.gen(function* () {
   const record = (command: PivotStore.PivotCommand) =>
     store.dispatch(command).pipe(Effect.asVoid, Effect.catchCause(logFailure(command.type)));
 
+  // Untraced: the tick polls and its helpers run on every pass, and events arrive per message.
   const refreshTeammates = Effect.gen(function* () {
     const teammates = yield* store.listTeammates({ includeTornDown: false });
     const now = yield* Clock.currentTimeMillis;
@@ -165,8 +166,8 @@ export const make = Effect.gen(function* () {
    * to the hosted log, narrowed as for a local one. This environment holds no Pivot to
    * wake, and the home reads the log when it can.
    */
-  const handleHostedEvent = (event: PivotThreads.PivotThreadEvent) =>
-    Effect.gen(function* () {
+  const handleHostedEvent = Effect.fnUntraced(
+    function* (event: PivotThreads.PivotThreadEvent) {
       switch (event.type) {
         case "activity": {
           const now = yield* Clock.currentTimeMillis;
@@ -193,10 +194,12 @@ export const make = Effect.gen(function* () {
           });
           return;
       }
-    }).pipe(Effect.catchCause(logFailure("hosted event")));
+    },
+    Effect.catchCause(logFailure("hosted event")),
+  );
 
-  const handleEvent: PivotSupervisor["Service"]["handleEvent"] = (event) =>
-    Effect.gen(function* () {
+  const handleEvent: PivotSupervisor["Service"]["handleEvent"] = Effect.fnUntraced(
+    function* (event) {
       if (!liveTeammates.has(event.threadId)) {
         if (yield* hostStore.isLive(event.threadId)) yield* handleHostedEvent(event);
         return;
@@ -225,10 +228,11 @@ export const make = Effect.gen(function* () {
           });
           return;
       }
-    });
+    },
+  );
 
-  const observe = (threadId: ThreadId) =>
-    Effect.gen(function* () {
+  const observe = Effect.fnUntraced(
+    function* (threadId: ThreadId) {
       let teammate = yield* store.getTeammate(threadId);
       if (teammate === null || teammate.tornDownAt !== null) return;
       const shell = yield* threads.shell(threadId);
@@ -275,57 +279,55 @@ export const make = Effect.gen(function* () {
         threadId,
         pullRequests: seenPullRequests(shell.pullRequests ?? []),
       });
-    }).pipe(Effect.catchCause(logFailure("observe")));
+    },
+    Effect.catchCause(logFailure("observe")),
+  );
 
-  const runTimers = (teammates: ReadonlyArray<PivotStore.TeammateRow>) =>
-    Effect.gen(function* () {
-      const now = yield* Clock.currentTimeMillis;
-      for (const teammate of teammates) {
-        const recheckAt = toMillis(teammate.recheckAt);
-        if (teammate.observedStatus === "paused" && recheckAt !== null && recheckAt <= now) {
-          yield* record({ type: "teammate.recheck-paused", threadId: teammate.threadId });
-        }
-        if (teammate.observedStatus !== "working") continue;
-        const quietSince = lastActivity.get(teammate.threadId) ?? now;
-        if (now - quietSince < STUCK_AFTER_MS) continue;
-        const shell = yield* threads
-          .shell(teammate.threadId)
-          .pipe(Effect.orElseSucceed(() => null));
-        const runId = shell?.activeRunId ?? null;
-        if (runId === null || teammate.stuckRunId === runId) continue;
-        // Once per run, and never an interrupt: the Pivot decides.
-        yield* record({ type: "teammate.mark-stuck", threadId: teammate.threadId, runId });
+  const runTimers = Effect.fnUntraced(function* (teammates: ReadonlyArray<PivotStore.TeammateRow>) {
+    const now = yield* Clock.currentTimeMillis;
+    for (const teammate of teammates) {
+      const recheckAt = toMillis(teammate.recheckAt);
+      if (teammate.observedStatus === "paused" && recheckAt !== null && recheckAt <= now) {
+        yield* record({ type: "teammate.recheck-paused", threadId: teammate.threadId });
       }
-    });
+      if (teammate.observedStatus !== "working") continue;
+      const quietSince = lastActivity.get(teammate.threadId) ?? now;
+      if (now - quietSince < STUCK_AFTER_MS) continue;
+      const shell = yield* threads.shell(teammate.threadId).pipe(Effect.orElseSucceed(() => null));
+      const runId = shell?.activeRunId ?? null;
+      if (runId === null || teammate.stuckRunId === runId) continue;
+      // Once per run, and never an interrupt: the Pivot decides.
+      yield* record({ type: "teammate.mark-stuck", threadId: teammate.threadId, runId });
+    }
+  });
 
-  const wakeTeammate = (row: PivotStore.TeammateRow) =>
-    Effect.gen(function* () {
-      const shell = yield* threads.shell(row.threadId).pipe(Effect.orElseSucceed(() => null));
-      const derived: { status: TeammateStatus; detail: string | null } =
-        shell === null
-          ? { status: row.observedStatus ?? "unreported", detail: null }
-          : deriveTeammateStatus({
-              status: shell.status,
-              latestRunId: shell.latestRunId,
-              pendingRuntimeRequest: shell.pendingRuntimeRequest,
-              pendingBackgroundTasks: shell.pendingBackgroundTasks ?? [],
-              lastError: shell.lastError ?? null,
-              usageLimitResetAt: shell.usageLimitResetAt ?? null,
-              teammate: row,
-            });
-      return {
-        threadId: row.threadId,
-        title: row.title,
-        kind: row.kind,
-        status: derived.status,
-        summary: derived.detail ?? row.report?.summary ?? null,
-        resume: row.resume,
-        tornDown: row.tornDownAt !== null,
-      } satisfies WakeTeammate;
-    });
+  const wakeTeammate = Effect.fnUntraced(function* (row: PivotStore.TeammateRow) {
+    const shell = yield* threads.shell(row.threadId).pipe(Effect.orElseSucceed(() => null));
+    const derived: { status: TeammateStatus; detail: string | null } =
+      shell === null
+        ? { status: row.observedStatus ?? "unreported", detail: null }
+        : deriveTeammateStatus({
+            status: shell.status,
+            latestRunId: shell.latestRunId,
+            pendingRuntimeRequest: shell.pendingRuntimeRequest,
+            pendingBackgroundTasks: shell.pendingBackgroundTasks ?? [],
+            lastError: shell.lastError ?? null,
+            usageLimitResetAt: shell.usageLimitResetAt ?? null,
+            teammate: row,
+          });
+    return {
+      threadId: row.threadId,
+      title: row.title,
+      kind: row.kind,
+      status: derived.status,
+      summary: derived.detail ?? row.report?.summary ?? null,
+      resume: row.resume,
+      tornDown: row.tornDownAt !== null,
+    } satisfies WakeTeammate;
+  });
 
-  const wakePivot = (pivot: PivotStore.PivotRow) =>
-    Effect.gen(function* () {
+  const wakePivot = Effect.fnUntraced(
+    function* (pivot: PivotStore.PivotRow) {
       const digest = digests.get(pivot.threadId) ?? null;
       const fresh = yield* store.pendingWake(pivot.threadId);
       const forced = digest?.kind === "takeover";
@@ -365,40 +367,40 @@ export const make = Effect.gen(function* () {
           throughSequence: through,
         });
       }
-    }).pipe(Effect.catchCause(logFailure("wake")));
+    },
+    Effect.catchCause(logFailure("wake")),
+  );
 
   /**
    * A Pivot that existed before this server started opens its next wake, whenever it
    * comes, with a restart digest; a takeover created later opens with its own.
    */
-  const notePivots = (pivots: ReadonlyArray<PivotStore.PivotRow>) =>
-    Effect.gen(function* () {
-      for (const pivot of pivots) {
-        if (knownPivots.has(pivot.threadId)) continue;
-        if (!started) {
-          const createdAt = toMillis(pivot.createdAt);
-          if (createdAt !== null && startedAtMs !== null && createdAt < startedAtMs) {
-            digests.set(pivot.threadId, { kind: "restart" });
-          }
-        } else {
-          const predecessor = yield* findPredecessor(pivot.threadId);
-          if (predecessor !== null) {
-            digests.set(pivot.threadId, { kind: "takeover", predecessorThreadId: predecessor });
-          }
+  const notePivots = Effect.fnUntraced(function* (pivots: ReadonlyArray<PivotStore.PivotRow>) {
+    for (const pivot of pivots) {
+      if (knownPivots.has(pivot.threadId)) continue;
+      if (!started) {
+        const createdAt = toMillis(pivot.createdAt);
+        if (createdAt !== null && startedAtMs !== null && createdAt < startedAtMs) {
+          digests.set(pivot.threadId, { kind: "restart" });
         }
-        knownPivots.add(pivot.threadId);
+      } else {
+        const predecessor = yield* findPredecessor(pivot.threadId);
+        if (predecessor !== null) {
+          digests.set(pivot.threadId, { kind: "takeover", predecessorThreadId: predecessor });
+        }
       }
-      started = true;
-    });
+      knownPivots.add(pivot.threadId);
+    }
+    started = true;
+  });
 
-  const findPredecessor = (threadId: ThreadId) =>
-    Effect.gen(function* () {
-      for (const id of knownPivots) {
-        const pivot = yield* store.getPivot(id as ThreadId).pipe(Effect.orElseSucceed(() => null));
-        if (pivot?.successorThreadId === threadId) return pivot.threadId;
-      }
-      return null;
-    });
+  const findPredecessor = Effect.fnUntraced(function* (threadId: ThreadId) {
+    for (const id of knownPivots) {
+      const pivot = yield* store.getPivot(id as ThreadId).pipe(Effect.orElseSucceed(() => null));
+      if (pivot?.successorThreadId === threadId) return pivot.threadId;
+    }
+    return null;
+  });
 
   const tick: PivotSupervisor["Service"]["tick"] = Effect.gen(function* () {
     const teammates = yield* refreshTeammates;

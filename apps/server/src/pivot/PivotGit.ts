@@ -379,15 +379,17 @@ export const make = Effect.gen(function* () {
   return PivotGit.of({
     startWorkspaceBranch,
     resetWorkspace,
-    isRepository: (cwd) =>
+    isRepository: Effect.fn("PivotGit.isRepository")((cwd) =>
       succeeds(cwd, ["rev-parse", "--is-inside-work-tree"]).pipe(Effect.orElseSucceed(() => false)),
+    ),
     hasRemote,
     defaultBranch,
     branchExists,
-    listBranches: (cwd, prefix) =>
+    listBranches: Effect.fn("PivotGit.listBranches")((cwd, prefix) =>
       git(cwd, ["for-each-ref", "--format=%(refname:short)", `refs/heads/${prefix}`]).pipe(
         Effect.map((out) => out.split("\n").filter((line) => line.length > 0)),
       ),
+    ),
     deleteBranch: Effect.fn("PivotGit.deleteBranch")(function* ({ projectRoot, branch, tip }) {
       if (tip === undefined) {
         yield* git(projectRoot, ["branch", "-d", "--", branch]);
@@ -400,15 +402,16 @@ export const make = Effect.gen(function* () {
       }
       yield* git(projectRoot, ["branch", "-D", "--", branch]);
     }),
-    headCommit: (cwd) => git(cwd, ["rev-parse", "HEAD"]),
+    headCommit: Effect.fn("PivotGit.headCommit")((cwd) => git(cwd, ["rev-parse", "HEAD"])),
     isClean,
     uncommitted,
     landed,
     fastForward,
-    remoteBranchCommit: (cwd, branch) =>
+    remoteBranchCommit: Effect.fn("PivotGit.remoteBranchCommit")((cwd, branch) =>
       git(cwd, ["ls-remote", "origin", `refs/heads/${branch}`]).pipe(
         Effect.map((out) => out.split(/\s+/)[0] || null),
       ),
+    ),
   });
 });
 

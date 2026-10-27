@@ -33,22 +33,26 @@ const toolRestrictions = Layer.effect(
   Effect.gen(function* () {
     const store = yield* PivotStore.PivotStore;
     return {
-      withoutBrowserOrDevice: (threadId) =>
-        store.getPivot(threadId).pipe(
-          Effect.map((pivot) => pivot !== null),
-          Effect.orElseSucceed(() => false),
-        ),
+      withoutBrowserOrDevice: Effect.fn("PivotToolRestrictions.withoutBrowserOrDevice")(
+        (threadId) =>
+          store.getPivot(threadId).pipe(
+            Effect.map((pivot) => pivot !== null),
+            Effect.orElseSucceed(() => false),
+          ),
+      ),
       // Only the Pivot's own shell merges. A teammate, and any thread delegated under a
       // teammate or a Pivot, is guarded. A lookup that fails guards the thread too.
-      withoutForgeMerge: (thread) =>
-        Effect.gen(function* () {
+      withoutForgeMerge: Effect.fn("PivotToolRestrictions.withoutForgeMerge")(
+        function* (thread) {
           if ((yield* store.getTeammate(thread.id)) !== null) return true;
           const root = thread.lineage.rootThreadId;
           if (root === thread.id) return false;
           return (
             (yield* store.getTeammate(root)) !== null || (yield* store.getPivot(root)) !== null
           );
-        }).pipe(Effect.orElseSucceed(() => true)),
+        },
+        Effect.orElseSucceed(() => true),
+      ),
     };
   }),
 );
@@ -97,12 +101,14 @@ const admission = Layer.effect(
     const hostStore = yield* PivotHostStore.PivotHostStore;
     return {
       // A teammate this server hosts for another environment's Pivot counts too.
-      isBackgroundAgent: (threadId) =>
-        Effect.gen(function* () {
+      isBackgroundAgent: Effect.fn("PivotToolRestrictions.isBackgroundAgent")(
+        function* (threadId) {
           const teammate = yield* store.getTeammate(threadId);
           if (teammate !== null && teammate.tornDownAt === null) return true;
           return yield* hostStore.isLive(threadId);
-        }).pipe(Effect.orElseSucceed(() => false)),
+        },
+        Effect.orElseSucceed(() => false),
+      ),
     };
   }),
 );

@@ -360,28 +360,29 @@ export const make = Effect.gen(function* () {
       ),
     );
 
-  const ensureHome = (projectId: ProjectId) =>
-    Effect.gen(function* () {
-      const entries = yield* teammateModels(projectId);
-      return yield* home.ensure(projectId, renderTeammateModels(entries));
-    });
+  const ensureHome = Effect.fn("PivotService.ensureHome")(function* (projectId: ProjectId) {
+    const entries = yield* teammateModels(projectId);
+    return yield* home.ensure(projectId, renderTeammateModels(entries));
+  });
 
   const refuse = (command: string, reason: string) =>
     new PivotStore.PivotRefusedError({ command, reason });
 
   /** The project, refusing one that is gone or not a git repository. */
-  const gitProject = (command: string, projectId: ProjectId) =>
-    Effect.gen(function* () {
-      const project = yield* threads.project(projectId);
-      if (project === null) return yield* refuse(command, `Project ${projectId} was not found.`);
-      if (!(yield* git.isRepository(project.workspaceRoot))) {
-        return yield* refuse(
-          command,
-          "Pivot mode needs a git repository: every teammate works in its own worktree.",
-        );
-      }
-      return project;
-    });
+  const gitProject = Effect.fn("PivotService.gitProject")(function* (
+    command: string,
+    projectId: ProjectId,
+  ) {
+    const project = yield* threads.project(projectId);
+    if (project === null) return yield* refuse(command, `Project ${projectId} was not found.`);
+    if (!(yield* git.isRepository(project.workspaceRoot))) {
+      return yield* refuse(
+        command,
+        "Pivot mode needs a git repository: every teammate works in its own worktree.",
+      );
+    }
+    return project;
+  });
 
   const create: PivotService["Service"]["create"] = (input) =>
     withProjectLock(
@@ -438,75 +439,72 @@ export const make = Effect.gen(function* () {
     }
   }).pipe(Effect.catchCause((cause) => Effect.logWarning("Pivot home refresh failed", { cause })));
 
-  const teammateDetail: PivotService["Service"]["teammateDetail"] = (threadId) =>
-    Effect.gen(function* () {
-      const teammate = yield* store.getTeammate(threadId);
-      if (teammate === null) {
-        return yield* refuse("teammate.detail", `Thread ${threadId} is not a teammate.`);
-      }
-      return {
-        teammate: PivotStore.teammateRecord(teammate),
-        intent: teammate.intent,
-        spec: teammate.spec,
-        baseBranch: teammate.baseBranch,
-        worktreePath: teammate.worktreePath,
-        deliveryMode: teammate.deliveryMode,
-        scoutReport: teammate.scoutReport,
-      };
-    });
+  const teammateDetail: PivotService["Service"]["teammateDetail"] = Effect.fn(
+    "PivotService.teammateDetail",
+  )(function* (threadId) {
+    const teammate = yield* store.getTeammate(threadId);
+    if (teammate === null) {
+      return yield* refuse("teammate.detail", `Thread ${threadId} is not a teammate.`);
+    }
+    return {
+      teammate: PivotStore.teammateRecord(teammate),
+      intent: teammate.intent,
+      spec: teammate.spec,
+      baseBranch: teammate.baseBranch,
+      worktreePath: teammate.worktreePath,
+      deliveryMode: teammate.deliveryMode,
+      scoutReport: teammate.scoutReport,
+    };
+  });
 
-  const decisionLog: PivotService["Service"]["decisionLog"] = (pivotThreadId) =>
-    Effect.gen(function* () {
+  const decisionLog: PivotService["Service"]["decisionLog"] = Effect.fn("PivotService.decisionLog")(
+    function* (pivotThreadId) {
       if ((yield* store.getPivot(pivotThreadId)) === null) {
         return yield* refuse("decision.log", `Thread ${pivotThreadId} is not a Pivot.`);
       }
       const decisions = yield* store.listDecisions({ pivotThreadId, openOnly: false });
       return decisions.toReversed();
-    });
+    },
+  );
 
-  const recordUserAnswer: PivotService["Service"]["recordUserAnswer"] = ({
-    decisionId,
-    answer,
-    approved,
-    attachments,
-  }) =>
-    Effect.gen(function* () {
-      yield* store.dispatch({
-        type: "decision.record-user-answer",
-        decisionId,
-        answer,
-        approved: approved ?? null,
-        ...(attachments === undefined ? {} : { attachments }),
-      });
-      const decision = yield* store.getDecision(decisionId);
-      if (decision === null) {
-        return yield* refuse(
-          "decision.record-user-answer",
-          `Decision ${decisionId} was not found.`,
-        );
-      }
-      return decision;
+  const recordUserAnswer: PivotService["Service"]["recordUserAnswer"] = Effect.fn(
+    "PivotService.recordUserAnswer",
+  )(function* ({ decisionId, answer, approved, attachments }) {
+    yield* store.dispatch({
+      type: "decision.record-user-answer",
+      decisionId,
+      answer,
+      approved: approved ?? null,
+      ...(attachments === undefined ? {} : { attachments }),
     });
+    const decision = yield* store.getDecision(decisionId);
+    if (decision === null) {
+      return yield* refuse("decision.record-user-answer", `Decision ${decisionId} was not found.`);
+    }
+    return decision;
+  });
 
   // --- Callers ---
 
-  const activePivot = (command: string, caller: ThreadId) =>
-    Effect.gen(function* () {
-      const pivot = yield* store.getPivot(caller);
-      if (pivot === null) {
-        return yield* new PivotCallerError({
-          tool: command,
-          reason: "Only a Pivot can use this tool.",
-        });
-      }
-      if (pivot.retiredAt !== null) {
-        return yield* new PivotCallerError({
-          tool: command,
-          reason: "This Pivot is retired; its successor holds the work now.",
-        });
-      }
-      return pivot;
-    });
+  const activePivot = Effect.fn("PivotService.activePivot")(function* (
+    command: string,
+    caller: ThreadId,
+  ) {
+    const pivot = yield* store.getPivot(caller);
+    if (pivot === null) {
+      return yield* new PivotCallerError({
+        tool: command,
+        reason: "Only a Pivot can use this tool.",
+      });
+    }
+    if (pivot.retiredAt !== null) {
+      return yield* new PivotCallerError({
+        tool: command,
+        reason: "This Pivot is retired; its successor holds the work now.",
+      });
+    }
+    return pivot;
+  });
 
   /**
    * The teammate with the worktree its thread recorded. Dispatch derived the path the
@@ -527,49 +525,54 @@ export const make = Effect.gen(function* () {
     );
 
   /** A live teammate of the calling Pivot, refusing any other target. */
-  const ownTeammate = (command: string, pivot: PivotStore.PivotRow, threadId: ThreadId) =>
-    Effect.gen(function* () {
-      const teammate = yield* store.getTeammate(threadId);
-      if (teammate === null || teammate.pivotThreadId !== pivot.threadId) {
-        return yield* refuse(command, `Thread ${threadId} is not one of your teammates.`);
-      }
-      if (teammate.tornDownAt !== null) {
-        return yield* refuse(command, `Teammate ${threadId} was torn down.`);
-      }
-      return yield* withRecordedWorktree(teammate);
-    });
+  const ownTeammate = Effect.fn("PivotService.ownTeammate")(function* (
+    command: string,
+    pivot: PivotStore.PivotRow,
+    threadId: ThreadId,
+  ) {
+    const teammate = yield* store.getTeammate(threadId);
+    if (teammate === null || teammate.pivotThreadId !== pivot.threadId) {
+      return yield* refuse(command, `Thread ${threadId} is not one of your teammates.`);
+    }
+    if (teammate.tornDownAt !== null) {
+      return yield* refuse(command, `Teammate ${threadId} was torn down.`);
+    }
+    return yield* withRecordedWorktree(teammate);
+  });
 
   /**
    * The calling teammate: one of this environment's own, or one it hosts for another
    * environment's Pivot. A hosted teammate has no Pivot here, so its reports go to the
    * hosted log instead of the Pivot store.
    */
-  const liveTeammate = (command: string, caller: ThreadId) =>
-    Effect.gen(function* () {
-      const teammate = yield* store.getTeammate(caller);
-      const hosted = teammate === null ? yield* hostStore.getTeammate(caller) : null;
-      if (teammate === null && hosted === null) {
-        return yield* new PivotCallerError({
-          tool: command,
-          reason: "Only a teammate can use this tool.",
-        });
-      }
-      if ((teammate ?? hosted)!.tornDownAt !== null) {
-        return yield* new PivotCallerError({
-          tool: command,
-          reason: "This teammate was torn down.",
-        });
-      }
-      if (hosted !== null && !(yield* hostStore.isLive(hosted.threadId))) {
-        return yield* new PivotCallerError({
-          tool: command,
-          reason: "This teammate's host link was revoked, or no longer allows its project.",
-        });
-      }
-      return teammate !== null
-        ? ({ type: "local", teammate: yield* withRecordedWorktree(teammate) } as const)
-        : ({ type: "hosted", teammate: yield* withRecordedWorktree(hosted!) } as const);
-    });
+  const liveTeammate = Effect.fn("PivotService.liveTeammate")(function* (
+    command: string,
+    caller: ThreadId,
+  ) {
+    const teammate = yield* store.getTeammate(caller);
+    const hosted = teammate === null ? yield* hostStore.getTeammate(caller) : null;
+    if (teammate === null && hosted === null) {
+      return yield* new PivotCallerError({
+        tool: command,
+        reason: "Only a teammate can use this tool.",
+      });
+    }
+    if ((teammate ?? hosted)!.tornDownAt !== null) {
+      return yield* new PivotCallerError({
+        tool: command,
+        reason: "This teammate was torn down.",
+      });
+    }
+    if (hosted !== null && !(yield* hostStore.isLive(hosted.threadId))) {
+      return yield* new PivotCallerError({
+        tool: command,
+        reason: "This teammate's host link was revoked, or no longer allows its project.",
+      });
+    }
+    return teammate !== null
+      ? ({ type: "local", teammate: yield* withRecordedWorktree(teammate) } as const)
+      : ({ type: "hosted", teammate: yield* withRecordedWorktree(hosted!) } as const);
+  });
 
   /** The host a teammate runs on, by its environment; null is the home. */
   const hostFor = (
@@ -592,145 +595,149 @@ export const make = Effect.gen(function* () {
       Effect.provideService(Path.Path, path),
     );
 
-  const decisionResult = (command: string, decisionId: PivotDecisionId) =>
-    Effect.gen(function* () {
-      const decision = yield* store.getDecision(decisionId);
-      if (decision === null) return yield* refuse(command, `Decision ${decisionId} was not found.`);
-      return { decision };
-    });
+  const decisionResult = Effect.fn("PivotService.decisionResult")(function* (
+    command: string,
+    decisionId: PivotDecisionId,
+  ) {
+    const decision = yield* store.getDecision(decisionId);
+    if (decision === null) return yield* refuse(command, `Decision ${decisionId} was not found.`);
+    return { decision };
+  });
 
   // --- Dispatch ---
 
-  const dispatchTeammate: PivotService["Service"]["dispatchTeammate"] = (caller, input) =>
-    Effect.gen(function* () {
-      const command = "dispatch_teammate";
-      const pivot = yield* activePivot(command, caller);
-      yield* nonEmpty(command, input.title, "The title");
-      yield* nonEmpty(command, input.intent, "The intent");
-      yield* nonEmpty(command, input.spec, "The spec");
-      if (opensWithSpeakerLabel(input.intent)) {
-        return yield* refuse(
-          command,
-          'The intent opens with a speaker label. Pass the user\'s words verbatim, without "User:" or an address.',
+  const dispatchTeammate: PivotService["Service"]["dispatchTeammate"] = Effect.fn(
+    "PivotService.dispatchTeammate",
+  )(function* (caller, input) {
+    const command = "dispatch_teammate";
+    const pivot = yield* activePivot(command, caller);
+    yield* nonEmpty(command, input.title, "The title");
+    yield* nonEmpty(command, input.intent, "The intent");
+    yield* nonEmpty(command, input.spec, "The spec");
+    if (opensWithSpeakerLabel(input.intent)) {
+      return yield* refuse(
+        command,
+        'The intent opens with a speaker label. Pass the user\'s words verbatim, without "User:" or an address.',
+      );
+    }
+    return yield* withProjectLock(
+      pivot.projectId,
+      Effect.gen(function* () {
+        const host = yield* hostFor(command, null);
+        const project = yield* host.project(command, pivot.projectId);
+        const choice = chooseTeammateModel(
+          yield* teammateModels(pivot.projectId),
+          yield* teammateKindModels(pivot.projectId),
+          input,
         );
-      }
-      return yield* withProjectLock(
-        pivot.projectId,
-        Effect.gen(function* () {
-          const host = yield* hostFor(command, null);
-          const project = yield* host.project(command, pivot.projectId);
-          const choice = chooseTeammateModel(
-            yield* teammateModels(pivot.projectId),
-            yield* teammateKindModels(pivot.projectId),
-            input,
+        if (choice.type === "refused") return yield* refuse(command, choice.reason);
+        if (input.kind !== "inline") {
+          const cap = yield* teammateCap;
+          const running = (yield* store.listTeammates({ includeTornDown: false })).filter(
+            (teammate) =>
+              teammate.pivotThreadId === pivot.threadId &&
+              teammate.kind !== "inline" &&
+              (teammate.observedStatus === null ||
+                teammate.observedStatus === "working" ||
+                teammate.observedStatus === "waiting"),
           );
-          if (choice.type === "refused") return yield* refuse(command, choice.reason);
-          if (input.kind !== "inline") {
-            const cap = yield* teammateCap;
-            const running = (yield* store.listTeammates({ includeTornDown: false })).filter(
-              (teammate) =>
-                teammate.pivotThreadId === pivot.threadId &&
-                teammate.kind !== "inline" &&
-                (teammate.observedStatus === null ||
-                  teammate.observedStatus === "working" ||
-                  teammate.observedStatus === "waiting"),
+          if (cap !== null && running.length >= cap) {
+            return yield* refuse(
+              command,
+              `${running.length} teammates are already running, the most at once (${cap}). Queue this one and dispatch it when one finishes, or do it inline if it is small.`,
             );
-            if (cap !== null && running.length >= cap) {
-              return yield* refuse(
-                command,
-                `${running.length} teammates are already running, the most at once (${cap}). Queue this one and dispatch it when one finishes, or do it inline if it is small.`,
-              );
-            }
           }
-          const pivotShell = yield* threads.shell(pivot.threadId);
-          const modelSelection =
-            choice.modelSelection ??
-            project.defaultModelSelection ??
-            pivotShell?.modelSelection ??
-            null;
-          if (modelSelection === null) {
-            return yield* refuse(command, "No model to run the teammate on. Name one.");
-          }
-          const launched = yield* host.launch({
-            projectId: pivot.projectId,
+        }
+        const pivotShell = yield* threads.shell(pivot.threadId);
+        const modelSelection =
+          choice.modelSelection ??
+          project.defaultModelSelection ??
+          pivotShell?.modelSelection ??
+          null;
+        if (modelSelection === null) {
+          return yield* refuse(command, "No model to run the teammate on. Name one.");
+        }
+        const launched = yield* host.launch({
+          projectId: pivot.projectId,
+          pivotThreadId: pivot.threadId,
+          title: input.title,
+          kind: input.kind,
+          intent: input.intent,
+          spec: input.spec,
+          baseBranch: input.baseBranch,
+          modelSelection,
+        });
+        // Recorded before the first run gets going, so its first report finds it.
+        yield* store
+          .dispatch({
+            type: "teammate.dispatch",
             pivotThreadId: pivot.threadId,
-            title: input.title,
-            kind: input.kind,
-            intent: input.intent,
-            spec: input.spec,
-            baseBranch: input.baseBranch,
-            modelSelection,
-          });
-          // Recorded before the first run gets going, so its first report finds it.
-          yield* store
-            .dispatch({
-              type: "teammate.dispatch",
-              pivotThreadId: pivot.threadId,
-              threadId: launched.threadId,
-              projectId: pivot.projectId,
-              kind: input.kind,
-              title: input.title,
-              branch: launched.branch,
-              baseBranch: launched.baseBranch,
-              worktreePath: launched.runId === null ? null : launched.worktreePath,
-              deliveryMode: launched.deliveryMode,
-              intent: input.intent,
-              spec: input.spec,
-              modelEntry: choice.entry,
-            })
-            .pipe(Effect.tapError(() => host.discard(launched.threadId).pipe(Effect.ignore)));
-          const start =
-            launched.runId === null
-              ? ({ type: "failed", runId: null, detail: "The launch created no run." } as const)
-              : yield* host.awaitStart(launched.threadId, launched.runId);
-          // A failing setup script still starts the teammate; the result says so.
-          const setup = yield* host.setupOutcome(launched.threadId);
-          return {
             threadId: launched.threadId,
-            title: input.title,
+            projectId: pivot.projectId,
             kind: input.kind,
+            title: input.title,
             branch: launched.branch,
             baseBranch: launched.baseBranch,
-            worktreePath: launched.worktreePath,
+            worktreePath: launched.runId === null ? null : launched.worktreePath,
             deliveryMode: launched.deliveryMode,
+            intent: input.intent,
+            spec: input.spec,
             modelEntry: choice.entry,
-            firstRun: start.type,
-            detail: start.type === "failed" ? start.detail : null,
-            setupScript: setup.status,
-            setupDetail: setup.detail,
-          };
-        }),
-      );
-    });
+          })
+          .pipe(Effect.tapError(() => host.discard(launched.threadId).pipe(Effect.ignore)));
+        const start =
+          launched.runId === null
+            ? ({ type: "failed", runId: null, detail: "The launch created no run." } as const)
+            : yield* host.awaitStart(launched.threadId, launched.runId);
+        // A failing setup script still starts the teammate; the result says so.
+        const setup = yield* host.setupOutcome(launched.threadId);
+        return {
+          threadId: launched.threadId,
+          title: input.title,
+          kind: input.kind,
+          branch: launched.branch,
+          baseBranch: launched.baseBranch,
+          worktreePath: launched.worktreePath,
+          deliveryMode: launched.deliveryMode,
+          modelEntry: choice.entry,
+          firstRun: start.type,
+          detail: start.type === "failed" ? start.detail : null,
+          setupScript: setup.status,
+          setupDetail: setup.detail,
+        };
+      }),
+    );
+  });
 
-  const promoteScout: PivotService["Service"]["promoteScout"] = (caller, input) =>
-    Effect.gen(function* () {
-      const command = "promote_scout";
-      const pivot = yield* activePivot(command, caller);
-      const teammate = yield* ownTeammate(command, pivot, input.threadId);
-      if (teammate.kind !== "scout") return yield* refuse(command, "Only a scout can be promoted.");
-      yield* nonEmpty(command, input.spec, "The spec");
-      const message = renderPromotion(yield* text(BRIEF_TEXTS.promotion), {
-        intent: teammate.intent.join("\n\n"),
-        spec: input.spec,
-        definitionOfDone: yield* text(definitionOfDoneText("ship", teammate.deliveryMode)),
-      });
-      yield* store.dispatch({
-        type: "teammate.promote",
-        pivotThreadId: pivot.threadId,
-        threadId: teammate.threadId,
-        spec: input.spec,
-      });
-      yield* (yield* hostOf(command, teammate)).send({
-        threadId: teammate.threadId,
-        senderThreadId: pivot.threadId,
-        text: message,
-      });
-      return { threadId: teammate.threadId, kind: "ship" as const, intent: teammate.intent };
+  const promoteScout: PivotService["Service"]["promoteScout"] = Effect.fn(
+    "PivotService.promoteScout",
+  )(function* (caller, input) {
+    const command = "promote_scout";
+    const pivot = yield* activePivot(command, caller);
+    const teammate = yield* ownTeammate(command, pivot, input.threadId);
+    if (teammate.kind !== "scout") return yield* refuse(command, "Only a scout can be promoted.");
+    yield* nonEmpty(command, input.spec, "The spec");
+    const message = renderPromotion(yield* text(BRIEF_TEXTS.promotion), {
+      intent: teammate.intent.join("\n\n"),
+      spec: input.spec,
+      definitionOfDone: yield* text(definitionOfDoneText("ship", teammate.deliveryMode)),
     });
+    yield* store.dispatch({
+      type: "teammate.promote",
+      pivotThreadId: pivot.threadId,
+      threadId: teammate.threadId,
+      spec: input.spec,
+    });
+    yield* (yield* hostOf(command, teammate)).send({
+      threadId: teammate.threadId,
+      senderThreadId: pivot.threadId,
+      text: message,
+    });
+    return { threadId: teammate.threadId, kind: "ship" as const, intent: teammate.intent };
+  });
 
-  const addIntent: PivotService["Service"]["addIntent"] = (caller, input) =>
-    Effect.gen(function* () {
+  const addIntent: PivotService["Service"]["addIntent"] = Effect.fn("PivotService.addIntent")(
+    function* (caller, input) {
       const command = "add_intent";
       const pivot = yield* activePivot(command, caller);
       const teammate = yield* ownTeammate(command, pivot, input.threadId);
@@ -760,242 +767,250 @@ export const make = Effect.gen(function* () {
         kind: teammate.kind,
         intent: [...teammate.intent, input.intent],
       };
-    });
+    },
+  );
 
   // --- Decisions ---
 
-  const openDecision: PivotService["Service"]["openDecision"] = (caller, input) =>
-    Effect.gen(function* () {
-      const pivot = yield* activePivot("open_decision", caller);
-      const [opened] = yield* store.dispatch({
-        type: "decision.open",
-        pivotThreadId: pivot.threadId,
-        teammateThreadId: input.teammateThreadId ?? null,
-        key: input.key ?? null,
-        summary: input.question,
-      });
-      if (opened?.event.type !== "decision.opened") {
-        return yield* refuse("open_decision", "The decision was not opened.");
-      }
-      return yield* decisionResult("open_decision", opened.event.decisionId);
+  const openDecision: PivotService["Service"]["openDecision"] = Effect.fn(
+    "PivotService.openDecision",
+  )(function* (caller, input) {
+    const pivot = yield* activePivot("open_decision", caller);
+    const [opened] = yield* store.dispatch({
+      type: "decision.open",
+      pivotThreadId: pivot.threadId,
+      teammateThreadId: input.teammateThreadId ?? null,
+      key: input.key ?? null,
+      summary: input.question,
     });
+    if (opened?.event.type !== "decision.opened") {
+      return yield* refuse("open_decision", "The decision was not opened.");
+    }
+    return yield* decisionResult("open_decision", opened.event.decisionId);
+  });
 
-  const escalateDecision: PivotService["Service"]["escalateDecision"] = (caller, input) =>
-    Effect.gen(function* () {
-      const pivot = yield* activePivot("escalate_decision", caller);
-      const { decisionId, ...escalation } = input;
-      yield* store.dispatch({
-        type: "decision.escalate",
-        pivotThreadId: pivot.threadId,
-        decisionId,
-        escalation,
-      });
-      return yield* decisionResult("escalate_decision", decisionId);
+  const escalateDecision: PivotService["Service"]["escalateDecision"] = Effect.fn(
+    "PivotService.escalateDecision",
+  )(function* (caller, input) {
+    const pivot = yield* activePivot("escalate_decision", caller);
+    const { decisionId, ...escalation } = input;
+    yield* store.dispatch({
+      type: "decision.escalate",
+      pivotThreadId: pivot.threadId,
+      decisionId,
+      escalation,
     });
+    return yield* decisionResult("escalate_decision", decisionId);
+  });
 
-  const answerDecision: PivotService["Service"]["answerDecision"] = (caller, input) =>
-    Effect.gen(function* () {
-      const command = "answer_decision";
-      const pivot = yield* activePivot(command, caller);
-      const decision = yield* store.getDecision(input.decisionId);
-      if (decision === null || decision.pivotThreadId !== pivot.threadId) {
-        return yield* refuse(command, `Decision ${input.decisionId} is not one of yours.`);
+  const answerDecision: PivotService["Service"]["answerDecision"] = Effect.fn(
+    "PivotService.answerDecision",
+  )(function* (caller, input) {
+    const command = "answer_decision";
+    const pivot = yield* activePivot(command, caller);
+    const decision = yield* store.getDecision(input.decisionId);
+    if (decision === null || decision.pivotThreadId !== pivot.threadId) {
+      return yield* refuse(command, `Decision ${input.decisionId} is not one of yours.`);
+    }
+    if (decision.resolution !== null) {
+      return yield* refuse(command, `Decision ${input.decisionId} is already closed.`);
+    }
+    if (decision.escalatedAt !== null && decision.userAnswer === null) {
+      return yield* refuse(
+        command,
+        "This decision is held for the user; relay their answer once they give it.",
+      );
+    }
+    yield* nonEmpty(command, input.answer, "The answer");
+    // The teammate hears the answer before the decision closes, so a failed send
+    // leaves it open rather than closed and unheard.
+    if (decision.teammateThreadId !== null) {
+      const teammate = yield* store.getTeammate(decision.teammateThreadId);
+      if (teammate !== null && teammate.tornDownAt === null) {
+        yield* (yield* hostOf(command, teammate)).send({
+          threadId: decision.teammateThreadId,
+          senderThreadId: pivot.threadId,
+          text: input.answer,
+          attachments: decision.userAttachments,
+        });
       }
-      if (decision.resolution !== null) {
-        return yield* refuse(command, `Decision ${input.decisionId} is already closed.`);
-      }
-      if (decision.escalatedAt !== null && decision.userAnswer === null) {
-        return yield* refuse(
-          command,
-          "This decision is held for the user; relay their answer once they give it.",
-        );
-      }
-      yield* nonEmpty(command, input.answer, "The answer");
-      // The teammate hears the answer before the decision closes, so a failed send
-      // leaves it open rather than closed and unheard.
-      if (decision.teammateThreadId !== null) {
-        const teammate = yield* store.getTeammate(decision.teammateThreadId);
-        if (teammate !== null && teammate.tornDownAt === null) {
-          yield* (yield* hostOf(command, teammate)).send({
-            threadId: decision.teammateThreadId,
-            senderThreadId: pivot.threadId,
-            text: input.answer,
-            attachments: decision.userAttachments,
-          });
-        }
-      }
-      yield* store.dispatch({
-        type: "decision.answer",
-        pivotThreadId: pivot.threadId,
-        decisionId: input.decisionId,
-        text: input.answer,
-      });
-      return yield* decisionResult(command, input.decisionId);
+    }
+    yield* store.dispatch({
+      type: "decision.answer",
+      pivotThreadId: pivot.threadId,
+      decisionId: input.decisionId,
+      text: input.answer,
     });
+    return yield* decisionResult(command, input.decisionId);
+  });
 
-  const markDecisionMoot: PivotService["Service"]["markDecisionMoot"] = (caller, input) =>
-    Effect.gen(function* () {
-      const pivot = yield* activePivot("mark_decision_moot", caller);
-      yield* store.dispatch({
-        type: "decision.mark-moot",
-        pivotThreadId: pivot.threadId,
-        decisionId: input.decisionId,
-        evidence: input.evidence,
-      });
-      return yield* decisionResult("mark_decision_moot", input.decisionId);
+  const markDecisionMoot: PivotService["Service"]["markDecisionMoot"] = Effect.fn(
+    "PivotService.markDecisionMoot",
+  )(function* (caller, input) {
+    const pivot = yield* activePivot("mark_decision_moot", caller);
+    yield* store.dispatch({
+      type: "decision.mark-moot",
+      pivotThreadId: pivot.threadId,
+      decisionId: input.decisionId,
+      evidence: input.evidence,
     });
+    return yield* decisionResult("mark_decision_moot", input.decisionId);
+  });
 
   // --- Reads ---
 
-  const teammateLine = (teammate: PivotStore.TeammateRow) =>
-    Effect.gen(function* () {
-      const shell = yield* threads.shell(teammate.threadId);
-      const derived =
-        shell === null
-          ? { status: "unreported" as const, detail: null }
-          : deriveTeammateStatus({
-              status: shell.status,
-              latestRunId: shell.latestRunId,
-              pendingRuntimeRequest: shell.pendingRuntimeRequest,
-              pendingBackgroundTasks: shell.pendingBackgroundTasks ?? [],
-              lastError: shell.lastError ?? null,
-              usageLimitResetAt: shell.usageLimitResetAt ?? null,
-              teammate,
-            });
-      const [latest] = yield* store.teammateHistory({ threadId: teammate.threadId, limit: 1 });
-      const pullRequest =
-        shell?.pullRequests?.find((link) => link.source !== "stack-dismissed")?.url ??
-        shell?.linkedPullRequest?.url ??
-        null;
-      return {
-        threadId: teammate.threadId,
-        title: teammate.title,
-        kind: teammate.kind,
-        status: derived.status,
-        // A teammate waiting for the machine to have memory has no run to report on yet.
-        summary: teammate.memoryWait ?? derived.detail ?? teammate.report?.summary ?? null,
-        branch: teammate.branch,
-        pullRequestUrl: pullRequest,
-        lastChangeAt: latest?.occurredAt ?? null,
-        worktreePath: teammate.worktreePath,
-        modelEntry: teammate.modelEntry,
-        tornDown: teammate.tornDownAt !== null,
-      } satisfies PivotMcpTeammateLine;
-    });
+  // Per teammate in a list; the listing's span covers it.
+  const teammateLine = Effect.fnUntraced(function* (teammate: PivotStore.TeammateRow) {
+    const shell = yield* threads.shell(teammate.threadId);
+    const derived =
+      shell === null
+        ? { status: "unreported" as const, detail: null }
+        : deriveTeammateStatus({
+            status: shell.status,
+            latestRunId: shell.latestRunId,
+            pendingRuntimeRequest: shell.pendingRuntimeRequest,
+            pendingBackgroundTasks: shell.pendingBackgroundTasks ?? [],
+            lastError: shell.lastError ?? null,
+            usageLimitResetAt: shell.usageLimitResetAt ?? null,
+            teammate,
+          });
+    const [latest] = yield* store.teammateHistory({ threadId: teammate.threadId, limit: 1 });
+    const pullRequest =
+      shell?.pullRequests?.find((link) => link.source !== "stack-dismissed")?.url ??
+      shell?.linkedPullRequest?.url ??
+      null;
+    return {
+      threadId: teammate.threadId,
+      title: teammate.title,
+      kind: teammate.kind,
+      status: derived.status,
+      // A teammate waiting for the machine to have memory has no run to report on yet.
+      summary: teammate.memoryWait ?? derived.detail ?? teammate.report?.summary ?? null,
+      branch: teammate.branch,
+      pullRequestUrl: pullRequest,
+      lastChangeAt: latest?.occurredAt ?? null,
+      worktreePath: teammate.worktreePath,
+      modelEntry: teammate.modelEntry,
+      tornDown: teammate.tornDownAt !== null,
+    } satisfies PivotMcpTeammateLine;
+  });
 
-  const listTeammates: PivotService["Service"]["listTeammates"] = (caller, input) =>
-    Effect.gen(function* () {
-      const pivot = yield* activePivot("list_teammates", caller);
-      const teammates = yield* store.listTeammates({
-        pivotThreadId: pivot.threadId,
-        includeTornDown: input.includeTornDown ?? false,
-      });
-      return { teammates: yield* Effect.forEach(teammates, teammateLine) };
+  const listTeammates: PivotService["Service"]["listTeammates"] = Effect.fn(
+    "PivotService.listTeammates",
+  )(function* (caller, input) {
+    const pivot = yield* activePivot("list_teammates", caller);
+    const teammates = yield* store.listTeammates({
+      pivotThreadId: pivot.threadId,
+      includeTornDown: input.includeTornDown ?? false,
     });
+    return { teammates: yield* Effect.forEach(teammates, teammateLine) };
+  });
 
-  const teammateHistory: PivotService["Service"]["teammateHistory"] = (caller, input) =>
-    Effect.gen(function* () {
-      const command = "teammate_history";
-      const pivot = yield* activePivot(command, caller);
-      const teammate = yield* store.getTeammate(input.threadId);
-      // Torn-down teammates stay readable; only another Pivot's are out of scope.
-      if (teammate === null || teammate.pivotThreadId !== pivot.threadId) {
-        return yield* refuse(command, `Thread ${input.threadId} is not one of your teammates.`);
-      }
-      const limit = Math.min(input.limit ?? PIVOT_HISTORY_DEFAULT_LIMIT, PIVOT_HISTORY_MAX_LIMIT);
-      const events: ReadonlyArray<StoredPivotEvent> = yield* store.teammateHistory({
-        threadId: input.threadId,
-        ...(input.beforeSequence === undefined ? {} : { beforeSequence: input.beforeSequence }),
-        limit: limit + 1,
-      });
-      const page = events.slice(0, limit);
-      return {
-        entries: page.map((stored) => ({
-          sequence: stored.sequence,
-          at: stored.occurredAt,
-          line: historyLine(stored.event),
-        })),
-        nextBeforeSequence: events.length > limit ? (page.at(-1)?.sequence ?? null) : null,
-      };
+  const teammateHistory: PivotService["Service"]["teammateHistory"] = Effect.fn(
+    "PivotService.teammateHistory",
+  )(function* (caller, input) {
+    const command = "teammate_history";
+    const pivot = yield* activePivot(command, caller);
+    const teammate = yield* store.getTeammate(input.threadId);
+    // Torn-down teammates stay readable; only another Pivot's are out of scope.
+    if (teammate === null || teammate.pivotThreadId !== pivot.threadId) {
+      return yield* refuse(command, `Thread ${input.threadId} is not one of your teammates.`);
+    }
+    const limit = Math.min(input.limit ?? PIVOT_HISTORY_DEFAULT_LIMIT, PIVOT_HISTORY_MAX_LIMIT);
+    const events: ReadonlyArray<StoredPivotEvent> = yield* store.teammateHistory({
+      threadId: input.threadId,
+      ...(input.beforeSequence === undefined ? {} : { beforeSequence: input.beforeSequence }),
+      limit: limit + 1,
     });
+    const page = events.slice(0, limit);
+    return {
+      entries: page.map((stored) => ({
+        sequence: stored.sequence,
+        at: stored.occurredAt,
+        line: historyLine(stored.event),
+      })),
+      nextBeforeSequence: events.length > limit ? (page.at(-1)?.sequence ?? null) : null,
+    };
+  });
 
   // --- Control ---
 
-  const stopTeammate: PivotService["Service"]["stopTeammate"] = (caller, input) =>
-    Effect.gen(function* () {
-      const command = "stop_teammate";
-      const pivot = yield* activePivot(command, caller);
-      const teammate = yield* ownTeammate(command, pivot, input.threadId);
-      const shell = yield* threads.shell(teammate.threadId);
-      // Recorded first, so what the stopped run does next is the Pivot's own doing.
-      yield* store.dispatch({
-        type: "teammate.stop",
-        pivotThreadId: pivot.threadId,
-        threadId: teammate.threadId,
-        runId: shell?.latestRunId ?? null,
-      });
-      yield* (yield* hostOf(command, teammate)).stop(teammate.threadId);
-      return { threadId: teammate.threadId, outcome: "stopped" as const, detail: null };
+  const stopTeammate: PivotService["Service"]["stopTeammate"] = Effect.fn(
+    "PivotService.stopTeammate",
+  )(function* (caller, input) {
+    const command = "stop_teammate";
+    const pivot = yield* activePivot(command, caller);
+    const teammate = yield* ownTeammate(command, pivot, input.threadId);
+    const shell = yield* threads.shell(teammate.threadId);
+    // Recorded first, so what the stopped run does next is the Pivot's own doing.
+    yield* store.dispatch({
+      type: "teammate.stop",
+      pivotThreadId: pivot.threadId,
+      threadId: teammate.threadId,
+      runId: shell?.latestRunId ?? null,
     });
+    yield* (yield* hostOf(command, teammate)).stop(teammate.threadId);
+    return { threadId: teammate.threadId, outcome: "stopped" as const, detail: null };
+  });
 
-  const relaunchTeammate: PivotService["Service"]["relaunchTeammate"] = (caller, input) =>
-    Effect.gen(function* () {
-      const command = "relaunch_teammate";
-      const pivot = yield* activePivot(command, caller);
-      const teammate = yield* ownTeammate(command, pivot, input.threadId);
-      const shell = yield* threads.shell(teammate.threadId);
-      yield* store.dispatch({
-        type: "teammate.stop",
-        pivotThreadId: pivot.threadId,
-        threadId: teammate.threadId,
-        runId: shell?.latestRunId ?? null,
-      });
-      yield* store.dispatch({
-        type: "teammate.relaunch",
-        pivotThreadId: pivot.threadId,
-        threadId: teammate.threadId,
-      });
-      // A launch whose setup failed never started its run; retry it in its worktree.
-      const launchFailed =
-        shell !== null &&
-        shell.status === "failed" &&
-        (shell.latestRunStartedAt === null || shell.latestRunStartedAt === undefined);
-      const host = yield* hostOf(command, teammate);
-      const start = launchFailed
-        ? yield* host.retryLaunch(teammate.threadId)
-        : yield* host.relaunch({
-            threadId: teammate.threadId,
-            senderThreadId: pivot.threadId,
-            text: "The Pivot restarted your session. Check your worktree and branch state, then carry on with the task from where it stands.",
-          });
-      return {
-        threadId: teammate.threadId,
-        outcome: start.type === "started" ? ("relaunched" as const) : ("relaunch-failed" as const),
-        detail: start.type === "failed" ? start.detail : null,
-      };
+  const relaunchTeammate: PivotService["Service"]["relaunchTeammate"] = Effect.fn(
+    "PivotService.relaunchTeammate",
+  )(function* (caller, input) {
+    const command = "relaunch_teammate";
+    const pivot = yield* activePivot(command, caller);
+    const teammate = yield* ownTeammate(command, pivot, input.threadId);
+    const shell = yield* threads.shell(teammate.threadId);
+    yield* store.dispatch({
+      type: "teammate.stop",
+      pivotThreadId: pivot.threadId,
+      threadId: teammate.threadId,
+      runId: shell?.latestRunId ?? null,
     });
+    yield* store.dispatch({
+      type: "teammate.relaunch",
+      pivotThreadId: pivot.threadId,
+      threadId: teammate.threadId,
+    });
+    // A launch whose setup failed never started its run; retry it in its worktree.
+    const launchFailed =
+      shell !== null &&
+      shell.status === "failed" &&
+      (shell.latestRunStartedAt === null || shell.latestRunStartedAt === undefined);
+    const host = yield* hostOf(command, teammate);
+    const start = launchFailed
+      ? yield* host.retryLaunch(teammate.threadId)
+      : yield* host.relaunch({
+          threadId: teammate.threadId,
+          senderThreadId: pivot.threadId,
+          text: "The Pivot restarted your session. Check your worktree and branch state, then carry on with the task from where it stands.",
+        });
+    return {
+      threadId: teammate.threadId,
+      outcome: start.type === "started" ? ("relaunched" as const) : ("relaunch-failed" as const),
+      detail: start.type === "failed" ? start.detail : null,
+    };
+  });
 
   // --- Delivery ---
 
   /** A decision about this teammate that the user answered: their recorded word. */
   /** The Pivot's decision about this teammate. */
-  const teammateDecision = (
+  const teammateDecision = Effect.fn("PivotService.teammateDecision")(function* (
     command: string,
     pivot: PivotStore.PivotRow,
     teammate: PivotStore.TeammateRow,
     decisionId: PivotDecisionId,
-  ) =>
-    Effect.gen(function* () {
-      const decision = yield* store.getDecision(decisionId);
-      if (
-        decision === null ||
-        decision.pivotThreadId !== pivot.threadId ||
-        decision.teammateThreadId !== teammate.threadId
-      ) {
-        return yield* refuse(command, `Decision ${decisionId} is not about this teammate.`);
-      }
-      return decision;
-    });
+  ) {
+    const decision = yield* store.getDecision(decisionId);
+    if (
+      decision === null ||
+      decision.pivotThreadId !== pivot.threadId ||
+      decision.teammateThreadId !== teammate.threadId
+    ) {
+      return yield* refuse(command, `Decision ${decisionId} is not about this teammate.`);
+    }
+    return decision;
+  });
 
   /** Why a decision does not carry the user's approval, or null when it does. */
   const notApproved = (decision: PivotDecision, what: string): string | null => {
@@ -1010,28 +1025,26 @@ export const make = Effect.gen(function* () {
   };
 
   /** A decision about this teammate that the user approved, in their recorded answer. */
-  const userApproval = (
+  const userApproval = Effect.fn("PivotService.userApproval")(function* (
     command: string,
     pivot: PivotStore.PivotRow,
     teammate: PivotStore.TeammateRow,
     decisionId: PivotDecisionId,
     what: string,
-  ) =>
-    Effect.gen(function* () {
-      const decision = yield* teammateDecision(command, pivot, teammate, decisionId);
-      const reason = notApproved(decision, what);
-      if (reason !== null) return yield* refuse(command, reason);
-      return decision;
-    });
+  ) {
+    const decision = yield* teammateDecision(command, pivot, teammate, decisionId);
+    const reason = notApproved(decision, what);
+    if (reason !== null) return yield* refuse(command, reason);
+    return decision;
+  });
 
-  const linkedPullRequest = (teammate: PivotStore.TeammateRow) =>
-    Effect.gen(function* () {
-      const shell = yield* threads.shell(teammate.threadId);
-      const links = (shell?.pullRequests ?? []).filter((link) => link.source !== "stack-dismissed");
-      return (
-        links.find((link) => link.snapshot?.headBranch === teammate.branch) ?? links[0] ?? null
-      );
-    });
+  const linkedPullRequest = Effect.fn("PivotService.linkedPullRequest")(function* (
+    teammate: PivotStore.TeammateRow,
+  ) {
+    const shell = yield* threads.shell(teammate.threadId);
+    const links = (shell?.pullRequests ?? []).filter((link) => link.source !== "stack-dismissed");
+    return links.find((link) => link.snapshot?.headBranch === teammate.branch) ?? links[0] ?? null;
+  });
 
   /** Whether the PR merged: its synced state, else its live state when the sync lags. */
   const pullRequestMerged = (
@@ -1060,422 +1073,418 @@ export const make = Effect.gen(function* () {
    * decision's `mergeOrder` have not landed, and any unmerged PR of the Pivot's, its own
    * links included, that the order leaves out, so no finished work is forgotten.
    */
-  const mergeOrderRefusals = (
+  const mergeOrderRefusals = Effect.fn("PivotService.mergeOrderRefusals")(function* (
     command: string,
     pivot: PivotStore.PivotRow,
     teammate: PivotStore.TeammateRow,
     decision: PivotDecision,
-  ) =>
-    Effect.gen(function* () {
-      const teammates = yield* store.listTeammates({
-        pivotThreadId: pivot.threadId,
-        includeTornDown: true,
-      });
-      const live = teammates.filter((other) => other.tornDownAt === null);
-      const pullRequests = (yield* Effect.forEach(
-        [
-          ...live.map((other) => [other.threadId, other.branch] as const),
-          [pivot.threadId, null] as const,
-        ],
-        ([threadId, branch]) =>
-          threads.shell(threadId).pipe(
-            Effect.map((shell) =>
-              (shell?.pullRequests ?? [])
-                .filter((link) => link.source !== "stack-dismissed")
-                .map((link) => ({
-                  link,
-                  branch: link.snapshot?.headBranch ?? branch ?? link.url,
-                })),
-            ),
+  ) {
+    const teammates = yield* store.listTeammates({
+      pivotThreadId: pivot.threadId,
+      includeTornDown: true,
+    });
+    const live = teammates.filter((other) => other.tornDownAt === null);
+    const pullRequests = (yield* Effect.forEach(
+      [
+        ...live.map((other) => [other.threadId, other.branch] as const),
+        [pivot.threadId, null] as const,
+      ],
+      ([threadId, branch]) =>
+        threads.shell(threadId).pipe(
+          Effect.map((shell) =>
+            (shell?.pullRequests ?? [])
+              .filter((link) => link.source !== "stack-dismissed")
+              .map((link) => ({
+                link,
+                branch: link.snapshot?.headBranch ?? branch ?? link.url,
+              })),
           ),
-      )).flat();
-      const landedLocally = Effect.fn("PivotService.landedLocally")(function* (
-        other: PivotStore.TeammateRow,
-      ) {
-        const verdict = yield* (yield* hostOf(command, other)).landed(command, {
-          projectId: pivot.projectId,
-          worktreePath: other.worktreePath,
-          branch: other.branch,
-          mergedPullRequestHead: null,
-        });
-        return verdict.landed;
-      });
-      /** Whether the work on `branch` has landed; null for a branch that is no work of the Pivot's. */
-      const landed = Effect.fn("PivotService.branchLanded")(function* (branch: string) {
-        const owner = teammates.find((other) => other.branch === branch);
-        if (owner?.tornDownAt != null) return true;
-        if (owner?.deliveryMode === "local-only") return yield* landedLocally(owner);
-        const links = pullRequests.filter((pr) => pr.branch === branch);
-        if (owner === undefined && links.length === 0) return null;
-        for (const { link } of links) {
-          if (yield* pullRequestMerged(command, teammate, link)) return true;
-        }
-        return false;
-      });
-
-      const reasons: Array<string> = [];
-      const own = yield* linkedPullRequest(teammate);
-      const bases = new Set([teammate.baseBranch, own?.snapshot?.baseBranch]);
-      for (const other of live) {
-        if (other.threadId === teammate.threadId || !bases.has(other.branch)) continue;
-        if (!(yield* landed(other.branch))) {
-          reasons.push(
-            `It is stacked on ${other.branch} ("${other.title}"), which has not landed. Land that first.`,
-          );
-        }
-      }
-
-      const order = decision.escalation?.mergeOrder ?? [];
-      const position = order.indexOf(teammate.branch);
-      if (order.length > 0 && position === -1) {
-        reasons.push(`The decision's merge order does not list ${teammate.branch}.`);
-      }
-      for (const branch of order.slice(0, Math.max(position, 0))) {
-        const verdict = yield* landed(branch);
-        if (verdict === null) {
-          reasons.push(`The merge order lists ${branch}, which is no branch of your teammates'.`);
-        } else if (!verdict) {
-          reasons.push(`${branch} comes before it in the merge order and has not landed.`);
-        }
-      }
-      const unordered = yield* Effect.filter(
-        pullRequests.filter((pr) => pr.branch !== teammate.branch && !order.includes(pr.branch)),
-        (pr) => pullRequestMerged(command, teammate, pr.link).pipe(Effect.map((merged) => !merged)),
-      );
-      if (unordered.length > 0) {
-        const listed = unordered.map((pr) => `${pr.link.url} (${pr.branch})`).join(", ");
-        reasons.push(
-          `Unmerged and missing from the decision's merge order: ${listed}. Escalate the merge with a mergeOrder listing every unmerged branch, so the user approves the order.`,
-        );
-      }
-      return reasons;
-    });
-
-  const mergeTeammate: PivotService["Service"]["mergeTeammate"] = (caller, input) =>
-    Effect.gen(function* () {
-      const command = "merge_teammate";
-      const pivot = yield* activePivot(command, caller);
-      const teammate = yield* ownTeammate(command, pivot, input.threadId);
-      if (teammate.kind !== "ship") return yield* refuse(command, "Only a ship's work merges.");
-      if (teammate.deliveryMode !== "direct-pr") {
-        return yield* refuse(
-          command,
-          "This project has no remote; land the branch with land_teammate.",
-        );
-      }
-      const decision = yield* teammateDecision(command, pivot, teammate, input.decisionId);
-      const link = yield* linkedPullRequest(teammate);
-      if (link === null) return yield* refuse(command, "The teammate has no linked PR.");
-      const ref = {
-        projectId: teammate.projectId,
-        host: link.host,
-        repository: link.repository,
-        number: link.number,
-      };
-      const host = yield* hostOf(command, teammate);
-      const detail = yield* host.pullRequestDetail(ref);
-      if (!PIVOT_MERGE_PROVIDERS.has(detail.provider)) {
-        return yield* refuse(
-          command,
-          `The Pivot merges on GitHub and GitLab only. Ask the user to merge ${link.url} on ${detail.provider} by hand.`,
-        );
-      }
-      const waived = input.waivedChecks ?? [];
-      // Every failing condition at once: the approval, each waiver, and live state.
-      const reasons = [
-        ...[notApproved(decision, "Merging")].filter((reason) => reason !== null),
-        ...waived.flatMap((name) =>
-          decision.userAnswer !== null && decision.userAnswer.includes(name)
-            ? []
-            : [`The user's answer does not waive check "${name}" by name.`],
         ),
-        ...mergeRefusals(detail, waived),
-        ...(yield* mergeOrderRefusals(command, pivot, teammate, decision)),
-      ];
-      if (reasons.length > 0) {
-        return yield* refuse(command, `Not merging ${link.url}:\n- ${reasons.join("\n- ")}`);
+    )).flat();
+    const landedLocally = Effect.fn("PivotService.landedLocally")(function* (
+      other: PivotStore.TeammateRow,
+    ) {
+      const verdict = yield* (yield* hostOf(command, other)).landed(command, {
+        projectId: pivot.projectId,
+        worktreePath: other.worktreePath,
+        branch: other.branch,
+        mergedPullRequestHead: null,
+      });
+      return verdict.landed;
+    });
+    /** Whether the work on `branch` has landed; null for a branch that is no work of the Pivot's. */
+    const landed = Effect.fn("PivotService.branchLanded")(function* (branch: string) {
+      const owner = teammates.find((other) => other.branch === branch);
+      if (owner?.tornDownAt != null) return true;
+      if (owner?.deliveryMode === "local-only") return yield* landedLocally(owner);
+      const links = pullRequests.filter((pr) => pr.branch === branch);
+      if (owner === undefined && links.length === 0) return null;
+      for (const { link } of links) {
+        if (yield* pullRequestMerged(command, teammate, link)) return true;
       }
-      const head = detail.headSha!;
-      // Recorded first, so the merge V2's sync then reports reads as the Pivot's own;
-      // cleared again if the forge refuses, so a later merge by hand still wakes it.
-      const recordMerge = (url: string | null) =>
-        store.dispatch({
-          type: "teammate.record-merge",
-          pivotThreadId: pivot.threadId,
-          threadId: teammate.threadId,
-          url,
-        });
-      yield* recordMerge(link.url);
-      yield* host
-        .mergePullRequest({ ...ref, expectedHeadSha: head })
-        .pipe(Effect.tapError(() => recordMerge(null).pipe(Effect.ignore)));
-      yield* host.stopScope(teammate.threadId);
-      return { threadId: teammate.threadId, url: link.url, mergedHead: head };
+      return false;
     });
 
-  const landTeammate: PivotService["Service"]["landTeammate"] = (caller, input) =>
-    Effect.gen(function* () {
-      const command = "land_teammate";
-      const pivot = yield* activePivot(command, caller);
-      const teammate = yield* ownTeammate(command, pivot, input.threadId);
-      if (teammate.kind !== "ship") return yield* refuse(command, "Only a ship's work lands.");
-      if (teammate.deliveryMode !== "local-only") {
-        return yield* refuse(command, "This project delivers PRs; merge with merge_teammate.");
-      }
-      const decision = yield* userApproval(command, pivot, teammate, input.decisionId, "Landing");
-      const outOfOrder = yield* mergeOrderRefusals(command, pivot, teammate, decision);
-      if (outOfOrder.length > 0) {
-        return yield* refuse(
-          command,
-          `Not landing ${teammate.branch}:\n- ${outOfOrder.join("\n- ")}`,
+    const reasons: Array<string> = [];
+    const own = yield* linkedPullRequest(teammate);
+    const bases = new Set([teammate.baseBranch, own?.snapshot?.baseBranch]);
+    for (const other of live) {
+      if (other.threadId === teammate.threadId || !bases.has(other.branch)) continue;
+      if (!(yield* landed(other.branch))) {
+        reasons.push(
+          `It is stacked on ${other.branch} ("${other.title}"), which has not landed. Land that first.`,
         );
       }
-      const result = yield* (yield* hostOf(command, teammate)).land(command, {
-        projectId: pivot.projectId,
-        worktreePath: teammate.worktreePath,
-        branch: teammate.branch,
-      });
-      if (result.type === "refused") return yield* refuse(command, result.reason);
-      yield* store.dispatch({
-        type: "teammate.record-landing",
+    }
+
+    const order = decision.escalation?.mergeOrder ?? [];
+    const position = order.indexOf(teammate.branch);
+    if (order.length > 0 && position === -1) {
+      reasons.push(`The decision's merge order does not list ${teammate.branch}.`);
+    }
+    for (const branch of order.slice(0, Math.max(position, 0))) {
+      const verdict = yield* landed(branch);
+      if (verdict === null) {
+        reasons.push(`The merge order lists ${branch}, which is no branch of your teammates'.`);
+      } else if (!verdict) {
+        reasons.push(`${branch} comes before it in the merge order and has not landed.`);
+      }
+    }
+    const unordered = yield* Effect.filter(
+      pullRequests.filter((pr) => pr.branch !== teammate.branch && !order.includes(pr.branch)),
+      (pr) => pullRequestMerged(command, teammate, pr.link).pipe(Effect.map((merged) => !merged)),
+    );
+    if (unordered.length > 0) {
+      const listed = unordered.map((pr) => `${pr.link.url} (${pr.branch})`).join(", ");
+      reasons.push(
+        `Unmerged and missing from the decision's merge order: ${listed}. Escalate the merge with a mergeOrder listing every unmerged branch, so the user approves the order.`,
+      );
+    }
+    return reasons;
+  });
+
+  const mergeTeammate: PivotService["Service"]["mergeTeammate"] = Effect.fn(
+    "PivotService.mergeTeammate",
+  )(function* (caller, input) {
+    const command = "merge_teammate";
+    const pivot = yield* activePivot(command, caller);
+    const teammate = yield* ownTeammate(command, pivot, input.threadId);
+    if (teammate.kind !== "ship") return yield* refuse(command, "Only a ship's work merges.");
+    if (teammate.deliveryMode !== "direct-pr") {
+      return yield* refuse(
+        command,
+        "This project has no remote; land the branch with land_teammate.",
+      );
+    }
+    const decision = yield* teammateDecision(command, pivot, teammate, input.decisionId);
+    const link = yield* linkedPullRequest(teammate);
+    if (link === null) return yield* refuse(command, "The teammate has no linked PR.");
+    const ref = {
+      projectId: teammate.projectId,
+      host: link.host,
+      repository: link.repository,
+      number: link.number,
+    };
+    const host = yield* hostOf(command, teammate);
+    const detail = yield* host.pullRequestDetail(ref);
+    if (!PIVOT_MERGE_PROVIDERS.has(detail.provider)) {
+      return yield* refuse(
+        command,
+        `The Pivot merges on GitHub and GitLab only. Ask the user to merge ${link.url} on ${detail.provider} by hand.`,
+      );
+    }
+    const waived = input.waivedChecks ?? [];
+    // Every failing condition at once: the approval, each waiver, and live state.
+    const reasons = [
+      ...[notApproved(decision, "Merging")].filter((reason) => reason !== null),
+      ...waived.flatMap((name) =>
+        decision.userAnswer !== null && decision.userAnswer.includes(name)
+          ? []
+          : [`The user's answer does not waive check "${name}" by name.`],
+      ),
+      ...mergeRefusals(detail, waived),
+      ...(yield* mergeOrderRefusals(command, pivot, teammate, decision)),
+    ];
+    if (reasons.length > 0) {
+      return yield* refuse(command, `Not merging ${link.url}:\n- ${reasons.join("\n- ")}`);
+    }
+    const head = detail.headSha!;
+    // Recorded first, so the merge V2's sync then reports reads as the Pivot's own;
+    // cleared again if the forge refuses, so a later merge by hand still wakes it.
+    const recordMerge = (url: string | null) =>
+      store.dispatch({
+        type: "teammate.record-merge",
         pivotThreadId: pivot.threadId,
         threadId: teammate.threadId,
-        head: result.head,
+        url,
       });
-      yield* (yield* hostOf(command, teammate)).stopScope(teammate.threadId);
-      return {
-        threadId: teammate.threadId,
-        branch: teammate.branch,
-        defaultBranch: result.defaultBranch,
-        landedHead: result.head,
-      };
-    });
+    yield* recordMerge(link.url);
+    yield* host
+      .mergePullRequest({ ...ref, expectedHeadSha: head })
+      .pipe(Effect.tapError(() => recordMerge(null).pipe(Effect.ignore)));
+    yield* host.stopScope(teammate.threadId);
+    return { threadId: teammate.threadId, url: link.url, mergedHead: head };
+  });
 
-  const teardownTeammate: PivotService["Service"]["teardownTeammate"] = (caller, input) =>
-    Effect.gen(function* () {
-      const command = "teardown_teammate";
-      const pivot = yield* activePivot(command, caller);
-      const teammate = yield* ownTeammate(command, pivot, input.threadId);
-      const host = yield* hostOf(command, teammate);
-      yield* host.project(command, pivot.projectId);
-      // Teardown deletes the worktree and branch, so nobody else may still be using them.
-      const others = (yield* store.listTeammates({ includeTornDown: false })).filter(
-        (other) => other.threadId !== teammate.threadId && other.projectId === teammate.projectId,
+  const landTeammate: PivotService["Service"]["landTeammate"] = Effect.fn(
+    "PivotService.landTeammate",
+  )(function* (caller, input) {
+    const command = "land_teammate";
+    const pivot = yield* activePivot(command, caller);
+    const teammate = yield* ownTeammate(command, pivot, input.threadId);
+    if (teammate.kind !== "ship") return yield* refuse(command, "Only a ship's work lands.");
+    if (teammate.deliveryMode !== "local-only") {
+      return yield* refuse(command, "This project delivers PRs; merge with merge_teammate.");
+    }
+    const decision = yield* userApproval(command, pivot, teammate, input.decisionId, "Landing");
+    const outOfOrder = yield* mergeOrderRefusals(command, pivot, teammate, decision);
+    if (outOfOrder.length > 0) {
+      return yield* refuse(
+        command,
+        `Not landing ${teammate.branch}:\n- ${outOfOrder.join("\n- ")}`,
       );
-      const sharing: Array<PivotStore.TeammateRow> = [];
-      for (const other of others) {
-        const resolved = yield* withRecordedWorktree(other);
-        if (
-          resolved.worktreePath === teammate.worktreePath ||
-          resolved.branch === teammate.branch
-        ) {
-          sharing.push(resolved);
-        }
-      }
-      if (sharing.length > 0) {
-        return yield* refuse(
-          command,
-          `Not torn down: ${sharing.map((other) => other.threadId).join(", ")} still ${sharing.length === 1 ? "works" : "work"} on the same worktree or branch. Tear that one down first, or hand the work over.`,
-        );
-      }
-      const worktreeExists = yield* host.worktreeExists(teammate.worktreePath);
+    }
+    const result = yield* (yield* hostOf(command, teammate)).land(command, {
+      projectId: pivot.projectId,
+      worktreePath: teammate.worktreePath,
+      branch: teammate.branch,
+    });
+    if (result.type === "refused") return yield* refuse(command, result.reason);
+    yield* store.dispatch({
+      type: "teammate.record-landing",
+      pivotThreadId: pivot.threadId,
+      threadId: teammate.threadId,
+      head: result.head,
+    });
+    yield* (yield* hostOf(command, teammate)).stopScope(teammate.threadId);
+    return {
+      threadId: teammate.threadId,
+      branch: teammate.branch,
+      defaultBranch: result.defaultBranch,
+      landedHead: result.head,
+    };
+  });
 
-      let reason: string;
-      let landedHead: string | null = null;
-      if (teammate.kind === "scout" && teammate.scoutReport !== null) {
-        reason = "Its scout report is recorded.";
-        // The report is the deliverable, but files it left uncommitted are still the user's.
-        if (worktreeExists && !(yield* host.worktreeClean(teammate.worktreePath))) {
-          if (input.discardDecisionId === undefined) {
-            return yield* refuse(
-              command,
-              "Not torn down: the scout's worktree has uncommitted files. Its report is recorded; discarding the files needs the user's word.",
-            );
-          }
-          yield* userApproval(command, pivot, teammate, input.discardDecisionId, "Discarding work");
-          reason =
-            "Discarded on the user's word: the scout's uncommitted files. Its scout report is recorded.";
-        }
-      } else {
-        const link = yield* linkedPullRequest(teammate);
-        let mergedHead: string | null = null;
-        if (link?.snapshot?.state === "merged") {
-          const detail = yield* host
-            .pullRequestDetail({
-              projectId: teammate.projectId,
-              host: link.host,
-              repository: link.repository,
-              number: link.number,
-            })
-            .pipe(Effect.orElseSucceed(() => null));
-          mergedHead = detail?.state === "merged" ? (detail.headSha ?? null) : null;
-        }
-        const verdict = yield* host.landed(command, {
-          projectId: pivot.projectId,
-          worktreePath: teammate.worktreePath,
-          branch: teammate.branch,
-          mergedPullRequestHead: mergedHead,
-        });
-        if (verdict.landed) {
-          reason = verdict.reason;
-          landedHead = verdict.head;
-        } else if (input.discardDecisionId !== undefined) {
-          yield* userApproval(command, pivot, teammate, input.discardDecisionId, "Discarding work");
-          reason = `Discarded on the user's word: ${verdict.reason}`;
-        } else {
+  const teardownTeammate: PivotService["Service"]["teardownTeammate"] = Effect.fn(
+    "PivotService.teardownTeammate",
+  )(function* (caller, input) {
+    const command = "teardown_teammate";
+    const pivot = yield* activePivot(command, caller);
+    const teammate = yield* ownTeammate(command, pivot, input.threadId);
+    const host = yield* hostOf(command, teammate);
+    yield* host.project(command, pivot.projectId);
+    // Teardown deletes the worktree and branch, so nobody else may still be using them.
+    const others = (yield* store.listTeammates({ includeTornDown: false })).filter(
+      (other) => other.threadId !== teammate.threadId && other.projectId === teammate.projectId,
+    );
+    const sharing: Array<PivotStore.TeammateRow> = [];
+    for (const other of others) {
+      const resolved = yield* withRecordedWorktree(other);
+      if (resolved.worktreePath === teammate.worktreePath || resolved.branch === teammate.branch) {
+        sharing.push(resolved);
+      }
+    }
+    if (sharing.length > 0) {
+      return yield* refuse(
+        command,
+        `Not torn down: ${sharing.map((other) => other.threadId).join(", ")} still ${sharing.length === 1 ? "works" : "work"} on the same worktree or branch. Tear that one down first, or hand the work over.`,
+      );
+    }
+    const worktreeExists = yield* host.worktreeExists(teammate.worktreePath);
+
+    let reason: string;
+    let landedHead: string | null = null;
+    if (teammate.kind === "scout" && teammate.scoutReport !== null) {
+      reason = "Its scout report is recorded.";
+      // The report is the deliverable, but files it left uncommitted are still the user's.
+      if (worktreeExists && !(yield* host.worktreeClean(teammate.worktreePath))) {
+        if (input.discardDecisionId === undefined) {
           return yield* refuse(
             command,
-            `Not torn down, its work has not landed. ${verdict.reason}`,
+            "Not torn down: the scout's worktree has uncommitted files. Its report is recorded; discarding the files needs the user's word.",
           );
         }
+        yield* userApproval(command, pivot, teammate, input.discardDecisionId, "Discarding work");
+        reason =
+          "Discarded on the user's word: the scout's uncommitted files. Its scout report is recorded.";
       }
-      const discarding = reason.startsWith("Discarded");
-      // Landed work's branch goes while it is still at the verified tip; a scout's
-      // report-only branch goes only if git agrees it is merged; discarded work keeps it.
-      const branchDisposal =
-        discarding || (landedHead === null && teammate.kind !== "scout")
-          ? ("keep" as const)
-          : landedHead === null
-            ? ("safe" as const)
-            : { tip: landedHead };
-
-      yield* host.teardown(command, {
+    } else {
+      const link = yield* linkedPullRequest(teammate);
+      let mergedHead: string | null = null;
+      if (link?.snapshot?.state === "merged") {
+        const detail = yield* host
+          .pullRequestDetail({
+            projectId: teammate.projectId,
+            host: link.host,
+            repository: link.repository,
+            number: link.number,
+          })
+          .pipe(Effect.orElseSucceed(() => null));
+        mergedHead = detail?.state === "merged" ? (detail.headSha ?? null) : null;
+      }
+      const verdict = yield* host.landed(command, {
         projectId: pivot.projectId,
-        threadId: teammate.threadId,
         worktreePath: teammate.worktreePath,
         branch: teammate.branch,
-        worktreeExists,
-        force: discarding,
-        branchDisposal,
-        inline: teammate.kind === "inline",
+        mergedPullRequestHead: mergedHead,
       });
-      yield* store.dispatch({
-        type: "teammate.tear-down",
-        pivotThreadId: pivot.threadId,
-        threadId: teammate.threadId,
-      });
-      return { threadId: teammate.threadId, reason, branch: teammate.branch };
+      if (verdict.landed) {
+        reason = verdict.reason;
+        landedHead = verdict.head;
+      } else if (input.discardDecisionId !== undefined) {
+        yield* userApproval(command, pivot, teammate, input.discardDecisionId, "Discarding work");
+        reason = `Discarded on the user's word: ${verdict.reason}`;
+      } else {
+        return yield* refuse(command, `Not torn down, its work has not landed. ${verdict.reason}`);
+      }
+    }
+    const discarding = reason.startsWith("Discarded");
+    // Landed work's branch goes while it is still at the verified tip; a scout's
+    // report-only branch goes only if git agrees it is merged; discarded work keeps it.
+    const branchDisposal =
+      discarding || (landedHead === null && teammate.kind !== "scout")
+        ? ("keep" as const)
+        : landedHead === null
+          ? ("safe" as const)
+          : { tip: landedHead };
+
+    yield* host.teardown(command, {
+      projectId: pivot.projectId,
+      threadId: teammate.threadId,
+      worktreePath: teammate.worktreePath,
+      branch: teammate.branch,
+      worktreeExists,
+      force: discarding,
+      branchDisposal,
+      inline: teammate.kind === "inline",
     });
+    yield* store.dispatch({
+      type: "teammate.tear-down",
+      pivotThreadId: pivot.threadId,
+      threadId: teammate.threadId,
+    });
+    return { threadId: teammate.threadId, reason, branch: teammate.branch };
+  });
 
   // --- Teammate tools ---
 
-  const reportStatus: PivotService["Service"]["reportStatus"] = (caller, input) =>
-    Effect.gen(function* () {
-      const command = "report_status";
-      const calling = yield* liveTeammate(command, caller);
-      const teammate = calling.teammate;
-      const shell = yield* threads.shell(teammate.threadId);
-      if (input.status === "done" && teammate.kind === "ship") {
-        const unsaved = yield* git.uncommitted(teammate.worktreePath);
-        if (unsaved.length > 0) {
-          return yield* refuse(
-            command,
-            `\`done\` needs all work committed. Uncommitted: ${unsaved.join(", ")}. Commit it, then report again.`,
-          );
-        }
-      }
-      if (
-        input.status === "done" &&
-        teammate.kind === "ship" &&
-        teammate.deliveryMode === "direct-pr"
-      ) {
-        const link = shell?.pullRequests?.find(
-          (candidate) => candidate.source !== "stack-dismissed",
+  const reportStatus: PivotService["Service"]["reportStatus"] = Effect.fn(
+    "PivotService.reportStatus",
+  )(function* (caller, input) {
+    const command = "report_status";
+    const calling = yield* liveTeammate(command, caller);
+    const teammate = calling.teammate;
+    const shell = yield* threads.shell(teammate.threadId);
+    if (input.status === "done" && teammate.kind === "ship") {
+      const unsaved = yield* git.uncommitted(teammate.worktreePath);
+      if (unsaved.length > 0) {
+        return yield* refuse(
+          command,
+          `\`done\` needs all work committed. Uncommitted: ${unsaved.join(", ")}. Commit it, then report again.`,
         );
-        const url = link?.url ?? shell?.linkedPullRequest?.url ?? null;
-        if (url === null) {
-          return yield* refuse(
-            command,
-            "`done` needs a linked PR. Open it, link it with link_pull_request using the full URL, then report again.",
-          );
-        }
-        if (link?.snapshot != null && link.snapshot.headBranch !== teammate.branch) {
-          return yield* refuse(
-            command,
-            `The linked PR's head is ${link.snapshot.headBranch}, not your branch ${teammate.branch}.`,
-          );
-        }
-        const local = yield* git.headCommit(teammate.worktreePath);
-        const remote = yield* git.remoteBranchCommit(teammate.worktreePath, teammate.branch);
-        if (remote !== local) {
-          return yield* refuse(
-            command,
-            remote === null
-              ? `Your branch ${teammate.branch} is not pushed. Push it, then report again.`
-              : `Your latest commit ${local.slice(0, 12)} is not what origin has (${remote.slice(0, 12)}). Push, then report again.`,
-          );
-        }
       }
-      if (calling.type === "hosted") {
-        // The home holds the Pivot, its decisions and its wakes; this host only logs the
-        // report, for the home to apply when it next reads the log.
-        if (input.until !== undefined && input.status !== "paused") {
-          return yield* refuse(command, "Only a `paused` report takes `until`.");
-        }
-        yield* hostStore.appendEvent({
-          threadId: teammate.threadId,
-          event: {
-            _tag: "reported",
-            status: input.status,
-            summary: input.summary,
-            until: input.until ?? null,
-            runId: shell?.latestRunId ?? null,
-            decisionKey: input.decisionKey ?? null,
-            clearedDecision:
-              input.clearDecision === undefined
-                ? null
-                : {
-                    key: input.clearDecision.key ?? null,
-                    resolution: input.clearDecision.resolution,
-                  },
-          },
-        });
-        return { status: input.status, openDecisions: 0 };
+    }
+    if (
+      input.status === "done" &&
+      teammate.kind === "ship" &&
+      teammate.deliveryMode === "direct-pr"
+    ) {
+      const link = shell?.pullRequests?.find((candidate) => candidate.source !== "stack-dismissed");
+      const url = link?.url ?? shell?.linkedPullRequest?.url ?? null;
+      if (url === null) {
+        return yield* refuse(
+          command,
+          "`done` needs a linked PR. Open it, link it with link_pull_request using the full URL, then report again.",
+        );
       }
-      yield* store.dispatch({
-        type: "teammate.report",
+      if (link?.snapshot != null && link.snapshot.headBranch !== teammate.branch) {
+        return yield* refuse(
+          command,
+          `The linked PR's head is ${link.snapshot.headBranch}, not your branch ${teammate.branch}.`,
+        );
+      }
+      const local = yield* git.headCommit(teammate.worktreePath);
+      const remote = yield* git.remoteBranchCommit(teammate.worktreePath, teammate.branch);
+      if (remote !== local) {
+        return yield* refuse(
+          command,
+          remote === null
+            ? `Your branch ${teammate.branch} is not pushed. Push it, then report again.`
+            : `Your latest commit ${local.slice(0, 12)} is not what origin has (${remote.slice(0, 12)}). Push, then report again.`,
+        );
+      }
+    }
+    if (calling.type === "hosted") {
+      // The home holds the Pivot, its decisions and its wakes; this host only logs the
+      // report, for the home to apply when it next reads the log.
+      if (input.until !== undefined && input.status !== "paused") {
+        return yield* refuse(command, "Only a `paused` report takes `until`.");
+      }
+      yield* hostStore.appendEvent({
         threadId: teammate.threadId,
-        status: input.status,
-        summary: input.summary,
-        until: input.until ?? null,
-        runId: shell?.latestRunId ?? null,
-        decisionKey: input.decisionKey ?? null,
-        clearedDecision:
-          input.clearDecision === undefined
-            ? null
-            : { key: input.clearDecision.key ?? null, resolution: input.clearDecision.resolution },
+        event: {
+          _tag: "reported",
+          status: input.status,
+          summary: input.summary,
+          until: input.until ?? null,
+          runId: shell?.latestRunId ?? null,
+          decisionKey: input.decisionKey ?? null,
+          clearedDecision:
+            input.clearDecision === undefined
+              ? null
+              : {
+                  key: input.clearDecision.key ?? null,
+                  resolution: input.clearDecision.resolution,
+                },
+        },
       });
-      const decisions = yield* store.listDecisions({
-        pivotThreadId: calling.teammate.pivotThreadId,
-        openOnly: true,
-      });
-      return {
-        status: input.status,
-        openDecisions: decisions.filter((d) => d.teammateThreadId === teammate.threadId).length,
-      };
+      return { status: input.status, openDecisions: 0 };
+    }
+    yield* store.dispatch({
+      type: "teammate.report",
+      threadId: teammate.threadId,
+      status: input.status,
+      summary: input.summary,
+      until: input.until ?? null,
+      runId: shell?.latestRunId ?? null,
+      decisionKey: input.decisionKey ?? null,
+      clearedDecision:
+        input.clearDecision === undefined
+          ? null
+          : { key: input.clearDecision.key ?? null, resolution: input.clearDecision.resolution },
     });
+    const decisions = yield* store.listDecisions({
+      pivotThreadId: calling.teammate.pivotThreadId,
+      openOnly: true,
+    });
+    return {
+      status: input.status,
+      openDecisions: decisions.filter((d) => d.teammateThreadId === teammate.threadId).length,
+    };
+  });
 
-  const recordScoutReport: PivotService["Service"]["recordScoutReport"] = (caller, input) =>
-    Effect.gen(function* () {
-      const command = "record_scout_report";
-      const calling = yield* liveTeammate(command, caller);
-      if (calling.type === "hosted") {
-        if (calling.teammate.kind !== "scout") {
-          return yield* refuse(command, "Only a scout records a report.");
-        }
-        yield* hostStore.appendEvent({
-          threadId: calling.teammate.threadId,
-          event: { _tag: "scout-report-recorded", report: input.report },
-        });
-        return { recorded: true };
+  const recordScoutReport: PivotService["Service"]["recordScoutReport"] = Effect.fn(
+    "PivotService.recordScoutReport",
+  )(function* (caller, input) {
+    const command = "record_scout_report";
+    const calling = yield* liveTeammate(command, caller);
+    if (calling.type === "hosted") {
+      if (calling.teammate.kind !== "scout") {
+        return yield* refuse(command, "Only a scout records a report.");
       }
-      yield* store.dispatch({
-        type: "teammate.record-scout-report",
+      yield* hostStore.appendEvent({
         threadId: calling.teammate.threadId,
-        report: input.report,
+        event: { _tag: "scout-report-recorded", report: input.report },
       });
       return { recorded: true };
+    }
+    yield* store.dispatch({
+      type: "teammate.record-scout-report",
+      threadId: calling.teammate.threadId,
+      report: input.report,
     });
+    return { recorded: true };
+  });
 
   return PivotService.of({
     create,

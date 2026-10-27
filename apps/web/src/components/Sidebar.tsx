@@ -3311,7 +3311,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           ) : null}
         </SidebarGroup>
       </SidebarContent>
-      <SidebarChromeFooter />
+      {/* The tab bar has no shelf headers to host the undo notice, so the footer always does. */}
+      <SidebarChromeFooter showUndoNotice />
     </>
   );
 }

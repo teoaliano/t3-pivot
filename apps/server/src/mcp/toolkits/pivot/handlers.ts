@@ -18,23 +18,22 @@ const toFailure = (error: PivotService.PivotServiceError) =>
   });
 
 /** Runs a Pivot service method as the calling thread. Credentials from outside T3 have none. */
-const asCaller = <A>(
+const asCaller = Effect.fn("PivotHandlers.asCaller")(function* <A>(
   run: (
     service: PivotService.PivotService["Service"],
     caller: ThreadId,
   ) => Effect.Effect<A, PivotService.PivotServiceError>,
-) =>
-  Effect.gen(function* () {
-    const scope = yield* McpInvocationContext.McpInvocationContext;
-    if (scope.thread === undefined) {
-      return yield* new OrchestratorMcpFailure({
-        code: "thread_credential_required",
-        message: "Pivot and teammate tools are only for threads T3 launched.",
-      });
-    }
-    const service = yield* PivotService.PivotService;
-    return yield* run(service, scope.thread.threadId).pipe(Effect.mapError(toFailure));
-  });
+) {
+  const scope = yield* McpInvocationContext.McpInvocationContext;
+  if (scope.thread === undefined) {
+    return yield* new OrchestratorMcpFailure({
+      code: "thread_credential_required",
+      message: "Pivot and teammate tools are only for threads T3 launched.",
+    });
+  }
+  const service = yield* PivotService.PivotService;
+  return yield* run(service, scope.thread.threadId).pipe(Effect.mapError(toFailure));
+});
 
 const pivotHandlers = {
   dispatch_teammate: McpToolAccess.actsAsCaller((input) =>
