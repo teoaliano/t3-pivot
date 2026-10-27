@@ -353,15 +353,6 @@ function resolveDraggedOrders(input: {
   };
 }
 
-function routeThreadOnly(
-  threads: readonly EnvironmentThreadShell[],
-  routeThreadKey: string | null,
-): readonly EnvironmentThreadShell[] {
-  if (routeThreadKey === null) return EMPTY_THREADS;
-  const routeThread = threads.find((thread) => threadShellKey(thread) === routeThreadKey);
-  return routeThread === undefined ? EMPTY_THREADS : [routeThread];
-}
-
 // Separate hooks cache maps independently of later Sidebar hooks and preserve dnd-kit inputs.
 function useSidebarThreads(input: {
   readonly projectScopeKey: string | null;
@@ -419,9 +410,7 @@ function useSidebarThreads(input: {
 
   const { pinnedThreads, activeThreads, workingThreads, snoozedThreads, settledThreads } =
     partition;
-  const visibleActiveThreads = threadsSectionExpanded
-    ? activeThreads
-    : routeThreadOnly(activeThreads, routeRowThreadKey);
+  const visibleActiveThreads = threadsSectionExpanded ? activeThreads : EMPTY_THREADS;
   // Older settled threads load in pages; the shelf lists them only as far as they are loaded.
   const olderSettledShelf = useOlderSettledShelf({
     scopes: olderSettledScopes([...serverConfigs.keys()], scopedProjectKeys),
@@ -445,15 +434,9 @@ function useSidebarThreads(input: {
     }
     return visible.length === settledThreads.length ? settledThreads : visible;
   })();
-  const renderedSettledThreads = settledShelfExpanded
-    ? visibleSettledThreads
-    : routeThreadOnly(visibleSettledThreads, routeRowThreadKey);
-  const visibleSnoozedThreads = snoozedShelfExpanded
-    ? snoozedThreads
-    : routeThreadOnly(snoozedThreads, routeRowThreadKey);
-  const visibleWorkingThreads = workingShelfExpanded
-    ? workingThreads
-    : routeThreadOnly(workingThreads, routeRowThreadKey);
+  const renderedSettledThreads = settledShelfExpanded ? visibleSettledThreads : EMPTY_THREADS;
+  const visibleSnoozedThreads = snoozedShelfExpanded ? snoozedThreads : EMPTY_THREADS;
+  const visibleWorkingThreads = workingShelfExpanded ? workingThreads : EMPTY_THREADS;
   const orderedThreads = [
     ...pinnedThreads,
     ...visibleActiveThreads,
