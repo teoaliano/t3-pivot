@@ -1,10 +1,4 @@
-import {
-  FolderPlusIcon,
-  LayoutDashboardIcon,
-  SearchIcon,
-  SquarePenIcon,
-  XIcon,
-} from "lucide-react";
+import { FolderPlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
 import {
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -25,8 +19,6 @@ export interface SidebarThreadHeaderProps {
   onNewProject: () => void;
   onNewThread: (event: ReactMouseEvent) => void;
   newThreadDisabled: boolean;
-  /** T3 Pivot: the new button starts a Pivot instead of a thread. */
-  newItemIsPivot: boolean;
   newThreadShortcutLabel: string | null | undefined;
   newThreadInProjectShortcutLabel: string | null | undefined;
   showNewThreadInProjectHint: boolean;
@@ -47,7 +39,6 @@ export function SidebarThreadHeader({
   onNewProject,
   onNewThread,
   newThreadDisabled,
-  newItemIsPivot,
   newThreadShortcutLabel,
   newThreadInProjectShortcutLabel,
   showNewThreadInProjectHint,
@@ -63,10 +54,9 @@ export function SidebarThreadHeader({
   const resultsVisible = isSearching && searchResultCount > 0;
   // Shrinking results can remove the active option; never leave aria-activedescendant pointing at it.
   const activeResultExists = resultsVisible && activeSearchResultIndex < searchResultCount;
-  const newItemName = newItemIsPivot ? "New pivot" : "New thread";
-  const newItemLabel = newThreadShortcutLabel
-    ? `${newItemName} (${newThreadShortcutLabel})`
-    : newItemName;
+  const newThreadLabel = newThreadShortcutLabel
+    ? `New thread (${newThreadShortcutLabel})`
+    : "New thread";
 
   return (
     <div className="flex items-center gap-1">
@@ -121,24 +111,24 @@ export function SidebarThreadHeader({
           </>
         ) : null}
         <SidebarHeaderIconButton
-          label={newItemName}
+          label="New thread"
           tooltip={
-            showNewThreadInProjectHint && !newItemIsPivot ? (
+            showNewThreadInProjectHint ? (
               <span className="flex flex-col gap-0.5">
-                <span>{newItemLabel}</span>
+                <span>{newThreadLabel}</span>
                 <span className="text-muted-foreground">
                   New thread in current project: Shift+click
                   {newThreadInProjectShortcutLabel ? ` (${newThreadInProjectShortcutLabel})` : ""}
                 </span>
               </span>
             ) : (
-              newItemLabel
+              newThreadLabel
             )
           }
           disabled={newThreadDisabled}
           onClick={onNewThread}
         >
-          {newItemIsPivot ? <LayoutDashboardIcon /> : <SquarePenIcon />}
+          <SquarePenIcon />
         </SidebarHeaderIconButton>
       </div>
     </div>

@@ -15,7 +15,10 @@ import {
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import { resolveSettledThreadTimestamp } from "@t3tools/client-runtime/state/thread-sort";
 import { type EnvironmentThreadSearchMatch } from "@t3tools/client-runtime/state/thread-search";
-import { resolveThreadProviderStack } from "@t3tools/client-runtime/state/models";
+import {
+  formatWorkingDurationLabel,
+  resolveThreadProviderStack,
+} from "@t3tools/client-runtime/state/models";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import {
   AuthOrchestrationOperateScope,
@@ -31,13 +34,18 @@ import {
   CheckIcon,
   CircleAlertIcon,
   CircleCheckIcon,
+  CircleDashedIcon,
+  CircleDotDashedIcon,
   ClockIcon,
   GitBranchIcon,
+  MessageCircleQuestionIcon,
   PinIcon,
   PinOffIcon,
+  ShieldQuestionIcon,
   SquarePenIcon,
   TerminalIcon,
   Undo2Icon,
+  UserRoundIcon,
   XIcon,
 } from "lucide-react";
 import {
@@ -55,8 +63,7 @@ import { useOpenPrLink } from "../../lib/openPullRequestLink";
 import { useUiStateStore } from "../../uiStateStore";
 import { useThreadSelectionStore } from "../../threadSelectionStore";
 import { useNowMinute } from "../../hooks/useNowMinute";
-import { SidebarStatusIcon } from "./SidebarStatusIcon";
-import { WorkingDuration } from "./WorkingDuration";
+import { useNowSecond } from "../../hooks/useNowSecond";
 import { vcsEnvironment } from "../../state/vcs";
 import { useEnvironmentQuery } from "../../state/query";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
@@ -148,6 +155,21 @@ function JumpHintBadge(props: { label: string }) {
     >
       {props.label}
     </span>
+  );
+}
+
+function WorkingDuration(props: { startedAt: string | null }) {
+  const startedMs = props.startedAt !== null ? Date.parse(props.startedAt) : Number.NaN;
+  if (Number.isNaN(startedMs)) return null;
+  return <WorkingDurationLabel startedMs={startedMs} />;
+}
+
+// Self-ticking so only this span re-renders each second, not the whole row;
+// the shared tick lands every working row's update in the same frame.
+function WorkingDurationLabel(props: { startedMs: number }) {
+  const nowMs = useNowSecond();
+  return (
+    <span className="tabular-nums">{formatWorkingDurationLabel(nowMs - props.startedMs)}</span>
   );
 }
 
@@ -509,8 +531,6 @@ type SidebarThreadRowProps = {
   // subagent: drafts and PR clicks care about which composer is on screen.
   isRouteThread: boolean;
   openPullRequestsInRightPanel: boolean;
-  // T3 Pivot: a Pivot's teammate count, needs-you count and fold toggle, in its last line.
-  pivotSummary: ReactNode;
   jumpLabel: string | null;
   currentEnvironmentId: string | null;
   environmentLabel: string | null;
@@ -1235,15 +1255,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const diff = latestRunDiff(thread);
   // Only the provider icon would remain; the New design drops the line instead of leaving it blank.
   const metaLineEmpty =
-    !props.pivotSummary &&
     !thread.branch &&
     !showsScratchMachine &&
     prBadge === null &&
     diff === null &&
     !isRemote &&
     runningTerminalIds.length === 0;
-  // A Pivot's title restates its project, so the project name takes the title's place.
-  const isPivotRow = Boolean(props.pivotSummary);
 
   return (
     <li
@@ -1252,7 +1269,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       {...(fileDropHandlers ?? {})}
       className={cn(
         "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_78px]",
-        (metaLineEmpty || isPivotRow) && "redesign:[contain-intrinsic-size:auto_58px]",
+        metaLineEmpty && "redesign:[contain-intrinsic-size:auto_58px]",
         sortable?.isDragging && "relative z-20",
       )}
     >
@@ -1280,7 +1297,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             className={cn(
               "relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)",
               metaLineEmpty && "redesign:h-auto",
-              isPivotRow && !isRenaming && "h-auto",
             )}
           >
             <div className="flex h-5 min-w-0 items-center gap-1.5">
@@ -1294,13 +1310,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {props.projectDisplayName ? (
                 <span
                   className={cn(
-                    "min-w-0 flex-1 truncate",
-                    isPivotRow
-                      ? cn("text-foreground text-sm", shouldRecede ? "font-normal" : "font-medium")
-                      : cn(
-                          "text-secondary-label text-xs",
-                          shouldRecede ? "font-normal" : "font-medium redesign:font-normal",
-                        ),
+                    "min-w-0 flex-1 truncate text-secondary-label text-xs",
+                    shouldRecede ? "font-normal" : "font-medium redesign:font-normal",
                   )}
                 >
                   {props.projectDisplayName}
@@ -1354,8 +1365,20 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                             topStatus.className,
                           )}
                         >
-                          {topStatus.icon !== null ? (
-                            <SidebarStatusIcon kind={topStatus.icon} />
+                          {topStatus.icon === "working" ? (
+                            <CircleDashedIcon aria-hidden className="size-4 shrink-0" />
+                          ) : topStatus.icon === "waiting" ? (
+                            <CircleDotDashedIcon aria-hidden className="size-4 shrink-0" />
+                          ) : topStatus.icon === "input" ? (
+                            <MessageCircleQuestionIcon aria-hidden className="size-4 shrink-0" />
+                          ) : topStatus.icon === "request" ? (
+                            <UserRoundIcon aria-hidden className="size-4 shrink-0" />
+                          ) : topStatus.icon === "approval" ? (
+                            <ShieldQuestionIcon aria-hidden className="size-4 shrink-0" />
+                          ) : topStatus.icon === "failed" ? (
+                            <CircleAlertIcon aria-hidden className="size-4 shrink-0" />
+                          ) : topStatus.icon === "done" ? (
+                            <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
                           ) : null}
                           {/* Not a live region: a collapsed sidebar is inert, so
                             BackgroundThreadAnnouncer and the open thread's
@@ -1435,12 +1458,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               )}
               {props.sweepAction !== null ? dragDestination : null}
             </div>
-            <div
-              className={cn(
-                "mt-1 flex min-w-0 items-center gap-1.5",
-                isPivotRow && !isRenaming && "hidden",
-              )}
-            >
+            <div className="mt-1 flex min-w-0 items-center gap-1.5">
               {title}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">
@@ -1460,12 +1478,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               className={cn(
                 "mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs",
                 metaLineEmpty && "redesign:hidden",
-                isPivotRow && props.project && "pl-5.5",
               )}
             >
-              {props.pivotSummary ? (
-                props.pivotSummary
-              ) : thread.branch ? (
+              {thread.branch ? (
                 <>
                   <ThreadWorktreeIndicator thread={thread} />
                   <span className="flex min-w-0 flex-1 text-muted-foreground/40 redesign:text-inherit">

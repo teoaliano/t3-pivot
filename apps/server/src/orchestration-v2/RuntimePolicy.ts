@@ -14,8 +14,6 @@ import * as Schema from "effect/Schema";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProjectStore from "./ProjectStore.ts";
-import * as ThreadToolRestrictions from "./ThreadToolRestrictions.ts";
-import * as ThreadWriteAccess from "./ThreadWriteAccess.ts";
 
 export class RuntimePolicyResolveError extends Schema.TaggedError<RuntimePolicyResolveError>()(
   "RuntimePolicyResolveError",
@@ -89,32 +87,9 @@ export const layerFromProjectStore: Layer.Layer<
           instance === undefined
             ? undefined
             : (yield* instance.snapshot.getSnapshot).supportedRuntimeModes;
-        const loadProject = projects.get(input.thread.projectId).pipe(
-          Effect.mapError(
-            (cause) =>
-              new RuntimePolicyResolveError({
-                projectId: input.thread.projectId,
-                providerInstanceId: input.modelSelection.instanceId,
-                cause,
-              }),
-          ),
-          Effect.flatMap(
-            Option.match({
-              onNone: () =>
-                Effect.fail(
-                  new RuntimePolicyResolveError({
-                    projectId: input.thread.projectId,
-                    providerInstanceId: input.modelSelection.instanceId,
-                    cause: "Project not found.",
-                  }),
-                ),
-              onSome: (project) => Effect.succeed(project),
-            }),
-          ),
-        );
-        const writeScope = yield* (yield* ThreadWriteAccess.ThreadWriteAccess)
-          .scopeFor(input.thread)
-          .pipe(
+        const cwd =
+          input.thread.worktreePath ??
+          (yield* projects.get(input.thread.projectId).pipe(
             Effect.mapError(
               (cause) =>
                 new RuntimePolicyResolveError({
@@ -123,46 +98,24 @@ export const layerFromProjectStore: Layer.Layer<
                   cause,
                 }),
             ),
-          );
-        const cwd =
-          writeScope?.cwd ?? input.thread.worktreePath ?? (yield* loadProject).workspaceRoot;
-        const withoutForgeMerge =
-          yield* (yield* ThreadToolRestrictions.ThreadToolRestrictions).withoutForgeMerge(
-            input.thread,
-          );
-        // A scoped thread names the project it works on separately, so its instructions can
-        // point at the checkout even when it runs elsewhere.
-        const project =
-          writeScope === null
-            ? undefined
-            : {
-                projectId: input.thread.projectId,
-                workspaceRoot: (yield* loadProject).workspaceRoot,
-              };
+            Effect.flatMap(
+              Option.match({
+                onNone: () =>
+                  Effect.fail(
+                    new RuntimePolicyResolveError({
+                      projectId: input.thread.projectId,
+                      providerInstanceId: input.modelSelection.instanceId,
+                      cause: "Project not found.",
+                    }),
+                  ),
+                onSome: (project) => Effect.succeed(project.workspaceRoot),
+              }),
+            ),
+          ));
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
           interactionMode: input.thread.interactionMode,
           cwd,
-          ...(project === undefined ? {} : { project }),
-          ...(withoutForgeMerge ? { withoutForgeMerge } : {}),
-          // Reads stay open everywhere; the sandbox only confines writes to the scope.
-          ...(writeScope === null
-            ? {}
-            : {
-                // With nothing to write, the sandbox is read-only: a workspace-write sandbox
-                // would still make the cwd writable.
-                sandboxPolicy:
-                  writeScope.writableRoots.length === 0
-                    ? { type: "readOnly", networkAccess: true }
-                    : {
-                        type: "workspaceWrite",
-                        writableRoots: [...writeScope.writableRoots],
-                        networkAccess: true,
-                        excludeSlashTmp: true,
-                        excludeTmpdirEnvVar: true,
-                      },
-                writableFiles: [...writeScope.writableFiles],
-              }),
         });
       }),
     });

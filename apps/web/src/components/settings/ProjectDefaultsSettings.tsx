@@ -2,13 +2,11 @@ import {
   DEFAULT_SERVER_SETTINGS,
   type ModelSelection,
   type ProviderInstanceId,
-  type TeammateModelEntry,
   type WorktreeSubmodules,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { useNavigate } from "@tanstack/react-router";
-import { PlusIcon, Trash2Icon } from "lucide-react";
 
 import { mergeEnvironmentSettings } from "../../hooks/useSettings";
 import {
@@ -25,31 +23,14 @@ import { useEnvironmentProviders, useEnvironments } from "../../state/environmen
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { resolveEnvModeLabel, WORKTREE_SUBMODULES_LABELS } from "../BranchToolbar.logic";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
-import { PIVOT_DRIVERS, pivotDefaultModel } from "../pivot/pivotModel.logic";
 import { runtimeModeConfig, runtimeModeOptions } from "../chat/runtimeModeConfig";
 import { PULL_REQUEST_MERGE_METHOD_LABELS } from "../pullRequest/pullRequestDetail.logic";
 import { TraitsPicker } from "../chat/TraitsPicker";
-import { Button } from "../ui/button";
-import { DraftInput } from "../ui/draft-input";
-import {
-  NumberField,
-  NumberFieldDecrement,
-  NumberFieldGroup,
-  NumberFieldIncrement,
-  NumberFieldInput,
-} from "../ui/number-field";
-import { Radio, RadioGroup } from "../ui/radio-group";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
 import { Switch } from "../ui/switch";
 import type { ProjectSettingsCategory } from "./ProjectSettingsPanel";
 import { searchableSetting } from "./settingsSearch";
-import {
-  addTeammateModel,
-  defaultTeammateModelIndex,
-  renameTeammateModel,
-  TEAMMATE_KIND_LABELS,
-} from "./teammateModels.logic";
 import { useSettingsScope } from "./SettingsScopeContext";
 import {
   SETTINGS_PICKER_TRIGGER_CLASSNAME,
@@ -105,10 +86,6 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   );
   const activeEntry = entries.find((entry) => entry.instanceId === selection?.instanceId);
   const mixedModel = useScopedSettingsMixed(["defaultModelSelection"]);
-  const mixedPivotModel = useScopedSettingsMixed(["pivotModelSelection"]);
-  const mixedTeammateModels = useScopedSettingsMixed(["teammateModels"]);
-  const mixedTeammateKindModels = useScopedSettingsMixed(["teammateKindModelSelections"]);
-  const pivotEntries = entries.filter((entry) => PIVOT_DRIVERS.has(entry.driverKind));
   const mixedPermissions = useScopedSettingsMixed(["defaultRuntimeMode"]);
   const PermissionIcon = runtimeModeConfig[settings.defaultRuntimeMode].icon;
   const mixedWorkspace = useScopedSettingsMixed(["defaultThreadEnvMode"]);
@@ -158,85 +135,6 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
       return;
     }
     updateSettings({ defaultModelSelection: value });
-  };
-
-  const setPivotModel = (value: ModelSelection | null) => {
-    const reason = value ? modelDisabledReason(value.instanceId, value.model) : null;
-    if (reason) {
-      toastManager.add({ type: "error", title: "Pivot model not saved", description: reason });
-      return;
-    }
-    updateSettings({ pivotModelSelection: value });
-  };
-
-  const teammateModels = settings.teammateModels;
-  const setTeammateModels = (next: readonly TeammateModelEntry[]) =>
-    updateSettings({ teammateModels: next });
-  const setTeammateModel = (index: number, value: ModelSelection) => {
-    const reason = modelDisabledReason(value.instanceId, value.model);
-    if (reason) {
-      toastManager.add({ type: "error", title: "Teammate model not saved", description: reason });
-      return;
-    }
-    setTeammateModels(
-      teammateModels.map((entry, at) =>
-        at === index ? { ...entry, modelSelection: value } : entry,
-      ),
-    );
-  };
-
-  /** A model and its effort, for the rows that pick one. */
-  const modelControl = (
-    value: ModelSelection,
-    instanceEntries: typeof entries,
-    mixed: boolean,
-    onChange: (value: ModelSelection) => void,
-  ) => {
-    const entry = instanceEntries.find((candidate) => candidate.instanceId === value.instanceId);
-    return (
-      <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
-        <ProviderModelPicker
-          environmentId={representative?.environmentId ?? null}
-          activeInstanceId={value.instanceId}
-          model={value.model}
-          lockedProvider={null}
-          instanceEntries={instanceEntries}
-          modelOptionsByInstance={getCustomModelOptionsByInstance(
-            settings,
-            providers,
-            value.instanceId,
-            value.model,
-          )}
-          triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-          {...(mixed ? { triggerLabel: "Mixed" } : {})}
-          getModelDisabledReason={modelDisabledReason}
-          onOpenProviderSetup={(instanceId) => {
-            if (representative)
-              void navigate({
-                to: "/settings/providers",
-                search: { environmentId: representative.environmentId, instanceId },
-              });
-          }}
-          onInstanceModelChange={(instanceId, model) =>
-            onChange(createModelSelection(instanceId, model))
-          }
-        />
-        {!mixed && entry ? (
-          <TraitsPicker
-            provider={entry.driverKind}
-            models={entry.models}
-            model={value.model}
-            modelOptions={value.options ?? []}
-            allowPromptInjectedEffort={false}
-            planModeEnabled={settings.planModeEnabled}
-            triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-            onModelOptionsChange={(options) =>
-              onChange(createModelSelection(value.instanceId, value.model, options))
-            }
-          />
-        ) : null}
-      </div>
-    );
   };
 
   const modelRow = (
@@ -306,188 +204,6 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
       }
     />
   );
-  const pivotSelection = pivotDefaultModel(settings, null, entries);
-  const pivotModelRow = (
-    <SettingsRow
-      serverScoped
-      settingKeys={["pivotModelSelection"]}
-      mixed={mixedPivotModel}
-      id="pivot-model"
-      title="Pivot model"
-      description={
-        isProjectScope
-          ? "Model new Pivots in this project run on."
-          : "Model new Pivots run on. Projects can override it."
-      }
-      status={
-        unavailable || mixedPivotModel || settings.pivotModelSelection !== null
-          ? undefined
-          : "Same as new threads"
-      }
-      resetAction={
-        settings.pivotModelSelection !== null ? (
-          <SettingResetButton label="Pivot model" onClick={() => setPivotModel(null)} />
-        ) : null
-      }
-      control={
-        pivotSelection ? (
-          modelControl(pivotSelection, pivotEntries, mixedPivotModel, setPivotModel)
-        ) : (
-          <span className="text-sm text-muted-foreground">No providers available</span>
-        )
-      }
-    />
-  );
-  const defaultTeammateIndex = defaultTeammateModelIndex(teammateModels);
-  const teammateKindModels = settings.teammateKindModelSelections;
-  const setTeammateKindModel = (
-    kind: keyof typeof TEAMMATE_KIND_LABELS,
-    value: ModelSelection | null,
-  ) => {
-    const reason = value ? modelDisabledReason(value.instanceId, value.model) : null;
-    if (reason) {
-      toastManager.add({ type: "error", title: "Teammate model not saved", description: reason });
-      return;
-    }
-    updateSettings({ teammateKindModelSelections: { ...teammateKindModels, [kind]: value } });
-  };
-  // Without a kind model a dispatch runs the default entry, so that is what the row shows.
-  const teammateKindFallback = teammateModels[defaultTeammateIndex]?.modelSelection ?? selection;
-  const teammateModelsRow = (
-    <SettingsRow
-      serverScoped
-      settingKeys={["teammateModels"]}
-      mixed={mixedTeammateModels}
-      id="teammate-models"
-      title="Teammate models"
-      description={
-        isProjectScope
-          ? "Models this project's Pivot starts teammates on. It reads each description to pick one, and uses the default when none fits."
-          : "Models a Pivot starts teammates on. It reads each description to pick one, and uses the default when none fits. A project's list replaces this one."
-      }
-      status={
-        unavailable || mixedTeammateModels || teammateModels.length > 0
-          ? undefined
-          : "Project default model"
-      }
-      resetAction={
-        teammateModels.length > 0 ? (
-          <SettingResetButton label="teammate models" onClick={() => setTeammateModels([])} />
-        ) : null
-      }
-      control={
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={selection === null || mixedTeammateModels}
-          onClick={() => {
-            if (selection) setTeammateModels(addTeammateModel(teammateModels, selection));
-          }}
-        >
-          <PlusIcon />
-          Add model
-        </Button>
-      }
-    >
-      {!mixedTeammateKindModels
-        ? Object.entries(TEAMMATE_KIND_LABELS).map(([kind, label]) => {
-            const kindModel = teammateKindModels[kind as keyof typeof TEAMMATE_KIND_LABELS];
-            const shown = kindModel ?? teammateKindFallback;
-            return (
-              <div
-                key={kind}
-                className="mb-2 flex flex-wrap items-center gap-1.5 rounded-lg border border-border/70 p-2"
-              >
-                <span className="w-36 text-sm">{label}</span>
-                <div className="min-w-0 flex-1">
-                  {shown ? (
-                    modelControl(shown, entries, false, (value) =>
-                      setTeammateKindModel(kind as keyof typeof TEAMMATE_KIND_LABELS, value),
-                    )
-                  ) : (
-                    <span className="text-sm text-muted-foreground">No providers available</span>
-                  )}
-                </div>
-                {kindModel === null ? (
-                  <span className="text-xs text-muted-foreground">Default</span>
-                ) : (
-                  <SettingResetButton
-                    label={`${label} model`}
-                    onClick={() =>
-                      setTeammateKindModel(kind as keyof typeof TEAMMATE_KIND_LABELS, null)
-                    }
-                  />
-                )}
-              </div>
-            );
-          })
-        : null}
-      {!mixedTeammateModels && teammateModels.length > 0 ? (
-        <RadioGroup
-          aria-label="Default teammate model"
-          value={String(defaultTeammateIndex)}
-          onValueChange={(value) =>
-            setTeammateModels(
-              teammateModels.map((entry, at) => ({ ...entry, isDefault: String(at) === value })),
-            )
-          }
-          className="mb-2"
-        >
-          {teammateModels.map((entry, index) => (
-            <div
-              // Names change as they are edited, so position is the stable key.
-              // oxlint-disable-next-line react/no-array-index-key
-              key={index}
-              className="flex flex-col gap-1.5 rounded-lg border border-border/70 p-2"
-            >
-              <div className="flex flex-wrap items-center gap-1.5">
-                <div className="w-36">
-                  <DraftInput
-                    size="sm"
-                    aria-label="Teammate model name"
-                    value={entry.name}
-                    onCommit={(name) =>
-                      setTeammateModels(renameTeammateModel(teammateModels, index, name))
-                    }
-                  />
-                </div>
-                <div className="min-w-0 flex-1">
-                  {modelControl(entry.modelSelection, entries, false, (value) =>
-                    setTeammateModel(index, value),
-                  )}
-                </div>
-                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Radio value={String(index)} />
-                  Default
-                </label>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={`Remove ${entry.name}`}
-                  onClick={() => setTeammateModels(teammateModels.filter((_, at) => at !== index))}
-                >
-                  <Trash2Icon />
-                </Button>
-              </div>
-              <DraftInput
-                size="sm"
-                aria-label={`When to use ${entry.name}`}
-                placeholder="When to use it, e.g. research and audits, small fixes, complex coding"
-                value={entry.description}
-                onCommit={(description) =>
-                  setTeammateModels(
-                    teammateModels.map((candidate, at) =>
-                      at === index ? { ...candidate, description: description.trim() } : candidate,
-                    ),
-                  )
-                }
-              />
-            </div>
-          ))}
-        </RadioGroup>
-      ) : null}
-    </SettingsRow>
-  );
   const workspaceRow = (
     <SettingsRow
       serverScoped
@@ -544,61 +260,11 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
       {category === "project" ? (
         <>
           {modelRow}
-          {pivotModelRow}
-          {teammateModelsRow}
           {workspaceRow}
         </>
       ) : category === "general" ? (
         <>
           {modelRow}
-          {pivotModelRow}
-          {teammateModelsRow}
-          {isProjectScope ? null : (
-            <SettingsRow
-              serverScoped
-              settingKeys={["pivotMaxTeammates"]}
-              id="pivot-max-teammates"
-              title="Teammates at once"
-              description="The most teammates a Pivot runs at a time; it queues the rest. Small changes it makes inline don't count."
-              status={
-                settings.pivotMaxTeammates === null ? "Auto, from this machine's memory" : undefined
-              }
-              resetAction={
-                settings.pivotMaxTeammates !== null ? (
-                  <SettingResetButton
-                    label="Teammates at once"
-                    onClick={() => updateSettings({ pivotMaxTeammates: null })}
-                  />
-                ) : null
-              }
-              control={
-                <NumberField
-                  value={settings.pivotMaxTeammates}
-                  min={1}
-                  max={20}
-                  step={1}
-                  size="sm"
-                  className="w-auto"
-                  onValueCommitted={(next) =>
-                    updateSettings({
-                      pivotMaxTeammates:
-                        next === null ? null : Math.min(20, Math.max(1, Math.round(next))),
-                    })
-                  }
-                >
-                  <NumberFieldGroup>
-                    <NumberFieldDecrement aria-label="Fewer teammates at once" />
-                    <NumberFieldInput
-                      aria-label="Teammates at once"
-                      placeholder="Auto"
-                      className="w-12 text-right"
-                    />
-                    <NumberFieldIncrement aria-label="More teammates at once" />
-                  </NumberFieldGroup>
-                </NumberField>
-              }
-            />
-          )}
           <SettingsRow
             serverScoped
             settingKeys={["defaultRuntimeMode"]}

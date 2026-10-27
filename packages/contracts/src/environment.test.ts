@@ -33,14 +33,4 @@ describe("ExecutionEnvironmentDescriptor", () => {
       ).toBeUndefined();
     }
   });
-
-  it("treats a missing pivotHost capability as unable to host teammates", () => {
-    expect(decodeDescriptor(descriptor).capabilities.pivotHost).toBeUndefined();
-    expect(
-      decodeDescriptor({
-        ...descriptor,
-        capabilities: { ...descriptor.capabilities, pivotHost: true },
-      }).capabilities.pivotHost,
-    ).toBe(true);
-  });
 });

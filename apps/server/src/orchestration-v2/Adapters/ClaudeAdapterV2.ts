@@ -31,7 +31,6 @@ import {
   getSubagentMessages,
   query,
   resolveSettings as resolveClaudeSettings,
-  type HookCallbackMatcher,
   type Options as ClaudeQueryOptions,
   type PermissionMode,
   type PermissionResult,
@@ -139,7 +138,6 @@ import {
   type CompiledClaudeModelSelection,
 } from "../../claudeModelOptions.ts";
 import * as ServerConfig from "../../config.ts";
-import { forgeMergeRefusal } from "../ShellForgeGuard.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { spawnAndCollect } from "@t3tools/provider-core/server/snapshotProbe";
@@ -169,10 +167,7 @@ import {
 import type { ManagedServerProvider } from "@t3tools/provider-core/server/snapshot";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
-import {
-  buildRuntimeInstructions,
-  type RuntimeProject,
-} from "@t3tools/provider-core/server/runtimeInstructions";
+import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import {
   mcpToolPresentation,
   normalizeMcpText,
@@ -1414,8 +1409,6 @@ export function makeClaudeQueryOptions(input: {
   readonly resumeSessionAt?: string;
   readonly cwd: string | null;
   readonly attachmentsDir?: string;
-  /** A Pivot's project, named in the system prompt so the Pivot can find its checkout. */
-  readonly project?: RuntimeProject | undefined;
   readonly settings?: ClaudeSettings;
   readonly sdkSettings?: string | ClaudeSdkSettings;
   readonly environment?: NodeJS.ProcessEnv;
@@ -1428,8 +1421,6 @@ export function makeClaudeQueryOptions(input: {
   readonly onUserDialog?: ClaudeQueryOptions["onUserDialog"];
   readonly supportedDialogKinds?: ClaudeQueryOptions["supportedDialogKinds"];
   readonly allowDangerouslySkipPermissions?: boolean;
-  /** Set for a teammate, whose shell may not merge or close PRs. */
-  readonly withoutForgeMerge?: boolean | undefined;
   readonly appendSystemPromptFileText?: string;
   // Flag settings, because a user's settings.json env beats the process env in Claude Code.
   readonly toolSearchOverride?: "true";
@@ -1529,14 +1520,11 @@ export function makeClaudeQueryOptions(input: {
       : {}),
     ...(input.environment === undefined ? {} : { env: input.environment }),
     ...(input.mcpServers === undefined ? {} : { mcpServers: input.mcpServers }),
-    ...(input.withoutForgeMerge === true
-      ? { hooks: { PreToolUse: [claudeForgeMergeHook()] } }
-      : {}),
     systemPrompt: {
       type: "preset" as const,
       preset: "claude_code" as const,
       append: [
-        buildRuntimeInstructions({ harness: "Claude Code", project: input.project }) +
+        buildRuntimeInstructions({ harness: "Claude Code" }) +
           (input.mcpServers === undefined
             ? ""
             : T3_CODE_ORCHESTRATION_INSTRUCTIONS + CLAUDE_BACKGROUND_WAIT_INSTRUCTIONS),
@@ -1590,32 +1578,6 @@ const readClaudeAppendSystemPromptFile = Effect.fnUntraced(function* (input: {
       Effect.mapError((cause) => new ClaudeAppendSystemPromptFileError({ path: filePath, cause })),
     );
 });
-
-// A PreToolUse hook runs in every permission mode, bypassPermissions included, where a
-// permission rule or canUseTool callback would never be asked.
-function claudeForgeMergeHook(): HookCallbackMatcher {
-  return {
-    matcher: "Bash",
-    hooks: [
-      async (hookInput) => {
-        const command =
-          hookInput.hook_event_name === "PreToolUse"
-            ? (hookInput.tool_input as { command?: unknown } | null)?.command
-            : undefined;
-        const refusal = typeof command === "string" ? forgeMergeRefusal(command) : null;
-        return refusal === null
-          ? {}
-          : {
-              hookSpecificOutput: {
-                hookEventName: "PreToolUse",
-                permissionDecision: "deny",
-                permissionDecisionReason: refusal,
-              },
-            };
-      },
-    ],
-  };
-}
 
 export const CLAUDE_T3_MCP_TOOL_WILDCARD = "mcp__t3-code__*";
 
@@ -2480,49 +2442,10 @@ const CLAUDE_BYPASS_FULLY_AVAILABLE: ClaudeBypassAvailability = {
   autoDisabled: false,
 };
 
-// The shell and the tools that manage its background commands.
-const CLAUDE_SHELL_TOOLS = ["Bash", "TaskOutput", "TaskStop"] as const;
-// Native subagents run inside the session under its permissions, so a scoped agent's
-// subagents read and run commands but edit nothing it couldn't.
-const CLAUDE_SUBAGENT_TOOLS = ["Agent"] as const;
-
-// A file-scoped write policy gives built-in reads, the shell, and edits to the listed
-// files only. Claude has no OS sandbox T3 can rely on, so the shell itself is not
-// confined: the edit rules bind Edit and Write, and the agent's instructions bind Bash.
-// The rule form is an absolute path with a `//` prefix, e.g. `Edit(//home/me/x.md)`.
-function claudeFileScopedQueryPolicy(
-  writableFiles: ReadonlyArray<string>,
-): ClaudeRuntimeQueryPolicy {
-  const editRules = writableFiles.flatMap((file) => {
-    const rule = `//${file.replace(/^\/+/, "")}`;
-    return [`Edit(${rule})`, `Write(${rule})`];
-  });
-  return {
-    permissionMode: "dontAsk",
-    tools: [
-      ...CLAUDE_READ_ONLY_ALLOWED_TOOLS,
-      ...CLAUDE_SHELL_TOOLS,
-      ...CLAUDE_SUBAGENT_TOOLS,
-      "Edit",
-      "Write",
-    ],
-    allowedTools: [
-      ...CLAUDE_READ_ONLY_ALLOWED_TOOLS,
-      ...CLAUDE_SHELL_TOOLS,
-      ...CLAUDE_SUBAGENT_TOOLS,
-      ...editRules,
-    ],
-    installPermissionCallback: false,
-  };
-}
-
 export function claudeRuntimeQueryPolicyForRuntimePolicy(
   runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
   availability: ClaudeBypassAvailability = CLAUDE_BYPASS_FULLY_AVAILABLE,
 ): ClaudeRuntimeQueryPolicy {
-  if (runtimePolicy.writableFiles !== undefined) {
-    return claudeFileScopedQueryPolicy(runtimePolicy.writableFiles);
-  }
   const requestedMode = permissionModeForClaudeRuntimePolicy(runtimePolicy);
   const downgraded = requestedMode === "bypassPermissions" && availability.bypassDisabled;
   const permissionMode = downgraded
@@ -9809,7 +9732,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             resume: shouldResume,
             ...(resumeSessionAt === undefined ? {} : { resumeSessionAt }),
             cwd: turnInput.runtimePolicy.cwd,
-            project: turnInput.runtimePolicy.project,
             attachmentsDir,
             settings: adapterOptions.settings,
             environment: claudeQueryEnvironment(
@@ -9835,7 +9757,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             canUseTool,
             onUserDialog,
             supportedDialogKinds: ["resume_return"],
-            withoutForgeMerge: turnInput.runtimePolicy.withoutForgeMerge,
             ...(appendSystemPromptFileText === undefined ? {} : { appendSystemPromptFileText }),
             ...(toolSearchOverride === undefined ? {} : { toolSearchOverride }),
           });

@@ -3,7 +3,6 @@ import {
   OrchestrationV2AppThreadJson,
   OrchestrationV2ProviderSessionJson,
 } from "@t3tools/contracts";
-import { PIVOT_WORKSPACE_DIRNAME } from "./pivot/pivotBrief.ts";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type {
@@ -786,9 +785,6 @@ const make = Effect.gen(function* () {
       yield* Effect.gen(function* () {
         if (!(yield* fs.exists(worktreePath))) return;
         if (deleted && !settings.worktreeOnDelete) return keep("no rules apply");
-        // The Pivot keeps one workspace per project for inline tasks and sets it up once.
-        if (path.basename(worktreePath) === PIVOT_WORKSPACE_DIRNAME)
-          return keep("it is the Pivot's workspace");
         if (members.length > 1 && worktreeOwner(members) === undefined)
           return keep(`shared by ${members.length} threads`);
         if (project === undefined) return keep("project is unavailable");

@@ -234,8 +234,7 @@ const allocatedBytes = (fs: FileSystem.FileSystem, file: string) =>
     ),
   );
 
-const makeCleanupFixture = (
-  worktreeName: string,
+const cleanupFixture = (
   storageCleanup: StorageCleanupSettings = {
     ...DEFAULT_SERVER_SETTINGS.storageCleanup,
     worktreeAfterDays: 8,
@@ -257,7 +256,7 @@ const makeCleanupFixture = (
     yield* command(repo, ["add", "."]);
     yield* command(repo, ["commit", "-m", "initial"]);
     yield* fs.makeDirectory(config.worktreesDir, { recursive: true });
-    const worktree = `${config.worktreesDir}/${worktreeName}`;
+    const worktree = `${config.worktreesDir}/feature`;
     yield* command(repo, ["worktree", "add", "-b", "feature", worktree]);
     let settings: import("@t3tools/contracts").ServerSettings = {
       ...DEFAULT_SERVER_SETTINGS,
@@ -449,8 +448,6 @@ const makeCleanupFixture = (
       },
     };
   });
-const cleanupFixture = (storageCleanup?: StorageCleanupSettings) =>
-  makeCleanupFixture("feature", storageCleanup);
 const pausedMeasurementFixture = (storageCleanup?: StorageCleanupSettings) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -1349,30 +1346,6 @@ describe("storage cleanup reports and local file policies", () => {
         expect(yield* fs.readFileString(`${outside}/external`)).toBe("must not count");
         expect(yield* fs.readFileString(`${outside}/store-file`)).toBe("shared ".repeat(10_000));
         expect(yield* fs.exists(worktree)).toBe(false);
-      }),
-    ),
-  );
-  it.live("keeps the Pivot's workspace, which it sets up once and reuses", () =>
-    runCleanupTest(
-      Effect.gen(function* () {
-        const { service, fs, worktree } = yield* makeCleanupFixture("pivot-inline");
-        const report = yield* service.runNow;
-        expect(report.entries[0]).toMatchObject({
-          outcome: "kept",
-          reason: "It is the Pivot's workspace",
-        });
-        expect(yield* fs.exists(worktree)).toBe(true);
-      }),
-    ),
-  );
-  it.live("keeps a Pivot home, which a Pivot runs in without a branch", () =>
-    runCleanupTest(
-      Effect.gen(function* () {
-        const { service, fs, worktree, setThreads } = yield* makeCleanupFixture("pivot-home");
-        setThreads([shell({ branch: null, worktreePath: worktree })]);
-        const report = yield* service.runNow;
-        expect(report.entries[0]).toMatchObject({ outcome: "kept" });
-        expect(yield* fs.exists(worktree)).toBe(true);
       }),
     ),
   );

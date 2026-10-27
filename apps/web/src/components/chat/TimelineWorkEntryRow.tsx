@@ -182,12 +182,6 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
     workEntry.projectedItem?.item.type === "notification"
       ? notificationChildThreadId(workEntry.projectedItem.item.source)
       : undefined;
-  // A Pivot wake about one teammate opens that teammate; other notifications open a subagent.
-  const notifiedThreadNoun =
-    workEntry.projectedItem?.item.type === "notification" &&
-    workEntry.projectedItem.item.source.kind === "teammate"
-      ? "teammate"
-      : "subagent";
   const groupView = use(WorkGroupViewCtx);
   const [expanded, setExpanded] = useState(
     () => groupView?.state.expandedEntries.has(workEntry.id) ?? false,
@@ -472,14 +466,14 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           ) : null}
           {notifiedSubagentThreadId ? (
             <InlineButton
-              aria-label={`Open ${notifiedThreadNoun} thread`}
+              aria-label="Open subagent thread"
               onClick={(event) => {
                 event.stopPropagation();
                 ctx.onOpenThread(notifiedSubagentThreadId);
               }}
               onKeyDown={stopRowToggle}
             >
-              Open {notifiedThreadNoun}
+              Open subagent
             </InlineButton>
           ) : null}
           {showFailedIndicator &&

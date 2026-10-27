@@ -83,13 +83,6 @@ import {
 } from "../../lib/composerContextRecords";
 import { environmentServerConfigsAtom } from "../../state/server";
 import { threadEnvironment } from "../../state/threads";
-import { serverEnvironment } from "../../state/server";
-import { usePivotState } from "../../state/pivot";
-import { readLocalApi } from "../../localApi";
-import { takeoverSummary } from "@t3tools/client-runtime/pivot-state";
-import { decideNewPivot, replacePivotPrompt } from "../pivot/newPivot.logic";
-import { usePivotViewStore } from "../pivot/pivotViewStore";
-import { useAtomCommand } from "../../state/use-atom-command";
 import { runMobileComposerTransition } from "./draftHeroTransition";
 import { useClientSettingsHydrated, useEnvironmentSettings } from "../../hooks/useSettings";
 import { environmentPresentations } from "../../state/presentation";
@@ -339,9 +332,6 @@ export function useComposerSend(input: ComposerSendInput) {
   const startThreadTurn = useOrchestrationCommand(threadEnvironment.startTurn, {
     reportFailure: false,
   });
-  // A New Pivot composer's first send: the Pivot is created on the draft's environment.
-  const createPivot = useAtomCommand(serverEnvironment.createPivot, { reportFailure: false });
-  const pivotState = usePivotState(draftThread?.environmentId ?? null);
   const uploadThreadFeedback = useOrchestrationCommand(threadEnvironment.uploadFeedback, {
     reportFailure: false,
   });
@@ -876,25 +866,6 @@ export function useComposerSend(input: ComposerSendInput) {
       multipleTargets.push(resolved);
     }
 
-    // A New Pivot draft's first send creates its Pivot, reserving the draft's thread id. The
-    // takeover question comes first, so declining sends nothing.
-    const pivotDraft = draftThread?.pivot === true && isLocalDraftThread ? draftThread : null;
-    const pivotTakeover =
-      pivotDraft === null || pivotState === null
-        ? null
-        : takeoverSummary(pivotState, pivotDraft.projectId);
-    const pivotDecision =
-      pivotDraft === null
-        ? null
-        : await decideNewPivot(
-            pivotTakeover,
-            async () =>
-              (await readLocalApi()?.dialogs.confirm(
-                replacePivotPrompt(activeProject.title, pivotTakeover!),
-              )) ?? false,
-          );
-    if (pivotDecision === "cancel") return;
-
     sendInFlightRef.current = true;
     const sendGeneration = ++composerSendGenerationRef.current;
     const attachmentCapabilitiesBeforeUpload = readLiveAttachmentCapabilities();
@@ -1257,30 +1228,9 @@ export function useComposerSend(input: ComposerSendInput) {
 
     let backgroundDraftOpened = false;
     let turnStartSucceeded = false;
-    if (failure === null && turnAttachmentsResult._tag === "Success" && pivotDraft !== null) {
-      // The Pivot is created on the draft's reserved thread id, so the turn below and the
-      // draft's promotion to the Pivot's route work as they do for a new thread.
-      const created = await createPivot({
-        environmentId: pivotDraft.environmentId,
-        input: {
-          projectId: pivotDraft.projectId,
-          modelSelection: ctxSelectedModelSelection,
-          takeover: pivotDecision === "replace",
-          threadId: threadIdForSend,
-        },
-      });
-      if (created._tag === "Success") {
-        usePivotViewStore
-          .getState()
-          .setMode(scopeThreadRef(pivotDraft.environmentId, created.value.threadId), "chat");
-      } else {
-        failure = created;
-      }
-    }
-
     if (failure === null && turnAttachmentsResult._tag === "Success") {
       const bootstrap =
-        pivotDraft === null && (isLocalDraftThread || baseBranchForWorktree)
+        isLocalDraftThread || baseBranchForWorktree
           ? {
               ...(isLocalDraftThread
                 ? {
@@ -1309,7 +1259,7 @@ export function useComposerSend(input: ComposerSendInput) {
             }
           : undefined;
       const backgroundThreadRef =
-        submissionIntent === "background" && isLocalDraftThread && pivotDraft === null
+        submissionIntent === "background" && isLocalDraftThread
           ? scopeThreadRef(environmentId, threadIdForSend)
           : null;
       if (backgroundThreadRef) beginBackgroundDraftSubmissionByRef(backgroundThreadRef);
@@ -1335,8 +1285,7 @@ export function useComposerSend(input: ComposerSendInput) {
           },
           modelSelection: ctxSelectedModelSelection,
           titleSeed: title,
-          // A Pivot always runs full-access, as createPivotThread sets it.
-          runtimeMode: pivotDraft === null ? runtimeMode : "full-access",
+          runtimeMode,
           interactionMode: sendInteractionMode,
           dispatchMode: turnDispatchMode,
           ...(bootstrap ? { bootstrap } : {}),

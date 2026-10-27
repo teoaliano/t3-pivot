@@ -45,14 +45,4 @@ describe("buildRuntimeInstructions", () => {
     assert.include(instructions, "instead of running the dev command in your own shell");
     assert.include(instructions, "Use the port it returns");
   });
-
-  it("names a Pivot's project id and checkout, and omits them otherwise", () => {
-    const project = { projectId: "project-1", workspaceRoot: "/repos/checkout" };
-    const withProject = buildRuntimeInstructions({ harness: "Codex", project });
-    assert.include(
-      withProject,
-      "Your project's id is project-1 and its checkout is /repos/checkout.",
-    );
-    assert.notInclude(buildRuntimeInstructions({ harness: "Codex" }), "<project_info>");
-  });
 });

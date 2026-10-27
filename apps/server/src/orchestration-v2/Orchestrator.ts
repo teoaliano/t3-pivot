@@ -419,8 +419,6 @@ export interface OrchestratorV2Shape {
     readonly eventType?: OrchestrationV2DomainEvent["type"];
   }) => Stream.Stream<OrchestrationV2StoredEvent, OrchestratorV2Error>;
   readonly streamDomainEvents: Stream.Stream<OrchestrationV2DomainEvent, OrchestratorV2Error>;
-  /** The live tail of `streamDomainEvents`, keeping the command each event came from. */
-  readonly streamLiveStoredEvents: Stream.Stream<OrchestrationV2StoredEvent, OrchestratorV2Error>;
 }
 
 export class OrchestratorV2 extends Context.Service<OrchestratorV2, OrchestratorV2Shape>()(
@@ -5286,40 +5284,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: "Notifications must be server- or provider-created queued messages.",
       });
     }
-    // T3 Pivot: a teammate wake joins one still queued on the thread, so changes that
-    // land before it is delivered reach the Pivot as one notice, images included.
-    if (command.notification?.source.kind === "teammate") {
-      const queuedWake = projection.runs
-        .filter((run) => run.status === "queued")
-        .map((run) => ({
-          run,
-          message: projection.messages.find((message) => message.id === run.userMessageId),
-        }))
-        .find(({ message }) => message?.notification?.source.kind === "teammate");
-      if (queuedWake?.message !== undefined) {
-        const now = yield* DateTime.now;
-        const { run, message } = queuedWake;
-        yield* emit(
-          events,
-          command,
-        )({
-          type: "message.updated",
-          threadId: command.threadId,
-          runId: run.id,
-          ...(run.rootNodeId === null ? {} : { nodeId: run.rootNodeId }),
-          providerInstanceId: run.providerInstanceId,
-          occurredAt: now,
-          payload: {
-            ...message,
-            text: command.text,
-            attachments: command.attachments,
-            notification: command.notification,
-            updatedAt: now,
-          },
-        });
-        return;
-      }
-    }
     let delegatedCompletion: OrchestrationV2ConversationMessage["delegatedCompletion"] | undefined;
     if (command.delegatedCompletion !== undefined) {
       const requestedCompletion = command.delegatedCompletion;
@@ -5362,12 +5326,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     // Route durable mailbox deliveries under the thread lock, using the live
     // session's capabilities. Never interrupt/restart a turn for a notification.
     if (
-      (delegatedCompletion !== undefined &&
-        delegatedCompletion.taskIds.every(
-          (id) => projection.subagents.find((task) => task.id === id)?.completionWake === "always",
-        )) ||
-      // T3 Pivot: a teammate wake is routed like a delegated task's result.
-      command.notification?.source.kind === "teammate"
+      delegatedCompletion !== undefined &&
+      delegatedCompletion.taskIds.every(
+        (id) => projection.subagents.find((task) => task.id === id)?.completionWake === "always",
+      )
     ) {
       const active = projection.runs.find((run) => run.status === "running");
       const providerThread = projection.providerThreads.find(
@@ -12791,12 +12753,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             }),
         ),
       ),
-    // Live tail only: eventSink.stream() with no cursor replays the whole store first.
-    streamLiveStoredEvents: Stream.unwrap(
-      eventSink
-        .latestSequence()
-        .pipe(Effect.map((latest) => eventSink.stream({ afterSequence: latest }))),
-    ).pipe(Stream.mapError((cause) => new OrchestratorDomainEventStreamError({ cause }))),
     // Start at the latest sequence; awareness needs no historical replay.
     streamDomainEvents: Stream.unwrap(
       eventSink

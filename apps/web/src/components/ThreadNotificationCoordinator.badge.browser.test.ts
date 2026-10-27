@@ -22,10 +22,6 @@ vi.mock(import("./ui/toast"), async (original) => {
   const actual = await original();
   return { ...actual, toastManager: { ...actual.toastManager, add: state.toast as never } };
 });
-vi.mock(import("../state/pivot"), async (original) => ({
-  ...(await original()),
-  usePivotState: (() => null) as never,
-}));
 vi.mock(import("../state/shell"), async (original) => {
   const actual = await original();
   return {
