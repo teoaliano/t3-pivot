@@ -191,8 +191,7 @@ export const make = Effect.gen(function* () {
     const together = present.length === 0 ? [] : yield* hashes(present);
     for (const [index, file] of present.entries()) {
       // One unreadable path fails the batch; then each is read on its own.
-      state[file] =
-        together?.[index] ?? (yield* hashes([file]))?.[0] ?? `unreadable ${status.stdout.length}`;
+      state[file] = together?.[index] ?? (yield* hashes([file]))?.[0] ?? "unreadable";
     }
     return state;
   });

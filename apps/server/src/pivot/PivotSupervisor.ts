@@ -376,14 +376,15 @@ export const make = Effect.gen(function* () {
   const advanceHandoffs = Effect.gen(function* () {
     // oxlint-disable-next-line unicorn/no-useless-spread -- settling deletes from the map mid-loop
     for (const [successor, pending] of [...handoffs]) {
+      // The deadline is checked first, so a reply only seen after it is never taken.
+      if ((yield* Clock.currentTimeMillis) - pending.askedAtMs >= HANDOFF_WAIT_MS) {
+        yield* settleHandoff(successor, pending.predecessor, null);
+        continue;
+      }
       const reply = yield* threads
         .runReply(pending.predecessor, pending.runId)
         .pipe(Effect.orElseSucceed(() => ({ type: "pending" as const })));
-      if (reply.type === "ended") {
-        yield* settleHandoff(successor, pending.predecessor, reply.text);
-      } else if ((yield* Clock.currentTimeMillis) - pending.askedAtMs >= HANDOFF_WAIT_MS) {
-        yield* settleHandoff(successor, pending.predecessor, null);
-      }
+      if (reply.type === "ended") yield* settleHandoff(successor, pending.predecessor, reply.text);
     }
   });
 

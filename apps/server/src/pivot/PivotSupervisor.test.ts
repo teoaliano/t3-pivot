@@ -750,6 +750,25 @@ describe("PivotSupervisor", () => {
       },
     );
 
+    it.effect("does not take a reply first seen after the two minutes are up", () => {
+      const { fake } = setup();
+      return Effect.gen(function* () {
+        const { pivot } = yield* running(fake);
+        const pivots = yield* PivotService.PivotService;
+        const successor = (yield* pivots.create({ projectId, modelSelection, takeover: true }))
+          .threadId;
+        yield* tick;
+        // Nothing ticked in between, so the first look at the reply comes after the wait.
+        yield* TestClock.adjust("3 minutes");
+        fake.replies.set(pivot, "Late.");
+        yield* tick;
+
+        const store = yield* PivotStore.PivotStore;
+        assert.isNull((yield* store.getPivot(pivot))?.handoff ?? null);
+        assert.include(wakesFor(fake, successor)[0]!.text, "did not write a handoff");
+      }).pipe(Effect.provide(withSupervisor(fake)));
+    });
+
     it.effect("opens the successor from the records after two minutes without a handoff", () => {
       const { fake } = setup();
       return Effect.gen(function* () {

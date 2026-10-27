@@ -137,11 +137,12 @@ Muse and Pi ignore the sandbox, so there the contract alone keeps a subagent rea
 ## Where teammates work
 
 A ship gets a fresh worktree, or takes over another ship's worktree and branch with
-`attachTo`. An attached teammate's thread is created directly on the worktree
-(`PivotThreads.startTeammate`) rather than launched, because V2's existing-worktree launch
-still runs the setup script; the ship it takes over ends, so one agent owns each worktree.
+`attachTo`. An attached teammate's thread is created directly on the worktree rather than
+launched, because V2's existing-worktree launch still runs the setup script; the ship it takes over ends, so one agent owns each worktree.
 A scout has no worktree. It starts in the project's checkout under the same empty write scope
-as a Pivot's subagents, so the limits above apply to it. On a provider that only follows the
+as a Pivot's subagents, so the limits above apply to it. The scope follows the lineage root,
+so a fork or subagent of a scout is read-only too, and a scout is recorded before its brief
+starts its first run. Hosts refuse scouts: there the checkout is someone else's. On a provider that only follows the
 instructions, the safety net is a fingerprint of the checkout's changed files, taken at
 dispatch and compared when the scout records its report: any file that changed is named in
 the report and wakes the Pivot. A scout's teardown only stops and archives its thread; it

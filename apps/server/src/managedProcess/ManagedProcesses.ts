@@ -101,6 +101,8 @@ export class ManagedProcesses extends Context.Service<
     ) => Effect.Effect<ManagedProcess, ManagedProcessServiceStartFailure>;
     /** Stops the process and waits for its reserved port to be released. */
     readonly stop: (target: ManagedProcessTarget) => Effect.Effect<void>;
+    /** Like `stop`, and says whether there was a starting or running process to stop. */
+    readonly stopIfLive: (target: ManagedProcessTarget) => Effect.Effect<boolean>;
     /**
      * Stops every process a checkout runs. Call before removing the checkout.
      * `releaseReservation` also frees its port block, for a checkout that is
@@ -602,6 +604,19 @@ export const make = Effect.fn("ManagedProcesses.make")(function* (
   const stop: ManagedProcesses["Service"]["stop"] = (target) =>
     lifecycleLock.withPermits(1)(stopUnlocked(target));
 
+  const stopIfLive: ManagedProcesses["Service"]["stopIfLive"] = Effect.fn(
+    "ManagedProcesses.stopIfLive",
+  )(function* (target) {
+    return yield* lifecycleLock.withPermits(1)(
+      Effect.gen(function* () {
+        const current = (yield* SubscriptionRef.get(state)).processes.get(processKey(target));
+        if (!current || !isLive(current)) return false;
+        yield* stopUnlocked(target);
+        return true;
+      }),
+    );
+  });
+
   const stopAllForCheckout: ManagedProcesses["Service"]["stopAllForCheckout"] = (
     checkoutPath,
     stopOptions,
@@ -878,6 +893,7 @@ export const make = Effect.fn("ManagedProcesses.make")(function* (
     service: ManagedProcesses.of({
       start,
       stop,
+      stopIfLive,
       stopAllForCheckout,
       reserve: (checkoutPath) => reserveBlock(checkoutPath, false).pipe(Effect.asVoid),
       setPinned,

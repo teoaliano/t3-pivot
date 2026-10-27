@@ -832,6 +832,21 @@ describe("ManagedProcesses", () => {
       ),
     );
 
+    it.effect("stops a live process and says so, and has nothing to stop the second time", () =>
+      withRegistry((registryPath) =>
+        Effect.gen(function* () {
+          const world = new World();
+          const { service } = yield* boot(world, registryPath);
+          yield* service.start(target("/work/app"));
+          const devServer = { checkoutPath: "/work/app", scriptId: "dev" };
+
+          expect(yield* service.stopIfLive(devServer)).toBe(true);
+          expect(yield* statusOf(service, "/work/app")).toBe("stopped");
+          expect(yield* service.stopIfLive(devServer)).toBe(false);
+        }),
+      ),
+    );
+
     it.effect("never restarts a reaped process", () =>
       withRegistry((registryPath) =>
         Effect.gen(function* () {

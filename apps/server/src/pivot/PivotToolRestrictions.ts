@@ -75,14 +75,15 @@ const writeAccess = Layer.effect(
         if (home === null) return yield* new PivotHomeMissingError({ threadId: thread.id });
         return { writableRoots: [home], writableFiles: [path.join(home, "preferences.md")] };
       }
-      // Any depth: a subagent's own subagent is still the Pivot's, or the scout's.
+      // Any depth: a subagent's own subagent is still the Pivot's. Anything descended from a
+      // scout, a fork included, would otherwise get full access in the user's checkout.
       const rootId = thread.lineage.rootThreadId;
-      const scout = (yield* store.getTeammate(thread.id))?.kind === "scout";
-      if (!scout) {
-        if (thread.lineage.relationshipToParent !== "subagent" || rootId === thread.id) return null;
-        const root = yield* store.getPivot(rootId);
-        if (root === null && (yield* store.getTeammate(rootId))?.kind !== "scout") return null;
-      }
+      const underScout = (yield* store.getTeammate(rootId))?.kind === "scout";
+      const underPivot =
+        thread.lineage.relationshipToParent === "subagent" &&
+        rootId !== thread.id &&
+        (yield* store.getPivot(rootId)) !== null;
+      if (!underScout && !underPivot) return null;
       const project = yield* projects.get(thread.projectId);
       if (Option.isNone(project)) {
         return yield* new PivotSubagentProjectMissingError({ threadId: thread.id });

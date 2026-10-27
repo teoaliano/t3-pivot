@@ -139,10 +139,12 @@ const makeHarness = (
             lastStarted = processOn(reallocate ? 11010 : 11000, target.checkoutPath);
             return lastStarted;
           }),
-        stop: (target) =>
+        stopIfLive: (target) =>
           Effect.sync(() => {
+            if (existing === null || existing.status === "stopped") return false;
             stops.push({ checkoutPath: target.checkoutPath, scriptId: target.scriptId });
-            if (existing !== null) existing = { ...existing, status: "stopped" };
+            existing = { ...existing, status: "stopped" };
+            return true;
           }),
         stopAllForCheckout: (checkoutPath, stopOptions) =>
           Effect.sync(() => {
@@ -150,10 +152,7 @@ const makeHarness = (
           }),
         stream: (checkoutPath) => {
           const snapshot = (process: ManagedProcess) => ({ checkoutPath, processes: [process] });
-          if (lastStarted === null) {
-            return Stream.make({ checkoutPath, processes: existing === null ? [] : [existing] });
-          }
-          const started = lastStarted;
+          const started = lastStarted!;
           if (outcome === "compiling") {
             return Stream.concat(Stream.make(snapshot(started)), Stream.never);
           }
@@ -319,5 +318,20 @@ describe("managed process toolkit handlers", () => {
       expect(result).toEqual({ stopped: false });
       expect(harness.stops).toEqual([]);
     }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("succeeds with nothing to stop when the checkout has no dev server at all", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const checkout = yield* fs.makeTempDirectoryScoped({ prefix: "t3-no-dev-" });
+      const harness = yield* makeHarness({
+        scripts: [project.scripts[0]!],
+        worktreePath: checkout,
+      });
+      const result = yield* harness.stop({});
+
+      expect(result).toEqual({ stopped: false });
+      expect(harness.stops).toEqual([]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
