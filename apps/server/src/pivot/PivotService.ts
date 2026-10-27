@@ -972,6 +972,10 @@ export const make = Effect.gen(function* () {
               teammate,
             });
       const [latest] = yield* store.teammateHistory({ threadId: teammate.threadId, limit: 1 });
+      const reclaimed =
+        teammate.kind === "ship" &&
+        teammate.tornDownAt === null &&
+        !(yield* localHost.worktreeExists(teammate.worktreePath));
       const pullRequest =
         shell?.pullRequests?.find((link) => link.source !== "stack-dismissed")?.url ??
         shell?.linkedPullRequest?.url ??
@@ -986,7 +990,7 @@ export const make = Effect.gen(function* () {
         branch: teammate.branch,
         pullRequestUrl: pullRequest,
         lastChangeAt: latest?.occurredAt ?? null,
-        worktreePath: teammate.worktreePath,
+        worktreePath: reclaimed ? null : teammate.worktreePath,
         modelEntry: teammate.modelEntry,
         evidence: teammate.report?.status === "done" ? (teammate.report.evidence ?? null) : null,
         verdict: teammate.verdict?.text ?? null,
@@ -1087,12 +1091,26 @@ export const make = Effect.gen(function* () {
         shell.status === "failed" &&
         (shell.latestRunStartedAt === null || shell.latestRunStartedAt === undefined);
       const host = yield* hostOf(command, teammate);
+      // Cleanup may have reclaimed the worktree while it waited; its branch brings it back.
+      const reclaimed =
+        !launchFailed &&
+        teammate.kind === "ship" &&
+        !(yield* host.worktreeExists(teammate.worktreePath));
+      if (reclaimed) {
+        yield* host.recreateWorktree(command, {
+          projectId: teammate.projectId,
+          worktreePath: teammate.worktreePath,
+          branch: teammate.branch,
+        });
+      }
       const start = launchFailed
         ? yield* host.retryLaunch(teammate.threadId)
         : yield* host.relaunch({
             threadId: teammate.threadId,
             senderThreadId: pivot.threadId,
-            text: "The Pivot restarted your session. Check your worktree and branch state, then carry on with the task from where it stands.",
+            text: reclaimed
+              ? `The Pivot restarted your session. Worktree cleanup had reclaimed your worktree while you waited; it is recreated at the same path from your branch \`${teammate.branch}\`, with your commits and nothing else: no installed dependencies and none of your uncommitted files. Run the project's setup or install its dependencies first, then carry on with the task from where it stands.`
+              : "The Pivot restarted your session. Check your worktree and branch state, then carry on with the task from where it stands.",
           });
       return {
         threadId: teammate.threadId,

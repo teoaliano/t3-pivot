@@ -146,7 +146,11 @@ export const PivotMcpTeammateLine = Schema.Struct({
   branch: Schema.String,
   pullRequestUrl: Schema.NullOr(Schema.String),
   lastChangeAt: Schema.NullOr(IsoDateTime),
-  worktreePath: Schema.String,
+  /**
+   * Null for a ship whose worktree worktree cleanup reclaimed; its branch stays, and
+   * relaunch_teammate recreates the worktree from it. A scout's is the project's checkout.
+   */
+  worktreePath: Schema.NullOr(Schema.String),
   /** The teammate model it was dispatched on, if any. */
   modelEntry: Schema.NullOr(Schema.String),
   /** What its latest `done` brought; null otherwise. */

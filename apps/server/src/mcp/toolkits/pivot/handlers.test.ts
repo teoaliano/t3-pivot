@@ -1101,11 +1101,51 @@ describe("Pivot and teammate tools", () => {
     });
   });
 
-  it.effect("lists teammates and reads bounded history, scoped to the calling Pivot", () => {
-    const { fake, layer } = setup();
+  it.effect("lists a reclaimed worktree as gone and relaunches the ship onto it again", () => {
+    const { fake, workspaceRoot, layer } = setup();
     return Effect.gen(function* () {
       const pivot = yield* createPivot;
       const ship = yield* dispatch(pivot);
+      addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
+      NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "fix.txt"), "fixed\n");
+      sh(ship.worktreePath, "git add -A && git commit -q -m fix");
+      const head = sh(ship.worktreePath, "git rev-parse HEAD");
+      // Worktree cleanup reclaimed it while the ship waited; its branch stays.
+      sh(workspaceRoot, `git worktree remove --force ${ship.worktreePath}`);
+
+      const line = (
+        expectOk(yield* call(pivot, "list_teammates", {})).teammates as Array<{
+          threadId: ThreadId;
+          branch: string;
+          worktreePath: string | null;
+        }>
+      ).find((candidate) => candidate.threadId === ship.threadId)!;
+      assert.strictEqual(line.branch, ship.branch);
+      assert.isNull(line.worktreePath);
+
+      const relaunched = expectOk(
+        yield* call(pivot, "relaunch_teammate", { threadId: ship.threadId }),
+      );
+      assert.strictEqual(relaunched.outcome, "relaunched");
+      assert.strictEqual(sh(ship.worktreePath, "git branch --show-current"), ship.branch);
+      assert.strictEqual(sh(ship.worktreePath, "git rev-parse HEAD"), head);
+      assert.include(lastMessage(fake, ship.threadId)!.text, "recreated");
+      const again = (
+        expectOk(yield* call(pivot, "list_teammates", {})).teammates as Array<{
+          threadId: ThreadId;
+          worktreePath: string | null;
+        }>
+      ).find((candidate) => candidate.threadId === ship.threadId)!;
+      assert.strictEqual(again.worktreePath, ship.worktreePath);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("lists teammates and reads bounded history, scoped to the calling Pivot", () => {
+    const { fake, workspaceRoot, layer } = setup();
+    return Effect.gen(function* () {
+      const pivot = yield* createPivot;
+      const ship = yield* dispatch(pivot);
+      addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
       for (let index = 0; index < 5; index += 1) {
         expectOk(
           yield* call(ship.threadId, "report_status", {
@@ -1198,10 +1238,11 @@ describe("Pivot and teammate tools", () => {
   });
 
   it.effect("stops and relaunches its own teammates and reports a failed relaunch", () => {
-    const { fake, layer } = setup();
+    const { fake, workspaceRoot, layer } = setup();
     return Effect.gen(function* () {
       const pivot = yield* createPivot;
       const ship = yield* dispatch(pivot);
+      addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
       expectOk(yield* call(pivot, "stop_teammate", { threadId: ship.threadId }));
       assert.strictEqual(fake.threads.get(ship.threadId)?.stops, 1);
 

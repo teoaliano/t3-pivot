@@ -337,6 +337,13 @@ export const layer = (fake: FakeV2) =>
         Effect.sync(() => {
           fake.stoppedServers.push(worktreePath);
         }),
+      recreateWorktree: ({ projectRoot, worktreePath, branch }) =>
+        Effect.sync(() => {
+          NodeChildProcess.execSync(
+            `git worktree prune && git worktree add -q ${worktreePath} ${branch}`,
+            { cwd: projectRoot },
+          );
+        }),
       removeWorktree: ({ projectRoot, worktreePath, force }) =>
         Effect.sync(() => {
           if (NodeFS.existsSync(worktreePath)) {

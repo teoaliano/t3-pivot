@@ -137,6 +137,11 @@ export class TeammateHost extends Context.Service<
       | { readonly type: "refused"; readonly reason: string }
     >;
     readonly worktreeExists: (worktreePath: string) => Effect.Effect<boolean>;
+    /**
+     * Recreates a ship's worktree that cleanup reclaimed, at its path and on its branch,
+     * without the setup script. Refuses a branch that is gone.
+     */
+    readonly recreateWorktree: (command: string, input: TeammateCheckout) => Result<void>;
     /** Whether the worktree has no uncommitted or untracked changes. */
     readonly worktreeClean: (worktreePath: string) => Result<boolean>;
     /**

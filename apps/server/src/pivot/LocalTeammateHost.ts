@@ -238,6 +238,23 @@ export const make = Effect.gen(function* () {
       fs.exists(worktreePath).pipe(Effect.orElseSucceed(() => false)),
     worktreeClean: git.isClean,
 
+    recreateWorktree: (command, input) =>
+      Effect.gen(function* () {
+        const project = yield* gitProject(command, input.projectId);
+        if (!(yield* git.branchExists(project.workspaceRoot, input.branch))) {
+          return yield* refuse(
+            command,
+            `Its worktree was reclaimed and its branch ${input.branch} is gone too, so there is nothing to relaunch onto.`,
+          );
+        }
+        yield* Effect.logInfo("Recreating teammate worktree", { path: input.worktreePath });
+        yield* threads.recreateWorktree({
+          projectRoot: project.workspaceRoot,
+          worktreePath: input.worktreePath,
+          branch: input.branch,
+        });
+      }),
+
     teardown: (command, input) =>
       Effect.gen(function* () {
         const project = yield* gitProject(command, input.projectId);
