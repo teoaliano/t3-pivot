@@ -3320,6 +3320,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         assert.isUndefined(restricted.allowDangerouslySkipPermissions);
         yield* fileSystem.remove(remoteFile);
         assert.equal((yield* open).permissionMode, "bypassPermissions");
+        // Claude Code truncates before rewriting; an empty read is not a policy.
+        yield* fileSystem.writeFileString(remoteFile, "");
+        assert.equal((yield* open).permissionMode, "bypassPermissions");
         yield* fileSystem.writeFileString(remoteFile, "{ invalid json");
         assert.equal((yield* open).permissionMode, "auto");
         yield* fileSystem.remove(remoteFile);
@@ -3684,6 +3687,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           const resolveSettings = vi
             .mocked(ClaudeSdk.resolveSettings)
             .mockClear()
+            // The adapter retries twice, so fail every attempt of the first turn.
+            .mockRejectedValueOnce(new Error("Cannot resolve managed settings"))
+            .mockRejectedValueOnce(new Error("Cannot resolve managed settings"))
             .mockRejectedValueOnce(new Error("Cannot resolve managed settings"))
             .mockResolvedValue({ effective: {}, provenance: {}, sources: [] });
           const harness = yield* makeWakeHarnessWithOptions({
@@ -3711,7 +3717,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             );
             if (ordinal === 1) assert.isUndefined(options.allowDangerouslySkipPermissions);
             else assert.equal(options.allowDangerouslySkipPermissions, true);
-            assert.equal(resolveSettings.mock.calls.length, ordinal);
+            assert.equal(resolveSettings.mock.calls.length, ordinal === 1 ? 3 : 4);
             yield* harness.offerAndWait(
               makeResultFrame({ uuid: `settings-recovery-result-${ordinal}`, result: "Done." }),
             );
