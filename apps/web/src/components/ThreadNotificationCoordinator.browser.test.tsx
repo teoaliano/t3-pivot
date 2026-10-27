@@ -135,10 +135,6 @@ vi.mock(import("../state/environments"), async (original) => ({
   ...(await original()),
   useEnvironmentIds: (() => ["env-1"]) as never,
 }));
-vi.mock(import("../state/pivot"), async (original) => ({
-  ...(await original()),
-  usePivotState: (() => null) as never,
-}));
 vi.mock(import("../threadNotifications"), async (original) => ({
   ...(await original()),
   playNotificationSound: state.sound,

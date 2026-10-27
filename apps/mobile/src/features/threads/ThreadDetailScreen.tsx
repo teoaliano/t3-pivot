@@ -112,7 +112,6 @@ import {
   clearThreadComposerError,
   threadComposerErrorsAtom,
 } from "../../state/thread-composer-error";
-import { useRetiredPivot } from "../../state/pivot";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useDelayedStatus } from "../../lib/useDelayedStatus";
@@ -129,7 +128,6 @@ import { ComposerFeedback } from "./ComposerFeedback";
 import { ComposerUsageLimits } from "./ComposerUsageLimits";
 import { PendingUserInputCard } from "./PendingUserInputCard";
 import { ProviderSubagentBar } from "./ProviderSubagentBar";
-import { RetiredPivotBar } from "./RetiredPivotBar";
 import { ThreadCreationFailedCard } from "./ThreadCreationFailedCard";
 import {
   FLOATING_WORKING_CONTROL_COVERAGE,
@@ -471,7 +469,6 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
   const agentsSegment = resolveSubagentPillSegment(turnSubagents);
   const composerEditorRef = useRef<ComposerEditorHandle>(null);
   const isProviderSubagent = isProviderNativeSubagentThread(props.selectedThread.source);
-  const retiredPivot = useRetiredPivot(props.environmentId, props.selectedThread.id);
   const editingRunId = props.queuedRunEdit?.runId ?? null;
   useEffect(() => {
     if (editingRunId === null) return;
@@ -1336,27 +1333,6 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
                                 navigation.navigate("Thread", {
                                   environmentId: String(props.environmentId),
                                   threadId: String(props.selectedThread.lineage.parentThreadId),
-                                })
-                        }
-                      />
-                    </View>
-                  ) : retiredPivot !== null ? (
-                    <View
-                      className="self-center px-3 pt-1.5"
-                      style={{
-                        width: "100%",
-                        maxWidth: contentMaxWidth,
-                        paddingBottom: composerBottomInset + 6,
-                      }}
-                    >
-                      <RetiredPivotBar
-                        onOpenSuccessor={
-                          retiredPivot.successorThreadId === null
-                            ? null
-                            : () =>
-                                navigation.navigate("Thread", {
-                                  environmentId: String(props.environmentId),
-                                  threadId: String(retiredPivot.successorThreadId),
                                 })
                         }
                       />

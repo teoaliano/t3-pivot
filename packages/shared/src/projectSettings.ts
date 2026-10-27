@@ -143,9 +143,7 @@ function resolveProjectOverrides(
     // undefined; that is not an override.
     if (value === undefined) continue;
     if (
-      (key === "textGenerationModelSelection" ||
-        key === "defaultModelSelection" ||
-        key === "pivotModelSelection") &&
+      (key === "textGenerationModelSelection" || key === "defaultModelSelection") &&
       value !== undefined &&
       value !== null &&
       !resolveProjectProviderInstanceEnabled(

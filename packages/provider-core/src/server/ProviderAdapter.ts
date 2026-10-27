@@ -51,17 +51,6 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
   cwd: Schema.NullOr(Schema.String),
   approvalPolicy: Schema.optional(Schema.Unknown),
   sandboxPolicy: Schema.optional(Schema.Unknown),
-  /**
-   * Files the agent may edit, when the provider cannot scope writes by directory.
-   * Set with a workspace-write sandbox; everything else stays read-only.
-   */
-  writableFiles: Schema.optional(Schema.Array(Schema.String)),
-  /** The project a Pivot works on, set only for a Pivot run; its home is `cwd`. */
-  project: Schema.optional(
-    Schema.Struct({ projectId: Schema.String, workspaceRoot: Schema.String }),
-  ),
-  /** Set for a teammate, whose shell may not merge or close PRs. */
-  withoutForgeMerge: Schema.optional(Schema.Boolean),
   reasoningEffort: Schema.optional(Schema.String),
 });
 export type ProviderAdapterV2RuntimePolicy = typeof ProviderAdapterV2RuntimePolicy.Type;

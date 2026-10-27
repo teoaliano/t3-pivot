@@ -100,8 +100,6 @@ export function createSidebarSortingStrategy(input: {
   settledVisibleCount?: number;
   routeThreadKey?: string | null;
   snoozedThreadCount?: number;
-  /** Active rows listed under the Pivots header; the rest sit under Threads. */
-  pivotKeys?: ReadonlySet<string>;
   cardHeight?: number;
   slimHeight?: number;
   boundaryLabelHeight?: number;
@@ -172,17 +170,14 @@ export function createSidebarSortingStrategy(input: {
     groups.settled = visible.map((key) => ({ kind: "thread", key, section: "settled" }));
     const projected: SidebarListItem[] = [];
     const marker = (name: SidebarListMarker) => projected.push({ kind: "marker", marker: name });
+    const section = (name: "active" | "settled") => {
+      if (groups[name].length > 0) projected.push(...groups[name]);
+      else marker(`${name}-placeholder`);
+    };
     marker("pinned-header");
     projected.push(...groups.pinned);
     marker("pinned-divider");
-    if (groups.active.length === 0) marker("active-placeholder");
-    const hasMarker = (name: SidebarListMarker) =>
-      items.some((item) => item.kind === "marker" && item.marker === name);
-    const isPivot = (item: ThreadItem) => input.pivotKeys?.has(item.key) === true;
-    if (hasMarker("pivots-header")) marker("pivots-header");
-    projected.push(...groups.active.filter(isPivot));
-    if (hasMarker("threads-header")) marker("threads-header");
-    projected.push(...groups.active.filter((item) => !isPivot(item)));
+    section("active");
     if (items.some((item) => item.kind === "marker" && item.marker === "working-header")) {
       marker("working-header");
       projected.push(...groups.working);
@@ -196,8 +191,7 @@ export function createSidebarSortingStrategy(input: {
       projected.push(...groups.snoozed);
     }
     marker("settled-header");
-    if (groups.settled.length > 0) projected.push(...groups.settled);
-    else marker("settled-placeholder");
+    section("settled");
     const heights = projected.map((item) => {
       const index = indices.get(sidebarListItemId(item));
       const rect = index === undefined ? undefined : rects[index];

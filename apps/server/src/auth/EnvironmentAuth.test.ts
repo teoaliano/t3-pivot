@@ -443,32 +443,6 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
     ),
   );
 
-  it.effect("keeps a host link's session out of /mcp, and an MCP session without pivot:host", () =>
-    Effect.gen(function* () {
-      const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-      const sessions = yield* SessionStore.SessionStore;
-      const hostLink = yield* sessions.issue({
-        subject: "pivot-host:grant-1",
-        method: "bearer-access-token",
-        scopes: ["pivot:host"],
-      });
-
-      // The host link's session is an ordinary WebSocket session for its own scope...
-      const session = yield* serverAuth.authenticateHttpRequest(makeBearerRequest(hostLink.token));
-      expect(session.scopes).toEqual(["pivot:host"]);
-      // ...and /mcp admits only the `mcp-client` subject.
-      const rejected = yield* serverAuth
-        .authenticateMcpClient(makeBearerRequest(hostLink.token))
-        .pipe(Effect.flip);
-      expect(rejected._tag).toBe("ServerAuthInvalidCredentialError");
-
-      // An MCP client's session carries no host scope at any access level.
-      for (const access of ["read-only", "approval-required", "full-access"] as const) {
-        expect(EnvironmentAuth.mcpClientScopes(access)).not.toContain("pivot:host");
-      }
-    }).pipe(Effect.provide(layerEnvironmentAuth())),
-  );
-
   it.effect("rotates desktop bearer sessions without accumulating authorized clients", () =>
     Effect.gen(function* () {
       const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;

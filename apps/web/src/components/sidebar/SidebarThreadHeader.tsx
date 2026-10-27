@@ -19,8 +19,6 @@ export interface SidebarThreadHeaderProps {
   onNewProject: () => void;
   onNewThread: (event: ReactMouseEvent) => void;
   newThreadDisabled: boolean;
-  /** T3 Pivot: the New Pivot button, beside new thread. */
-  newPivot?: ReactNode;
   newThreadShortcutLabel: string | null | undefined;
   newThreadInProjectShortcutLabel: string | null | undefined;
   showNewThreadInProjectHint: boolean;
@@ -41,7 +39,6 @@ export function SidebarThreadHeader({
   onNewProject,
   onNewThread,
   newThreadDisabled,
-  newPivot,
   newThreadShortcutLabel,
   newThreadInProjectShortcutLabel,
   showNewThreadInProjectHint,
@@ -115,7 +112,6 @@ export function SidebarThreadHeader({
             </SidebarHeaderIconButton>
           </>
         ) : null}
-        {newPivot}
         <SidebarHeaderIconButton
           label="New thread"
           tooltip={

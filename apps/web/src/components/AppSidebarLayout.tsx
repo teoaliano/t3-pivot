@@ -1,5 +1,4 @@
 import { useAtomValue } from "@effect/atom-react";
-import { PivotAppChrome } from "./pivot/PivotAppChrome";
 import * as Schema from "effect/Schema";
 import {
   useEffect,
@@ -326,7 +325,6 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       >
         <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
         <ProjectProjectionRetention />
-        <PivotAppChrome />
         <Sidebar
           side="left"
           collapsible="offcanvas"

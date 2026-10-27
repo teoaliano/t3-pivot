@@ -359,33 +359,6 @@ import {
   ScheduledTaskUpsertInput,
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
-import {
-  PivotAnswerDecisionInput,
-  PivotAnswerDecisionResult,
-  PivotCreateInput,
-  PivotCreateResult,
-  PivotDecisionLog,
-  PivotDecisionLogInput,
-  PivotError,
-  PivotHostDescribeInput,
-  PivotHostDescription,
-  PivotHostError,
-  PivotHostEvent,
-  PivotHostEventsInput,
-  PivotHostLandResult,
-  PivotHostLaunchInput,
-  PivotHostLaunchResult,
-  PivotHostMergeInput,
-  PivotHostPullRequestInput,
-  PivotHostRunStart,
-  PivotHostSendInput,
-  PivotHostTeammateInput,
-  PivotHostTeardownInput,
-  PivotStreamEvent,
-  PivotSubscribeInput,
-  PivotTeammateDetail,
-  PivotTeammateDetailInput,
-} from "./pivot.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import {
   ProjectCloneActionInput,
@@ -539,23 +512,6 @@ export const WS_METHODS = {
   serverGetUsageSummary: "server.getUsageSummary",
   serverRefreshUsageRates: "server.refreshUsageRates",
 
-  pivotSubscribe: "pivot.subscribe",
-  pivotCreate: "pivot.create",
-  pivotAnswerDecision: "pivot.answerDecision",
-  pivotTeammateDetail: "pivot.teammateDetail",
-  pivotDecisionLog: "pivot.decisionLog",
-  pivotHostDescribe: "pivotHost.describe",
-  pivotHostLaunchTeammate: "pivotHost.launchTeammate",
-  pivotHostSend: "pivotHost.send",
-  pivotHostStop: "pivotHost.stop",
-  pivotHostRelaunch: "pivotHost.relaunch",
-  pivotHostRetryLaunch: "pivotHost.retryLaunch",
-  pivotHostSettle: "pivotHost.settle",
-  pivotHostTeardown: "pivotHost.teardown",
-  pivotHostPullRequestDetail: "pivotHost.pullRequestDetail",
-  pivotHostMergePullRequest: "pivotHost.mergePullRequest",
-  pivotHostLand: "pivotHost.land",
-  pivotHostEvents: "pivotHost.events",
   scheduledTasksList: "scheduledTasks.list",
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
   scheduledTasksUpsert: "scheduledTasks.upsert",
@@ -1846,114 +1802,6 @@ const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServerLifecyc
   stream: true,
 });
 
-/** Pivot mode's records: a snapshot on subscribe, then the records that changed. */
-const WsPivotSubscribeRpc = Rpc.make(WS_METHODS.pivotSubscribe, {
-  payload: PivotSubscribeInput,
-  success: PivotStreamEvent,
-  error: Schema.Union([PivotError, EnvironmentAuthorizationError]),
-  stream: true,
-});
-
-const WsPivotCreateRpc = Rpc.make(WS_METHODS.pivotCreate, {
-  payload: PivotCreateInput,
-  success: PivotCreateResult,
-  error: Schema.Union([PivotError, EnvironmentAuthorizationError]),
-});
-
-const WsPivotAnswerDecisionRpc = Rpc.make(WS_METHODS.pivotAnswerDecision, {
-  payload: PivotAnswerDecisionInput,
-  success: PivotAnswerDecisionResult,
-  error: Schema.Union([PivotError, EnvironmentAuthorizationError]),
-});
-
-const WsPivotTeammateDetailRpc = Rpc.make(WS_METHODS.pivotTeammateDetail, {
-  payload: PivotTeammateDetailInput,
-  success: PivotTeammateDetail,
-  error: Schema.Union([PivotError, EnvironmentAuthorizationError]),
-});
-
-const WsPivotDecisionLogRpc = Rpc.make(WS_METHODS.pivotDecisionLog, {
-  payload: PivotDecisionLogInput,
-  success: PivotDecisionLog,
-  error: Schema.Union([PivotError, EnvironmentAuthorizationError]),
-});
-
-const PivotHostRpcError = Schema.Union([PivotHostError, EnvironmentAuthorizationError]);
-
-const WsPivotHostDescribeRpc = Rpc.make(WS_METHODS.pivotHostDescribe, {
-  payload: PivotHostDescribeInput,
-  success: PivotHostDescription,
-  error: PivotHostRpcError,
-});
-
-const WsPivotHostLaunchTeammateRpc = Rpc.make(WS_METHODS.pivotHostLaunchTeammate, {
-  payload: PivotHostLaunchInput,
-  success: PivotHostLaunchResult,
-  error: PivotHostRpcError,
-});
-
-const WsPivotHostSendRpc = Rpc.make(WS_METHODS.pivotHostSend, {
-  payload: PivotHostSendInput,
-  success: Schema.Struct({}),
-  error: PivotHostRpcError,
-});
-
-const WsPivotHostStopRpc = Rpc.make(WS_METHODS.pivotHostStop, {
-  payload: PivotHostTeammateInput,
-  success: Schema.Struct({}),
-  error: PivotHostRpcError,
-});
-
-const WsPivotHostRelaunchRpc = Rpc.make(WS_METHODS.pivotHostRelaunch, {
-  payload: PivotHostSendInput,
-  success: PivotHostRunStart,
-  error: PivotHostRpcError,
-});
-
-const WsPivotHostRetryLaunchRpc = Rpc.make(WS_METHODS.pivotHostRetryLaunch, {
-  payload: PivotHostTeammateInput,
-  success: PivotHostRunStart,
-  error: PivotHostRpcError,
-});
-
-const WsPivotHostSettleRpc = Rpc.make(WS_METHODS.pivotHostSettle, {
-  payload: PivotHostTeammateInput,
-  success: Schema.Struct({}),
-  error: PivotHostRpcError,
-});
-
-const WsPivotHostTeardownRpc = Rpc.make(WS_METHODS.pivotHostTeardown, {
-  payload: PivotHostTeardownInput,
-  success: Schema.Struct({}),
-  error: PivotHostRpcError,
-});
-
-const WsPivotHostPullRequestDetailRpc = Rpc.make(WS_METHODS.pivotHostPullRequestDetail, {
-  payload: PivotHostPullRequestInput,
-  success: PullRequestDetail,
-  error: PivotHostRpcError,
-});
-
-const WsPivotHostMergePullRequestRpc = Rpc.make(WS_METHODS.pivotHostMergePullRequest, {
-  payload: PivotHostMergeInput,
-  success: Schema.Struct({}),
-  error: PivotHostRpcError,
-});
-
-const WsPivotHostLandRpc = Rpc.make(WS_METHODS.pivotHostLand, {
-  payload: PivotHostTeammateInput,
-  success: PivotHostLandResult,
-  error: PivotHostRpcError,
-});
-
-/** The hosted-teammate log after a cursor, then each new entry. Ends when the link is revoked. */
-const WsPivotHostEventsRpc = Rpc.make(WS_METHODS.pivotHostEvents, {
-  payload: PivotHostEventsInput,
-  success: PivotHostEvent,
-  error: PivotHostRpcError,
-  stream: true,
-});
-
 const WsScheduledTasksListRpc = Rpc.make(WS_METHODS.scheduledTasksList, {
   payload: ScheduledTaskListInput,
   success: ScheduledTaskListResult,
@@ -2104,11 +1952,6 @@ export const WsCoreRpcGroup = RpcGroup.make(
   WsServerSignalProcessRpc,
   WsScheduledTasksListRpc,
   WsScheduledTasksSubscribeRpc,
-  WsPivotSubscribeRpc,
-  WsPivotCreateRpc,
-  WsPivotAnswerDecisionRpc,
-  WsPivotTeammateDetailRpc,
-  WsPivotDecisionLogRpc,
   WsScheduledTasksUpsertRpc,
   WsScheduledTasksSetEnabledRpc,
   WsScheduledTasksDeleteRpc,
@@ -2263,25 +2106,4 @@ export const WsToolsRpcGroup = RpcGroup.make(
 ).middleware(RpcScopeAuthorization);
 
 /** Everything clients call. The server builds each part's handlers apart, to keep them checkable. */
-export const WsClientRpcGroup = WsCoreRpcGroup.merge(WsToolsRpcGroup);
-
-/**
- * What a Pivot host link's session calls: another environment's Pivot running teammates
- * here. Its own group, so the server builds its handlers apart from the client table.
- */
-export const PivotHostRpcGroup = RpcGroup.make(
-  WsPivotHostDescribeRpc,
-  WsPivotHostLaunchTeammateRpc,
-  WsPivotHostSendRpc,
-  WsPivotHostStopRpc,
-  WsPivotHostRelaunchRpc,
-  WsPivotHostRetryLaunchRpc,
-  WsPivotHostSettleRpc,
-  WsPivotHostTeardownRpc,
-  WsPivotHostPullRequestDetailRpc,
-  WsPivotHostMergePullRequestRpc,
-  WsPivotHostLandRpc,
-  WsPivotHostEventsRpc,
-).middleware(RpcScopeAuthorization);
-
-export const WsRpcGroup = WsClientRpcGroup.merge(PivotHostRpcGroup);
+export const WsRpcGroup = WsCoreRpcGroup.merge(WsToolsRpcGroup);

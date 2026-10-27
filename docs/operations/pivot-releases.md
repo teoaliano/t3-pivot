@@ -142,4 +142,3 @@ undone, and a `sync/<tag>` PR carries the agent's explanation for you. The Mac s
   rework. The Mac's morning run shows a notification while one is open. Nothing from that
   nightly, or later ones, lands until it is settled.
 - While T3 Pivot is open on the Mac, a new release waits for its update button.
-- Pivot mode's own records live in `~/.t3-pivot/userdata/pivot.sqlite`.

@@ -5,7 +5,7 @@ import { cn } from "~/lib/utils";
 
 /**
  * One choice in a question attached to the composer: a check once selected, otherwise
- * its 1–9 shortcut. Used by provider questions and by Pivot decisions.
+ * its 1–9 shortcut.
  */
 export function ComposerOptionRow(props: {
   label: string;

@@ -455,42 +455,6 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     });
   });
 
-  it("maps a file-scoped write policy to reads, the shell and edits of the listed file only", () => {
-    const queryPolicy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
-      ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        cwd: "/home/me/pivot-homes/p1",
-        approvalPolicy: "never",
-        sandboxPolicy: { type: "workspaceWrite", writableRoots: ["/home/me/pivot-homes/p1"] },
-        writableFiles: ["/home/me/pivot-homes/p1/preferences.md"],
-      }),
-    );
-
-    assert.deepEqual(queryPolicy, {
-      permissionMode: "dontAsk",
-      tools: [
-        ...ClaudeAdapterV2.CLAUDE_READ_ONLY_ALLOWED_TOOLS,
-        "Bash",
-        "TaskOutput",
-        "TaskStop",
-        "Agent",
-        "Edit",
-        "Write",
-      ],
-      allowedTools: [
-        ...ClaudeAdapterV2.CLAUDE_READ_ONLY_ALLOWED_TOOLS,
-        "Bash",
-        "TaskOutput",
-        "TaskStop",
-        "Agent",
-        "Edit(//home/me/pivot-homes/p1/preferences.md)",
-        "Write(//home/me/pivot-homes/p1/preferences.md)",
-      ],
-      installPermissionCallback: false,
-    });
-  });
-
   it("maps default full-access policy to Claude bypass permissions", () => {
     const queryPolicy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
       ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
@@ -833,24 +797,6 @@ describe("ClaudeAdapterV2 native protocol logging", () => {
     const logged = ClaudeAdapterV2.loggedClaudeQueryOptions(options);
     assert.equal(logged.hasMcpServers, true);
     assert.notInclude(JSON.stringify(logged), "secret-claude-token");
-  });
-
-  it("names a Pivot's project in the system prompt", () => {
-    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
-      modelSelection: {
-        instanceId: ProviderInstanceId.make("claudeAgent"),
-        model: "claude-sonnet-4-6",
-      },
-      nativeThreadId: "native-thread-claude-pivot-project",
-      resume: false,
-      cwd: "/pivot-home",
-      project: { projectId: "project-1", workspaceRoot: "/repos/checkout" },
-    });
-    const systemPrompt = options.systemPrompt as { readonly append?: string };
-    assert.include(
-      systemPrompt.append ?? "",
-      "Your project's id is project-1 and its checkout is /repos/checkout.",
-    );
   });
 
   it.effect("writes Claude Agent SDK protocol frames to the native provider log", () =>

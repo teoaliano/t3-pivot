@@ -136,7 +136,7 @@ export function formatStartFailureMemory(diagnosis: StartFailureMemoryDiagnosis)
   const { currentBytes, maxBytes } = diagnosis.memory;
   const used =
     maxBytes === undefined ? undefined : `${formatGB(currentBytes)} GB of ${formatGB(maxBytes)} GB`;
-  const advice = "Stop idle dev servers or teammates and retry.";
+  const advice = "Stop idle dev servers or agents and retry.";
   switch (diagnosis.status) {
     case "over":
       return `Couldn't start: the agent slice is over its memory limit (${used}). ${advice}`;

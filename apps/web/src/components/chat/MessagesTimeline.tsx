@@ -3,7 +3,6 @@ import { ThreadFindTimelineContext } from "./ThreadFindProvider";
 import { shallow } from "zustand/vanilla/shallow";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import { MarkdownFindContext, findRevealRef } from "./markdownFindContext";
-import { useSenderLabel } from "../pivot/senderLabel";
 import { useChatCanvas } from "./ChatCanvasContext";
 import { WorkLogBlock, WorkLogButton, WorkLogDetails, WorkLogList, WorkLogRow } from "./WorkLog";
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
@@ -472,8 +471,6 @@ interface MessagesTimelineProps {
   parentThreadLink?: {
     readonly threadId: ThreadId;
     readonly title: string;
-    /** How this thread relates to the parent; a Pivot teammate is "Teammate of". */
-    readonly relation: "Subagent of" | "Teammate of";
   } | null;
   /** Set on a workflow coordinator's thread: its script message renders as this opening. */
   workflowOpening?: WorkflowOpening | null;
@@ -1318,7 +1315,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       <div className="messages-timeline-row-frame">
         <div className="chat-content-lane pt-1 sm:pt-2">
           <TimelineSystemDivider
-            label={parentThreadLink.relation}
+            label="Subagent of"
             detail={parentThreadLink.title}
             icon={BotIcon}
             actionLabel="Open parent thread"
@@ -2138,11 +2135,6 @@ function MessageAuthorHeading({ children }: { children: string }) {
   return <h3 className="sr-only select-none">{children}</h3>;
 }
 
-/** T3 Pivot: a message from a Pivot reads as the Pivot's. */
-function SenderAttribution(props: { environmentId: EnvironmentId; senderThreadId: ThreadId }) {
-  return useSenderLabel(props.environmentId, props.senderThreadId);
-}
-
 function UserMessageRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   return ctx.workflowOpening?.messageId === row.message.id ? (
@@ -2320,10 +2312,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
               tone="muted"
               aria-label="Open sending thread"
             >
-              <SenderAttribution
-                environmentId={ctx.activeThreadEnvironmentId}
-                senderThreadId={senderThreadId}
-              />
+              Sent by another agent
             </InlineButton>
           ) : (
             "Sent by another agent"
@@ -5175,7 +5164,6 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
     switch (source.kind) {
       case "subagent":
       case "delegated_task":
-      case "teammate":
         return "bot";
       case "command":
         return "terminal";
@@ -5331,12 +5319,6 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
     workEntry.projectedItem?.item.type === "notification"
       ? notificationChildThreadId(workEntry.projectedItem.item.source)
       : undefined;
-  // A Pivot wake about one teammate opens that teammate; other notifications open a subagent.
-  const notifiedThreadNoun =
-    workEntry.projectedItem?.item.type === "notification" &&
-    workEntry.projectedItem.item.source.kind === "teammate"
-      ? "teammate"
-      : "subagent";
   const groupView = use(WorkGroupViewCtx);
   const [expanded, setExpanded] = useState(
     () => groupView?.state.expandedEntries.has(workEntry.id) ?? false,
@@ -5621,14 +5603,14 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           ) : null}
           {notifiedSubagentThreadId ? (
             <InlineButton
-              aria-label={`Open ${notifiedThreadNoun} thread`}
+              aria-label="Open subagent thread"
               onClick={(event) => {
                 event.stopPropagation();
                 ctx.onOpenThread(notifiedSubagentThreadId);
               }}
               onKeyDown={stopRowToggle}
             >
-              Open {notifiedThreadNoun}
+              Open subagent
             </InlineButton>
           ) : null}
           {showFailedIndicator &&

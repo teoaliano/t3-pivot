@@ -138,9 +138,6 @@ export type SidebarListMarker =
   | "active-placeholder"
   | "settled-placeholder"
   | "pinned-divider"
-  /** Group headers inside the active section; they never change a row's section. */
-  | "pivots-header"
-  | "threads-header"
   | "working-header"
   | "snoozed-header"
   | "settled-header";

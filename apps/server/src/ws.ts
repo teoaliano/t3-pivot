@@ -1,4 +1,4 @@
-import { OrchestrationDispatchCommandError, PivotError } from "@t3tools/contracts";
+import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 
@@ -97,7 +97,6 @@ import {
   type TerminalMetadataStreamEvent,
   type PullRequestRef,
   WS_METHODS,
-  PivotHostRpcGroup,
   WsCoreRpcGroup,
   WsRpcGroup,
   WsToolsRpcGroup,
@@ -123,9 +122,6 @@ import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts"
 import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
-import * as PivotHost from "./pivot/PivotHost.ts";
-import * as PivotHostRpc from "./pivot/PivotHostRpc.ts";
-import * as PivotService from "./pivot/PivotService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import {
   archivedShellStreamItemFromThreadShell,
@@ -555,7 +551,6 @@ const ServerWsRpcGroup = WsRpcGroup.middleware(RpcInstrumentation);
 // TypeScript will check in one statement.
 const ServerWsCoreRpcGroup = WsCoreRpcGroup.middleware(RpcInstrumentation);
 const ServerWsToolsRpcGroup = WsToolsRpcGroup.middleware(RpcInstrumentation);
-const ServerPivotHostRpcGroup = PivotHostRpcGroup.middleware(RpcInstrumentation);
 // Replaying each intervening event costs a shell refetch; past this gap a
 // single O(active-threads) snapshot is cheaper and bounded.
 const SHELL_RESUME_MAX_GAP = 1_000;
@@ -1180,12 +1175,6 @@ const layerWsRpc = (
   Layer.mergeAll(
     layerWsCoreRpc(currentSession, clientOrigin, clientAnalyticsProps),
     layerWsToolsRpc(currentSession, serverBrowser),
-    ServerPivotHostRpcGroup.toLayer(
-      Effect.gen(function* () {
-        const pivotHost = yield* PivotHost.PivotHost;
-        return ServerPivotHostRpcGroup.of(PivotHostRpc.handlers(pivotHost, currentSession));
-      }),
-    ),
   );
 
 // The terminal, preview and device tools.
@@ -1313,9 +1302,6 @@ const layerWsCoreRpc = (
       const commandOutputHub = yield* CommandOutputHub.CommandOutputHub;
       const providerSessionManager = yield* ProviderSessionManager.ProviderSessionManagerV2;
       const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
-      const pivots = yield* PivotService.PivotService;
-      const toPivotError = (cause: PivotService.PivotServiceError) =>
-        new PivotError({ message: cause.message, cause });
       const secretRequests = yield* SecretRequests.SecretRequests;
       const pullRequests = yield* PullRequestService.PullRequestService;
       const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
@@ -2127,21 +2113,6 @@ const layerWsCoreRpc = (
           ),
         [WS_METHODS.scheduledTasksList]: (_input) =>
           scheduledTasks.list().pipe(Effect.map(withVisibleWebhookUrls)),
-        [WS_METHODS.pivotSubscribe]: (_input) => pivots.stream.pipe(Stream.mapError(toPivotError)),
-        [WS_METHODS.pivotCreate]: (input) =>
-          pivots.create(input).pipe(Effect.mapError(toPivotError)),
-        [WS_METHODS.pivotAnswerDecision]: (input) =>
-          pivots.recordUserAnswer(input).pipe(
-            Effect.map((decision) => ({ decision })),
-            Effect.mapError(toPivotError),
-          ),
-        [WS_METHODS.pivotTeammateDetail]: (input) =>
-          pivots.teammateDetail(input.threadId).pipe(Effect.mapError(toPivotError)),
-        [WS_METHODS.pivotDecisionLog]: (input) =>
-          pivots.decisionLog(input.pivotThreadId).pipe(
-            Effect.map((decisions) => ({ decisions })),
-            Effect.mapError(toPivotError),
-          ),
         [WS_METHODS.scheduledTasksSubscribe]: (_input) =>
           scheduledTasks.subscribeList().pipe(Stream.map(withVisibleWebhookUrls)),
         [WS_METHODS.scheduledTasksUpsert]: (input) => scheduledTasks.upsert(input),

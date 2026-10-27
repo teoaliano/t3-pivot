@@ -462,42 +462,6 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
-  it.effect("confines a Pivot's writes to its home and keeps its shell sandboxed", () =>
-    Effect.gen(function* () {
-      const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
-        nativeThreadId: "native-pivot-scope",
-        codexInput: [{ type: "text", text: "test" }],
-        runtimePolicy: {
-          runtimeMode: "full-access",
-          interactionMode: "default",
-          cwd: "/pivot-home",
-          approvalPolicy: "never",
-          sandboxPolicy: {
-            type: "workspaceWrite",
-            writableRoots: ["/pivot-home"],
-            networkAccess: true,
-            excludeSlashTmp: true,
-            excludeTmpdirEnvVar: true,
-          },
-          writableFiles: ["/pivot-home/preferences.md"],
-        },
-        modelSelection: {
-          instanceId: ProviderInstanceId.make("codex"),
-          model: "gpt-5.4",
-        },
-      });
-
-      assert.equal(params.approvalPolicy, "never");
-      assert.deepEqual(params.sandboxPolicy, {
-        type: "workspaceWrite",
-        writableRoots: ["/pivot-home"],
-        networkAccess: true,
-        excludeSlashTmp: true,
-        excludeTmpdirEnvVar: true,
-      });
-    }),
-  );
-
   it.effect("sends MCP app model context as untrusted Codex context", () =>
     Effect.gen(function* () {
       const policy = { runtimeMode: "full-access", interactionMode: "default", cwd: null } as const;
@@ -554,31 +518,6 @@ describe("CodexAdapterV2 runtime policy", () => {
       assert.include(
         params.additionalContext?.t3_code_orchestration_02?.value ?? "",
         "structured object, never as JSON text",
-      );
-    }),
-  );
-
-  it.effect("names a Pivot's project in the turn's runtime context", () =>
-    Effect.gen(function* () {
-      const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
-        nativeThreadId: "native-pivot-project",
-        codexInput: [{ type: "text", text: "where is the project?" }],
-        runtimePolicy: {
-          runtimeMode: "full-access",
-          interactionMode: "default",
-          cwd: "/pivot-home",
-          project: { projectId: "project-1", workspaceRoot: "/repos/checkout" },
-        },
-        modelSelection: {
-          instanceId: ProviderInstanceId.make("codex"),
-          model: "gpt-5.4",
-        },
-        hasT3Mcp: true,
-      });
-
-      assert.include(
-        params.additionalContext?.t3_code_runtime?.value ?? "",
-        "its checkout is /repos/checkout.",
       );
     }),
   );

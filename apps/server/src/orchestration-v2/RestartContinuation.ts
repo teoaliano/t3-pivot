@@ -5,8 +5,6 @@ import {
   latestProviderTurnForAttempt,
   MessageId,
   type OrchestrationV2Run,
-  type ProjectId,
-  type ServerSettings as ServerSettingsValue,
   type RunId,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -15,7 +13,6 @@ import * as Effect from "effect/Effect";
 import type { ProjectionRuntimeRecoveryState } from "./ProjectionStore.ts";
 
 import * as ServerSettings from "../serverSettings.ts";
-import * as RestartCarryOn from "./RestartCarryOn.ts";
 import { isNativeMaintenanceCommand } from "./CommandPolicy.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import {
@@ -188,28 +185,11 @@ export function restartContinuationRun(
   return run;
 }
 
-/**
- * Whether a thread resumes its interrupted run: it carries on whatever the settings
- * say (see RestartCarryOn), or its project's continue-after-update setting is on.
- */
-export function continuesAfterRestart(
-  carriesOn: boolean,
-  settings: ServerSettingsValue | null,
-  projectId: ProjectId,
-): boolean {
-  return (
-    carriesOn ||
-    (settings !== null &&
-      resolveProjectSettings(settings, projectId).settings.continueThreadsAfterServerUpdate)
-  );
-}
-
 export const continueRestartedRun = Effect.fn("RestartContinuation.continueRestartedRun")(
   function* (input: { readonly threadId: ThreadId; readonly sourceRunId: RunId }) {
     const settings = yield* ServerSettings.ServerSettingsService;
     const enabled = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
-    const carriesOn = yield* (yield* RestartCarryOn.RestartCarryOn).carriesOn(input.threadId);
-    if (!enabled && !carriesOn) return;
+    if (!enabled) return;
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const messageId = MessageId.make(`message:restart-continuation:${input.sourceRunId}`);
     const projection = yield* threads.getThreadRecords(
@@ -217,7 +197,11 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
       ["messages", "runs", "providerTurns", "attempts", "runtimeRequests", "turnItems"],
       { messageIds: [messageId], turnItemTypes: ["secret_request"] },
     );
-    if (!continuesAfterRestart(carriesOn, enabled, projection.thread.projectId)) return;
+    if (
+      !resolveProjectSettings(enabled, projection.thread.projectId).settings
+        .continueThreadsAfterServerUpdate
+    )
+      return;
     if (projection.messages.some((message) => message.id === messageId)) return;
     const source = projection.runs.find((run) => run.id === input.sourceRunId);
     if (

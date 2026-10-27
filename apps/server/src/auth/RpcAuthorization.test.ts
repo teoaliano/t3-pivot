@@ -10,7 +10,6 @@ import {
   AuthOrchestrationOperateScope,
   ORCHESTRATION_V2_WS_METHODS,
   AuthOrchestrationReadScope,
-  AuthPivotHostScope,
   AuthSourceControlWriteScope,
   AuthPreviewOperateScope,
   AuthRelayReadScope,
@@ -29,59 +28,12 @@ import {
   RPC_REQUIRED_SCOPES,
   requiredScopeForRpcMethod,
   requiredScopeForDeviceList,
-  requiredScopesForRpcCall,
 } from "./RpcAuthorization.ts";
 import * as RpcAuthorization from "./RpcAuthorization.ts";
 
 describe("RPC authorization scopes", () => {
   it("declares exactly one scope for every RPC in the server group", () => {
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
-  });
-
-  it("lets a pivot:host-only session call the pivotHost methods and nothing else", () => {
-    // Methods whose scopes depend on the payload need one that decodes.
-    const payloads: Record<string, unknown> = {
-      [WS_METHODS.serverUpdateSettings]: { patch: {} },
-      [WS_METHODS.projectsMutate]: {
-        type: "project.delete",
-        commandId: "command-1",
-        projectId: "project-1",
-      },
-      [WS_METHODS.assetsCreateUrl]: { resource: { _tag: "attachment", attachmentId: "image" } },
-      [WS_METHODS.gitPreparePullRequestThread]: {
-        cwd: "/repo",
-        reference: "42",
-        mode: "worktree",
-        threadId: "thread-1",
-      },
-    };
-    const session = new Set<string>([AuthPivotHostScope]);
-    const permitted = [...WsRpcGroup.requests.keys()].filter((method) =>
-      requiredScopesForRpcCall(method, payloads[method]).every((scope) => session.has(scope)),
-    );
-    expect(permitted.toSorted()).toEqual(
-      Object.values(WS_METHODS)
-        .filter((method) => method.startsWith("pivotHost."))
-        .toSorted(),
-    );
-    expect(permitted).toHaveLength(12);
-  });
-
-  it("names pivot:host only for pivotHost methods, and gives no other scope their access", () => {
-    for (const [method, scope] of Object.entries(RPC_REQUIRED_SCOPES)) {
-      expect(scope === AuthPivotHostScope, method).toBe(method.startsWith("pivotHost."));
-    }
-    // A session with every ordinary scope is still not a host link's session.
-    const everythingElse = new Set<string>(
-      Object.values(RPC_REQUIRED_SCOPES).filter((scope) => scope !== AuthPivotHostScope),
-    );
-    expect(
-      [...WsRpcGroup.requests.keys()].filter(
-        (method) =>
-          method.startsWith("pivotHost.") &&
-          requiredScopesForRpcCall(method, undefined).every((scope) => everythingElse.has(scope)),
-      ),
-    ).toEqual([]);
   });
 
   it("requires operate access to stop a workflow", () => {
@@ -325,61 +277,6 @@ describe("RPC scope middleware", () => {
       yield* client[WS_METHODS.serverProbe]({});
       yield* client[WS_METHODS.serverRetryResourceTelemetry]({}).pipe(Effect.flip);
       expect(observed).toEqual([WS_METHODS.serverProbe]);
-    }).pipe(Effect.scoped),
-  );
-});
-
-describe("pivot host authorization", () => {
-  const tested = [WS_METHODS.pivotHostDescribe, WS_METHODS.serverProbe] as const;
-  const group = WsRpcGroup.omit(
-    ...[...WsRpcGroup.requests.keys()].filter(
-      (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, (typeof tested)[number]> =>
-        !(tested as ReadonlyArray<string>).includes(tag),
-    ),
-  );
-
-  it.effect("fails a session without pivot:host before the pivotHost handler runs", () =>
-    Effect.gen(function* () {
-      const handled: Array<string> = [];
-      const describeHandler = group.toLayerHandler(WS_METHODS.pivotHostDescribe, () =>
-        Effect.sync(() => {
-          handled.push("describe");
-          return { projects: [], teammateModels: [] };
-        }),
-      );
-      const probeHandler = group.toLayerHandler(WS_METHODS.serverProbe, () => Effect.succeed({}));
-      const call = { homeEnvironmentId: "environment-home" } as never;
-
-      const ordinary = yield* RpcTest.makeClient(group).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            describeHandler,
-            probeHandler,
-            RpcAuthorization.layer([AuthOrchestrationReadScope, AuthOrchestrationOperateScope]),
-          ),
-        ),
-      );
-      expect(yield* ordinary[WS_METHODS.pivotHostDescribe](call).pipe(Effect.flip)).toMatchObject({
-        _tag: "EnvironmentAuthorizationError",
-        requiredPermission: "pivot:host",
-      });
-      expect(handled).toEqual([]);
-
-      // The host link's own session reaches the pivotHost handler, and no ordinary method.
-      const host = yield* RpcTest.makeClient(group).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            describeHandler,
-            probeHandler,
-            RpcAuthorization.layer([AuthPivotHostScope]),
-          ),
-        ),
-      );
-      expect(yield* host[WS_METHODS.serverProbe]({}).pipe(Effect.flip)).toMatchObject({
-        requiredPermission: AuthOrchestrationReadScope,
-      });
-      yield* host[WS_METHODS.pivotHostDescribe](call);
-      expect(handled).toEqual(["describe"]);
     }).pipe(Effect.scoped),
   );
 });

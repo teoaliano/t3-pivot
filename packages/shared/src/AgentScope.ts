@@ -37,15 +37,13 @@ export interface AgentScopeShape {
    * One admission attempt for an agent about to start; it never waits. Agents start in
    * the order they asked, across every T3 server of this user. A ticket that is not
    * admitted stays in line only while its caller keeps asking: one that stops asking
-   * (a stopped run, a dead server) drops out after a few missed polls. `spaced` marks a
-   * Pivot teammate: those start only with memory to spare, one at a time, spaced out,
-   * while other agents are held back only when memory is starved.
+   * (a stopped run, a dead server) drops out after a few missed polls. An agent is held
+   * back only while memory is starved.
    */
   readonly admit: (input: {
     /** Stable across attempts for one start, such as the run id. */
     readonly ticketId: string;
     readonly threadId: string;
-    readonly spaced: boolean;
   }) => Effect.Effect<AgentAdmission>;
   /** The machine's memory for agents now, or undefined where it is not measured. */
   readonly memory: () => Effect.Effect<MemoryProbe | undefined>;

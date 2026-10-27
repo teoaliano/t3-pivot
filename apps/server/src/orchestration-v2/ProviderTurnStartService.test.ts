@@ -1034,7 +1034,7 @@ effectIt.effect("terminalizes a starting run when its provider session cannot op
         failure: {
           class: "provider_error",
           message:
-            "DESCRIPTION is not valid ACP JSON\nCouldn't start: the agent slice is over its memory limit (9.8 GB of 9.4 GB). Stop idle dev servers or teammates and retry.",
+            "DESCRIPTION is not valid ACP JSON\nCouldn't start: the agent slice is over its memory limit (9.8 GB of 9.4 GB). Stop idle dev servers or agents and retry.",
         },
       },
     ]);
@@ -1168,7 +1168,7 @@ effectIt.effect("fails a starting run when its last start attempt cannot load th
         failure: {
           class: "provider_error",
           message:
-            "Pi RPC read failed: pi process exited with code 1.\nCouldn't start: the agent slice is over its memory limit (9.8 GB of 9.4 GB). Stop idle dev servers or teammates and retry.",
+            "Pi RPC read failed: pi process exited with code 1.\nCouldn't start: the agent slice is over its memory limit (9.8 GB of 9.4 GB). Stop idle dev servers or agents and retry.",
         },
       },
     ]);

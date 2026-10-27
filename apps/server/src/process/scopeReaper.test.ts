@@ -138,13 +138,13 @@ describe("stopScope", () => {
 
 describe("stopWorktreeProcesses", () => {
   it.effect("stops this server's scoped processes inside the worktree and no others", () => {
-    const wt = "/w/pivot-x";
+    const wt = "/w/feature-x";
     const mine = unit("claude", "aaaa1111");
     const terminal = unit("terminal", "bbbb2222");
     const { host, signals } = fakeHost([
       proc(50, { cwd: wt, unit: mine }),
       proc(51, { cwd: `${wt}/apps/web`, unit: terminal }),
-      proc(52, { cwd: "/w/pivot-x-other", unit: mine }),
+      proc(52, { cwd: "/w/feature-x-other", unit: mine }),
       proc(53, { cwd: wt, unit: unit("claude", "cccc3333", "ffffffff") }), // another server's
       proc(54, { cwd: wt }), // the user's own shell or editor
       proc(55, { cwd: null, unit: mine }),

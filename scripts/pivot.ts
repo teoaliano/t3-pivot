@@ -780,8 +780,6 @@ const PIVOT_OWNED_PATHS = [
   "scripts/pivot-release-plan.ts",
   "scripts/pivot-release-plan.test.ts",
   "docs/operations/pivot-releases.md",
-  "apps/server/src/pivot/",
-  ".scratch/pivot-mode/",
 ];
 const UPSTREAM_OWNED_PATHS = [".repos/"];
 

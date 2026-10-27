@@ -214,23 +214,6 @@ const RPC_AGGREGATES = {
   [WS_METHODS.managedProcessStart]: "managed-process",
   [WS_METHODS.managedProcessStop]: "managed-process",
   [WS_METHODS.managedProcessSetPinned]: "managed-process",
-  [WS_METHODS.pivotSubscribe]: "pivot",
-  [WS_METHODS.pivotCreate]: "pivot",
-  [WS_METHODS.pivotAnswerDecision]: "pivot",
-  [WS_METHODS.pivotTeammateDetail]: "pivot",
-  [WS_METHODS.pivotDecisionLog]: "pivot",
-  [WS_METHODS.pivotHostDescribe]: "pivot-host",
-  [WS_METHODS.pivotHostLaunchTeammate]: "pivot-host",
-  [WS_METHODS.pivotHostSend]: "pivot-host",
-  [WS_METHODS.pivotHostStop]: "pivot-host",
-  [WS_METHODS.pivotHostRelaunch]: "pivot-host",
-  [WS_METHODS.pivotHostRetryLaunch]: "pivot-host",
-  [WS_METHODS.pivotHostSettle]: "pivot-host",
-  [WS_METHODS.pivotHostTeardown]: "pivot-host",
-  [WS_METHODS.pivotHostPullRequestDetail]: "pivot-host",
-  [WS_METHODS.pivotHostMergePullRequest]: "pivot-host",
-  [WS_METHODS.pivotHostLand]: "pivot-host",
-  [WS_METHODS.pivotHostEvents]: "pivot-host",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";

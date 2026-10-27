@@ -1,16 +1,6 @@
 import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
-import { usePivotStatesStore } from "./pivot/pivotStatesStore";
-import { teammateCardShellOf } from "./pivot/pivotCards.logic";
-import { SidebarPivotSummary } from "./pivot/SidebarPivotStrip";
-import {
-  nestPivotTeammates,
-  pivotNestingKey,
-  type SidebarPivotGroup,
-  sidebarPivotGroup,
-} from "./sidebar/pivotNesting.logic";
-import { SidebarNewPivotButton } from "./pivot/SidebarNewPivotButton";
 import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
 import { ThreadTerminalStatusButton } from "./ThreadStatusIndicators";
 import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
@@ -83,14 +73,18 @@ import {
   CheckIcon,
   CircleAlertIcon,
   CircleCheckIcon,
+  CircleDashedIcon,
+  CircleDotDashedIcon,
   ClockIcon,
   FolderIcon,
   GitBranchIcon,
   ListFilterIcon,
+  MessageCircleQuestionIcon,
   PinIcon,
   PinOffIcon,
   PlusIcon,
   SettingsIcon,
+  ShieldQuestionIcon,
   SquarePenIcon,
   TerminalIcon,
   Undo2Icon,
@@ -157,6 +151,7 @@ import { useClientSettings } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
+import { useNowSecond } from "../hooks/useNowSecond";
 import {
   useEnvironmentIdentities,
   useConnectedEnvironmentIds,
@@ -200,6 +195,7 @@ import {
   buildBulkUnpinContextMenuItem,
   deleteSelectedThreadEntries,
   filterSidebarProjectScopeItems,
+  formatWorkingDurationLabel,
   firstValidTimestampMs,
   hasUnseenCompletion,
   isSidebarNestedLinkClick,
@@ -285,8 +281,6 @@ import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
-import { SidebarStatusIcon } from "./sidebar/SidebarStatusIcon";
-import { WorkingDuration } from "./sidebar/WorkingDuration";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { MiddleTruncate } from "./ui/middle-truncate";
 import {
@@ -375,9 +369,6 @@ const SETTLED_TAIL_PAGE_COUNT = 25;
 const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar:settled-expanded";
 const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
 const WORKING_SHELF_EXPANDED_KEY = "t3code:sidebar:working-expanded";
-// The active list splits into Pivots and Threads, both expanded by default.
-const PIVOTS_SECTION_EXPANDED_KEY = "t3code:sidebar:pivots-expanded";
-const THREADS_SECTION_EXPANDED_KEY = "t3code:sidebar:threads-expanded";
 
 const inboxReturns = createInboxReturnTracker();
 
@@ -398,9 +389,6 @@ interface SidebarThreadPartitionInput {
   readonly serverConfigs: ReadonlyMap<EnvironmentId, EnvironmentServerConfig>;
   readonly optimisticDrop: SidebarOptimisticDrop | null;
   readonly workingShelfEnabled: boolean;
-  readonly pivotStatesByEnvironment: ReturnType<
-    typeof usePivotStatesStore.getState
-  >["byEnvironment"];
   // Snooze wakes and the queued-turn grace depend on the clock, so the minute
   // tick and the precise snooze-wake tick are inputs: a new key repartitions.
   readonly clockKey: string;
@@ -467,7 +455,6 @@ function useSidebarThreads(input: {
   const { projectScopeKey, scopedProjectKeys, serverConfigs, optimisticDrop, routeThreadRef } =
     input;
   const threads = useThreadShells();
-  const pivotStatesByEnvironment = usePivotStatesStore((store) => store.byEnvironment);
   const routeRowThreadKey =
     routeThreadRef === null
       ? null
@@ -506,16 +493,6 @@ function useSidebarThreads(input: {
     false,
     Schema.Boolean,
   );
-  const [pivotsSectionExpanded, setPivotsSectionExpanded] = useLocalStorage(
-    PIVOTS_SECTION_EXPANDED_KEY,
-    true,
-    Schema.Boolean,
-  );
-  const [threadsSectionExpanded, setThreadsSectionExpanded] = useLocalStorage(
-    THREADS_SECTION_EXPANDED_KEY,
-    true,
-    Schema.Boolean,
-  );
   // The settled tail restarts whenever the project scope changes.
   const [settledTail, setSettledTail] = useState({
     scopeKey: projectScopeKey,
@@ -533,35 +510,13 @@ function useSidebarThreads(input: {
     serverConfigs,
     optimisticDrop,
     workingShelfEnabled,
-    pivotStatesByEnvironment,
     clockKey: `${nowMinute}:${snoozeWakeTick}`,
   });
   const partitionNextWakeAt = partition.snoozedThreads[0]?.snoozedUntil ?? null;
   if (partitionNextWakeAt !== nextSnoozeWakeAt) setNextSnoozeWakeAt(partitionNextWakeAt);
 
-  const {
-    pinnedThreads,
-    activeThreads,
-    workingThreads,
-    snoozedThreads,
-    settledThreads,
-    pivotTeammatesByKey,
-  } = partition;
-  // Pivots are long-lived and come first; teammates already sit under theirs.
-  const activePivotThreads = activeThreads.filter(
-    (thread) => pivotStatesByEnvironment[thread.environmentId]?.pivots[thread.id] !== undefined,
-  );
-  const activeNormalThreads = activeThreads.filter(
-    (thread) => pivotStatesByEnvironment[thread.environmentId]?.pivots[thread.id] === undefined,
-  );
-  const visibleActiveThreads = [
-    ...(pivotsSectionExpanded
-      ? activePivotThreads
-      : routeThreadOnly(activePivotThreads, routeRowThreadKey)),
-    ...(threadsSectionExpanded
-      ? activeNormalThreads
-      : routeThreadOnly(activeNormalThreads, routeRowThreadKey)),
-  ];
+  const { pinnedThreads, activeThreads, workingThreads, snoozedThreads, settledThreads } =
+    partition;
   const visibleSettledThreads = (() => {
     if (settledThreads.length <= settledVisibleCount) return settledThreads;
     const visible = settledThreads.slice(0, settledVisibleCount);
@@ -584,7 +539,7 @@ function useSidebarThreads(input: {
     : routeThreadOnly(workingThreads, routeRowThreadKey);
   const orderedThreads = [
     ...pinnedThreads,
-    ...visibleActiveThreads,
+    ...activeThreads,
     ...visibleWorkingThreads,
     ...visibleSnoozedThreads,
     ...renderedSettledThreads,
@@ -610,16 +565,7 @@ function useSidebarThreads(input: {
       ...workingThreads,
       ...snoozedThreads,
       ...settledThreads,
-      // Nested under their Pivot, but still found by search.
-      ...[...pivotTeammatesByKey.values()].flat(),
     ],
-    activePivotThreads,
-    activeNormalThreads,
-    visibleActiveThreads,
-    pivotsSectionExpanded,
-    togglePivotsSection: () => setPivotsSectionExpanded((value) => !value),
-    threadsSectionExpanded,
-    toggleThreadsSection: () => setThreadsSectionExpanded((value) => !value),
     settledVisibleCount,
     hiddenSettledCount: settledThreads.length - visibleSettledThreads.length,
     showMoreSettled: () =>
@@ -642,7 +588,7 @@ function useSidebarThreads(input: {
     snoozedThreadKeys: new Set(snoozedThreads.map(threadShellKey)),
     sectionByThreadKey,
     pinnedKeys: pinnedThreads.map(threadShellKey),
-    activeKeys: visibleActiveThreads.map(threadShellKey),
+    activeKeys: activeThreads.map(threadShellKey),
     pinnedKeysById: new Map(
       threads.map((thread) => [threadShellKey(thread), thread.pinOrderKey ?? null] as const),
     ),
@@ -653,21 +599,9 @@ function useSidebarThreads(input: {
 }
 
 function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
-  const {
-    threads,
-    scopedProjectKeys,
-    serverConfigs,
-    optimisticDrop,
-    workingShelfEnabled,
-    pivotStatesByEnvironment,
-  } = input;
+  const { threads, scopedProjectKeys, serverConfigs, optimisticDrop, workingShelfEnabled } = input;
   const preciseNow = new Date().toISOString();
-  // T3 Pivot: teammates leave the shelves; their Pivot's right panel lists them.
-  const pivotNesting = nestPivotTeammates(
-    filterSidebarV2VisibleThreads(threads, scopedProjectKeys),
-    (environmentId) => pivotStatesByEnvironment[environmentId] ?? null,
-  );
-  const visible = pivotNesting.topLevel;
+  const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys);
   inboxReturns.observe(workingShelfEnabled ? threads : null);
   const pinned: EnvironmentThreadShell[] = [];
   const active: EnvironmentThreadShell[] = [];
@@ -754,7 +688,6 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
     ),
     settledThreads: sortSettledThreads(settled),
     snoozeNow: preciseNow,
-    pivotTeammatesByKey: pivotNesting.teammatesByPivotKey,
   };
 }
 
@@ -930,6 +863,21 @@ function JumpHintBadge(props: { label: string }) {
     >
       {props.label}
     </span>
+  );
+}
+
+function WorkingDuration(props: { startedAt: string | null }) {
+  const startedMs = props.startedAt !== null ? Date.parse(props.startedAt) : Number.NaN;
+  if (Number.isNaN(startedMs)) return null;
+  return <WorkingDurationLabel startedMs={startedMs} />;
+}
+
+// Self-ticking so only this span re-renders each second, not the whole row;
+// the shared tick lands every working row's update in the same frame.
+function WorkingDurationLabel(props: { startedMs: number }) {
+  const nowMs = useNowSecond();
+  return (
+    <span className="tabular-nums">{formatWorkingDurationLabel(nowMs - props.startedMs)}</span>
   );
 }
 
@@ -1327,19 +1275,19 @@ function SidebarDragBoundary(props: {
 }
 
 function SidebarSectionHeader(props: {
-  marker:
-    | "pivots-header"
-    | "threads-header"
-    | "working-header"
-    | "snoozed-header"
-    | "settled-header";
+  marker: "working-header" | "snoozed-header" | "settled-header";
   label: string;
   className?: string;
   dragging?: boolean;
   isDropTarget?: boolean;
   toggle: { expanded: boolean; onToggle: () => void };
 }) {
-  const shelf = props.marker.slice(0, -"-header".length);
+  const shelf =
+    props.marker === "working-header"
+      ? "working"
+      : props.marker === "snoozed-header"
+        ? "snoozed"
+        : "settled";
   const snoozed = shelf === "snoozed";
   return (
     <SortableSidebarMarker
@@ -1613,8 +1561,6 @@ type SidebarThreadRowProps = {
   // subagent: drafts and PR clicks care about which composer is on screen.
   isRouteThread: boolean;
   openPullRequestsInRightPanel: boolean;
-  // T3 Pivot: a Pivot's teammate count, needs-you count and fold toggle, in its last line.
-  pivotSummary: ReactNode;
   jumpLabel: string | null;
   currentEnvironmentId: string | null;
   environmentLabel: string | null;
@@ -2415,8 +2361,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                             topStatus.className,
                           )}
                         >
-                          {topStatus.icon !== null ? (
-                            <SidebarStatusIcon kind={topStatus.icon} />
+                          {topStatus.icon === "working" ? (
+                            <CircleDashedIcon aria-hidden className="size-4 shrink-0" />
+                          ) : topStatus.icon === "waiting" ? (
+                            <CircleDotDashedIcon aria-hidden className="size-4 shrink-0" />
+                          ) : topStatus.icon === "input" ? (
+                            <MessageCircleQuestionIcon aria-hidden className="size-4 shrink-0" />
+                          ) : topStatus.icon === "approval" ? (
+                            <ShieldQuestionIcon aria-hidden className="size-4 shrink-0" />
+                          ) : topStatus.icon === "failed" ? (
+                            <CircleAlertIcon aria-hidden className="size-4 shrink-0" />
+                          ) : topStatus.icon === "done" ? (
+                            <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
                           ) : null}
                           {/* The label alone is the live region: a role="status"
                             wrapper around the ticking duration would make
@@ -2509,9 +2465,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               ) : null}
             </div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
-              {props.pivotSummary ? (
-                props.pivotSummary
-              ) : thread.branch ? (
+              {thread.branch ? (
                 <>
                   <ThreadWorktreeIndicator thread={thread} />
                   <span className="flex min-w-0 flex-1 text-muted-foreground/40">
@@ -2848,7 +2802,6 @@ export default function Sidebar() {
     },
   });
   const newThreadContext = useHandleNewThread();
-  const pivotStatesByEnvironment = usePivotStatesStore((store) => store.byEnvironment);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
@@ -3040,13 +2993,6 @@ export default function Sidebar() {
     draggableThreadKeys,
     activeReorderableThreadKeys,
     activeThreads,
-    activePivotThreads,
-    activeNormalThreads,
-    visibleActiveThreads,
-    pivotsSectionExpanded,
-    togglePivotsSection,
-    threadsSectionExpanded,
-    toggleThreadsSection,
     workingThreads,
     snoozedThreads,
     settledThreads,
@@ -3081,23 +3027,6 @@ export default function Sidebar() {
     optimisticDrop,
     routeThreadRef,
   });
-  // T3 Pivot: each Pivot's row counts its teammates by state, read from the Pivot records.
-  const pivotGroupsByKey = (() => {
-    const shellByKey = new Map(threads.map((shell) => [pivotNestingKey(shell), shell] as const));
-    const groups = new Map<string, SidebarPivotGroup>();
-    for (const [environmentId, pivotState] of Object.entries(pivotStatesByEnvironment)) {
-      if (pivotState == null) continue;
-      for (const pivot of Object.values(pivotState.pivots)) {
-        const key = `${environmentId}:${pivot.threadId}`;
-        const group = sidebarPivotGroup(pivotState, pivot.threadId, (threadId) => {
-          const shell = shellByKey.get(`${environmentId}:${threadId}`);
-          return shell === undefined ? null : teammateCardShellOf(shell.source, shell.pullRequests);
-        });
-        if (group !== null) groups.set(key, group);
-      }
-    }
-    return groups;
-  })();
 
   const isSearchingThreads = threadSearchQuery.trim().length > 0;
   const threadSearchMatchByKey = new Map(
@@ -3640,22 +3569,9 @@ export default function Sidebar() {
     const pinnedRows = rowsOf(pinnedThreads, "pinned");
     items.push(...pinnedRows);
     items.push({ kind: "marker", marker: "pinned-divider" });
-    const pivotSet = new Set(activePivotThreads);
-    const isActivePivot = (thread: EnvironmentThreadShell) => pivotSet.has(thread);
+    const activeRows = rowsOf(activeThreads, "active");
     items.push({ kind: "marker", marker: "active-placeholder" });
-    if (activePivotThreads.length > 0) {
-      items.push({ kind: "marker", marker: "pivots-header" });
-      items.push(...rowsOf(visibleActiveThreads.filter(isActivePivot), "active"));
-    }
-    if (activeNormalThreads.length > 0) {
-      items.push({ kind: "marker", marker: "threads-header" });
-      items.push(
-        ...rowsOf(
-          visibleActiveThreads.filter((thread) => !isActivePivot(thread)),
-          "active",
-        ),
-      );
-    }
+    items.push(...activeRows);
     if (workingThreads.length > 0) {
       items.push({ kind: "marker", marker: "working-header" });
       items.push(...rowsOf(visibleWorkingThreads, "working"));
@@ -3744,7 +3660,6 @@ export default function Sidebar() {
     settledVisibleCount,
     routeThreadKey: routeRowThreadKey,
     snoozedThreadCount: snoozedThreads.length,
-    pivotKeys: new Set(activePivotThreads.map(threadShellKey)),
   });
   const draggedThreadKey = dragState?.activeKey;
   const draggedFromSection = dragState?.activeSection;
@@ -4774,13 +4689,6 @@ export default function Sidebar() {
               onNewProject={openAddProjectCommandPalette}
               onNewThread={handleNewThreadClick}
               newThreadDisabled={projects.length === 0}
-              newPivot={
-                <SidebarNewPivotButton
-                  onOpen={() => {
-                    if (isMobile) setOpenMobile(false);
-                  }}
-                />
-              }
               newThreadShortcutLabel={newThreadShortcutLabel}
               newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
               showNewThreadInProjectHint={projectGroups.length > 1}
@@ -4900,10 +4808,6 @@ export default function Sidebar() {
                     )}
                   >
                     {(() => {
-                      const renderPivotSummary = (thread: EnvironmentThreadShell) => {
-                        const group = pivotGroupsByKey.get(pivotNestingKey(thread));
-                        return group === undefined ? null : <SidebarPivotSummary group={group} />;
-                      };
                       const renderThreadRow = (
                         thread: EnvironmentThreadShell,
                         section: SidebarSection,
@@ -4968,7 +4872,6 @@ export default function Sidebar() {
                             isActive={routeRowThreadKey === threadKey}
                             isRouteThread={routeThreadKey === threadKey}
                             openPullRequestsInRightPanel={routeThreadRef !== null}
-                            pivotSummary={renderPivotSummary(thread)}
                             jumpLabel={
                               showJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null
                             }
@@ -5069,40 +4972,6 @@ export default function Sidebar() {
                                       dragTargetSection !== "active"))
                                 }
                                 isDropTarget={dragTargetSection === "active"}
-                              />,
-                            );
-                            break;
-                          case "pivots-header":
-                            items.push(
-                              <SidebarSectionHeader
-                                key="pivots-section-header"
-                                marker="pivots-header"
-                                label={
-                                  pivotsSectionExpanded
-                                    ? "Pivots"
-                                    : `Pivots (${activePivotThreads.length})`
-                                }
-                                toggle={{
-                                  expanded: pivotsSectionExpanded,
-                                  onToggle: togglePivotsSection,
-                                }}
-                              />,
-                            );
-                            break;
-                          case "threads-header":
-                            items.push(
-                              <SidebarSectionHeader
-                                key="threads-section-header"
-                                marker="threads-header"
-                                label={
-                                  threadsSectionExpanded
-                                    ? "Threads"
-                                    : `Threads (${activeNormalThreads.length})`
-                                }
-                                toggle={{
-                                  expanded: threadsSectionExpanded,
-                                  onToggle: toggleThreadsSection,
-                                }}
                               />,
                             );
                             break;

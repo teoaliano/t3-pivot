@@ -27,7 +27,6 @@ import { threadEnvironment } from "../../state/threads";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { ProjectFavicon } from "../ProjectFavicon";
-import { PivotViewSwitch } from "../pivot/PivotChatChrome";
 import {
   WorkspaceBreadcrumb,
   WorkspaceBreadcrumbItem,
@@ -399,10 +398,6 @@ export const ChatHeader = memo(function ChatHeader({
           )}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
-      {/* Inside the padding reserved for the titlebar panel controls, so they never cover it. */}
-      {isServerThread ? (
-        <PivotViewSwitch environmentId={activeThreadEnvironmentId} threadId={activeThreadId} />
-      ) : null}
     </div>
   );
 });

@@ -18,7 +18,6 @@ import {
   AuthDiagnosticsReadScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
-  AuthPivotHostScope,
   AuthPreviewOperateScope,
   AuthRelayReadScope,
   AuthRelayWriteScope,
@@ -111,24 +110,6 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverReportClientActivity]: AuthOrchestrationReadScope,
   [WS_METHODS.serverReportHostPowerState]: AuthEnvironmentMaintainScope,
   [WS_METHODS.serverGetBackgroundPolicy]: AuthOrchestrationReadScope,
-  [WS_METHODS.pivotSubscribe]: AuthOrchestrationReadScope,
-  [WS_METHODS.pivotCreate]: AuthOrchestrationOperateScope,
-  [WS_METHODS.pivotAnswerDecision]: AuthOrchestrationOperateScope,
-  [WS_METHODS.pivotTeammateDetail]: AuthOrchestrationReadScope,
-  [WS_METHODS.pivotDecisionLog]: AuthOrchestrationReadScope,
-  // The host link's own scope reaches only these; no other method names it.
-  [WS_METHODS.pivotHostDescribe]: AuthPivotHostScope,
-  [WS_METHODS.pivotHostLaunchTeammate]: AuthPivotHostScope,
-  [WS_METHODS.pivotHostSend]: AuthPivotHostScope,
-  [WS_METHODS.pivotHostStop]: AuthPivotHostScope,
-  [WS_METHODS.pivotHostRelaunch]: AuthPivotHostScope,
-  [WS_METHODS.pivotHostRetryLaunch]: AuthPivotHostScope,
-  [WS_METHODS.pivotHostSettle]: AuthPivotHostScope,
-  [WS_METHODS.pivotHostTeardown]: AuthPivotHostScope,
-  [WS_METHODS.pivotHostPullRequestDetail]: AuthPivotHostScope,
-  [WS_METHODS.pivotHostMergePullRequest]: AuthPivotHostScope,
-  [WS_METHODS.pivotHostLand]: AuthPivotHostScope,
-  [WS_METHODS.pivotHostEvents]: AuthPivotHostScope,
   [WS_METHODS.scheduledTasksList]: AuthOrchestrationReadScope,
   [WS_METHODS.scheduledTasksSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.secretsAnswerRequest]: AuthOrchestrationOperateScope,
@@ -266,7 +247,7 @@ const requiredScopesForSettingsUpdate = (payload: unknown) => {
 
 const decodeProjectMutation = Schema.decodeUnknownSync(ProjectMutation);
 
-export const requiredScopesForRpcCall = (
+const requiredScopesForRpcCall = (
   method: string,
   payload: unknown,
 ): ReadonlyArray<AuthEnvironmentScope> => {
