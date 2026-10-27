@@ -8,7 +8,14 @@ import type {
 import { EllipsisIcon } from "lucide-react";
 import { memo } from "react";
 
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
+
 import { useNowMinute } from "../../hooks/useNowMinute";
+import { managedProcessEnvironment } from "../../state/managedProcesses";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { cn } from "../../lib/utils";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { useThreadShells } from "../../state/entities";
@@ -24,6 +31,7 @@ import { SidebarStatusIcon } from "../sidebar/SidebarStatusIcon";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   elapsedLabel,
@@ -183,13 +191,31 @@ const PivotTeammateCard = memo(function PivotTeammateCard(
 
 /**
  * A ship's work waiting for the user: the Pivot's verdict, the evidence behind a button, and
- * when a dev server is part of it, Try it, which opens the preview where it starts.
+ * when a dev server is part of it, Try it, which starts the teammate's dev server and opens
+ * its preview. The preview's own controls stop it.
  */
 function TeammateReview(props: {
+  environmentId: EnvironmentId;
+  threadId: ThreadId;
   review: NonNullable<TeammateCard["review"]>;
-  onTryIt: () => void;
+  onOpenPreview: () => void;
 }) {
   const { evidence, verdict } = props.review;
+  const start = useAtomCommand(managedProcessEnvironment.start, { reportFailure: false });
+  const tryIt = async () => {
+    props.onOpenPreview();
+    const result = await start({
+      environmentId: props.environmentId,
+      input: { threadId: props.threadId },
+    });
+    if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
+    const error = squashAtomCommandFailure(result);
+    toastManager.add({
+      type: "error",
+      title: "Could not start the dev server",
+      description: error instanceof Error ? error.message : String(error),
+    });
+  };
   return (
     <span className="flex w-full min-w-0 items-center gap-1.5 text-xs">
       <span className="min-w-0 flex-1 truncate text-muted-foreground">
@@ -213,7 +239,7 @@ function TeammateReview(props: {
               {(evidence.files ?? []).length > 0 ? (
                 <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground">
                   {evidence.files!.map((file) => (
-                    <li key={file} className="truncate" title={file}>
+                    <li key={file} className="wrap-anywhere">
                       {file}
                     </li>
                   ))}
@@ -235,7 +261,7 @@ function TeammateReview(props: {
           variant="outline"
           onClick={(event) => {
             event.stopPropagation();
-            props.onTryIt();
+            void tryIt();
           }}
         >
           Try it
@@ -312,8 +338,10 @@ function TeammateCardBody(props: TeammateCardProps) {
       />
       {card.review !== null ? (
         <TeammateReview
+          environmentId={props.environmentId}
+          threadId={card.threadId}
           review={card.review}
-          onTryIt={() => props.onOpen("preview", card.threadId)}
+          onOpenPreview={() => props.onOpen("preview", card.threadId)}
         />
       ) : null}
       {/* Over the card's corner, beside the short status line, shown on hover or focus. */}

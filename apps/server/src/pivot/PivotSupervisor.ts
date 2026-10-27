@@ -45,7 +45,7 @@ import { composeWake, type WakeDigest, type WakeTeammate } from "./pivotWake.ts"
 /** A teammate still resuming this long after the supervisor started did not survive the restart. */
 export const RESUME_GRACE_MS = 5 * 60 * 1000;
 /** How long a takeover waits for the retired Pivot's handoff before going on without it. */
-export const HANDOFF_WAIT_MS = 2 * 60 * 1000;
+const HANDOFF_WAIT_MS = 2 * 60 * 1000;
 /** A running teammate with no activity this long wakes its Pivot, once per run. */
 export const STUCK_AFTER_MS = 30 * 60 * 1000;
 /** A hosted teammate's activity is logged at most this often, since a turn emits many events. */
@@ -139,7 +139,7 @@ export const make = Effect.gen(function* () {
   // Takeovers whose successor waits for the retired Pivot's handoff, by successor. A restart
   // forgets them: the successor then opens with the restart digest.
   const handoffs = new Map<
-    string,
+    ThreadId,
     { readonly predecessor: ThreadId; readonly runId: RunId; readonly askedAtMs: number }
   >();
   let started = false;
@@ -343,41 +343,46 @@ export const make = Effect.gen(function* () {
    * The successor opens with the retired Pivot's handoff, or a note that it has none, and the
    * retired thread settles now that its work moved on.
    */
-  const settleHandoff = (successor: ThreadId, predecessor: ThreadId, handoff: string | null) =>
-    Effect.gen(function* () {
-      handoffs.delete(successor);
-      if (handoff !== null) {
-        yield* record({ type: "pivot.record-handoff", threadId: predecessor, text: handoff });
-      }
-      digests.set(successor, { kind: "takeover", predecessorThreadId: predecessor, handoff });
-      yield* threads.settle(predecessor).pipe(Effect.catchCause(logFailure("settle")));
-    });
+  const settleHandoff = Effect.fn("PivotSupervisor.settleHandoff")(function* (
+    successor: ThreadId,
+    predecessor: ThreadId,
+    handoff: string | null,
+  ) {
+    handoffs.delete(successor);
+    if (handoff !== null) {
+      yield* record({ type: "pivot.record-handoff", threadId: predecessor, text: handoff });
+    }
+    digests.set(successor, { kind: "takeover", predecessorThreadId: predecessor, handoff });
+    yield* threads.settle(predecessor).pipe(Effect.catchCause(logFailure("settle")));
+  });
 
-  const askForHandoff = (successor: ThreadId, predecessor: ThreadId) =>
-    Effect.gen(function* () {
-      const askedAtMs = yield* Clock.currentTimeMillis;
-      const runId = yield* threads
-        .request({
-          threadId: predecessor,
-          senderThreadId: successor,
-          text: renderHandoffRequest(guidance.handoff, { successorThreadId: successor }),
-        })
-        .pipe(Effect.catchCause((cause) => Effect.as(logFailure("handoff")(cause), null)));
-      if (runId === null) return yield* settleHandoff(successor, predecessor, null);
-      handoffs.set(successor, { predecessor, runId, askedAtMs });
-    });
+  const askForHandoff = Effect.fn("PivotSupervisor.askForHandoff")(function* (
+    successor: ThreadId,
+    predecessor: ThreadId,
+  ) {
+    const askedAtMs = yield* Clock.currentTimeMillis;
+    const runId = yield* threads
+      .request({
+        threadId: predecessor,
+        senderThreadId: successor,
+        text: renderHandoffRequest(guidance.handoff, { successorThreadId: successor }),
+      })
+      .pipe(Effect.catchCause((cause) => Effect.as(logFailure("handoff")(cause), null)));
+    if (runId === null) return yield* settleHandoff(successor, predecessor, null);
+    handoffs.set(successor, { predecessor, runId, askedAtMs });
+  });
 
   /** Takes each handoff whose reply came, and gives up on each whose wait is over. */
   const advanceHandoffs = Effect.gen(function* () {
-    // oxlint-disable-next-line unicorn/no-useless-spread
+    // oxlint-disable-next-line unicorn/no-useless-spread -- settling deletes from the map mid-loop
     for (const [successor, pending] of [...handoffs]) {
       const reply = yield* threads
         .runReply(pending.predecessor, pending.runId)
         .pipe(Effect.orElseSucceed(() => ({ type: "pending" as const })));
       if (reply.type === "ended") {
-        yield* settleHandoff(successor as ThreadId, pending.predecessor, reply.text);
+        yield* settleHandoff(successor, pending.predecessor, reply.text);
       } else if ((yield* Clock.currentTimeMillis) - pending.askedAtMs >= HANDOFF_WAIT_MS) {
-        yield* settleHandoff(successor as ThreadId, pending.predecessor, null);
+        yield* settleHandoff(successor, pending.predecessor, null);
       }
     }
   });

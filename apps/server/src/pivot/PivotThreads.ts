@@ -13,6 +13,7 @@ import {
   CommandId,
   MessageId,
   type ModelSelection,
+  type OrchestrationV2RunStatus,
   type OrchestrationV2ThreadShell,
   type ProjectId,
   type OrchestrationV2DomainEvent,
@@ -106,7 +107,7 @@ export const setupScriptOutcome = (snapshot: WorktreeSetupSnapshot | null): Setu
   }
 };
 
-const ENDED_RUN_STATUSES: ReadonlySet<string> = new Set([
+const ENDED_RUN_STATUSES: ReadonlySet<OrchestrationV2RunStatus> = new Set([
   "completed",
   "interrupted",
   "failed",
@@ -493,8 +494,8 @@ export const make = Effect.gen(function* () {
         });
       }).pipe(Effect.mapError(fail("send", threadId))),
 
-    request: ({ threadId, senderThreadId, text }) =>
-      Effect.gen(function* () {
+    request: Effect.fn("PivotThreads.request")(
+      function* ({ threadId, senderThreadId, text }) {
         const shell = yield* threads.getThreadShell(threadId);
         if (shell === null) {
           return yield* new PivotThreadsError({
@@ -515,7 +516,9 @@ export const make = Effect.gen(function* () {
           creationSource: "mcp",
         });
         return sent.run?.id ?? null;
-      }).pipe(Effect.mapError(fail("send the request", threadId))),
+      },
+      (effect, { threadId }) => effect.pipe(Effect.mapError(fail("send the request", threadId))),
+    ),
 
     runReply: (threadId, runId) =>
       threads.getThreadRecords(threadId, ["runs", "messages"], { runIds: [runId] }).pipe(

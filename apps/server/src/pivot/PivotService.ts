@@ -667,191 +667,190 @@ export const make = Effect.gen(function* () {
    * The teammate whose worktree and branch a dispatch takes over: one of the Pivot's ships,
    * between turns, its worktree still there. Two agents never write in one worktree.
    */
-  const attachTarget = (
+  const attachTarget = Effect.fn("PivotService.attachTarget")(function* (
     command: string,
     pivot: PivotStore.PivotRow,
     host: TeammateHost["Service"],
     input: PivotMcpDispatchTeammateInput,
     attachTo: ThreadId,
-  ) =>
-    Effect.gen(function* () {
-      if (input.baseBranch !== undefined) {
-        return yield* refuse(
-          command,
-          "An attached teammate works on the branch it takes over; baseBranch is only for a fresh worktree.",
-        );
-      }
-      if (input.kind !== "ship") {
-        return yield* refuse(command, "Only a ship attaches to another teammate's worktree.");
-      }
-      const previous = yield* ownTeammate(command, pivot, attachTo);
-      if (previous.kind !== "ship") {
-        return yield* refuse(command, "Only a ship's worktree can be taken over.");
-      }
-      const shell = yield* threads.shell(previous.threadId);
-      if (shell?.activeRunId != null) {
-        return yield* refuse(
-          command,
-          `"${previous.title}" is still working in that worktree. Wait for its turn to end, or stop it first.`,
-        );
-      }
-      if (!(yield* host.worktreeExists(previous.worktreePath))) {
-        return yield* refuse(
-          command,
-          `"${previous.title}"'s worktree was reclaimed. Relaunch it to recreate the worktree from its branch first.`,
-        );
-      }
-      return previous;
-    });
+  ) {
+    if (input.baseBranch !== undefined) {
+      return yield* refuse(
+        command,
+        "An attached teammate works on the branch it takes over; baseBranch is only for a fresh worktree.",
+      );
+    }
+    if (input.kind !== "ship") {
+      return yield* refuse(command, "Only a ship attaches to another teammate's worktree.");
+    }
+    const previous = yield* ownTeammate(command, pivot, attachTo);
+    if (previous.kind !== "ship") {
+      return yield* refuse(command, "Only a ship's worktree can be taken over.");
+    }
+    const shell = yield* threads.shell(previous.threadId);
+    if (shell?.activeRunId != null) {
+      return yield* refuse(
+        command,
+        `"${previous.title}" is still working in that worktree. Wait for its turn to end, or stop it first.`,
+      );
+    }
+    if (!(yield* host.worktreeExists(previous.worktreePath))) {
+      return yield* refuse(
+        command,
+        `"${previous.title}"'s worktree was reclaimed. Relaunch it to recreate the worktree from its branch first.`,
+      );
+    }
+    return previous;
+  });
 
   /**
    * Launches a teammate and records it, under the project lock. `promotedFrom` is the scout
    * whose report it builds on, which ends with it.
    */
-  const launchTeammate = (
+  const launchTeammate = Effect.fn("PivotService.launchTeammate")(function* (
     command: string,
     pivot: PivotStore.PivotRow,
     input: PivotMcpDispatchTeammateInput,
     promotedFrom: PivotStore.TeammateRow | null,
-  ) =>
-    Effect.gen(function* () {
-      yield* nonEmpty(command, input.title, "The title");
-      yield* nonEmpty(command, input.intent, "The intent");
-      yield* nonEmpty(command, input.spec, "The spec");
-      if (opensWithSpeakerLabel(input.intent)) {
-        return yield* refuse(
-          command,
-          'The intent opens with a speaker label. Pass the user\'s words verbatim, without "User:" or an address.',
+  ) {
+    yield* nonEmpty(command, input.title, "The title");
+    yield* nonEmpty(command, input.intent, "The intent");
+    yield* nonEmpty(command, input.spec, "The spec");
+    if (opensWithSpeakerLabel(input.intent)) {
+      return yield* refuse(
+        command,
+        'The intent opens with a speaker label. Pass the user\'s words verbatim, without "User:" or an address.',
+      );
+    }
+    return yield* withProjectLock(
+      pivot.projectId,
+      Effect.gen(function* () {
+        const host = yield* hostFor(command, null);
+        const project = yield* host.project(command, pivot.projectId);
+        const attachedFrom =
+          input.attachTo === undefined
+            ? null
+            : yield* attachTarget(command, pivot, host, input, input.attachTo);
+        const choice = chooseTeammateModel(
+          yield* teammateModels(pivot.projectId),
+          yield* teammateKindModels(pivot.projectId),
+          input,
         );
-      }
-      return yield* withProjectLock(
-        pivot.projectId,
-        Effect.gen(function* () {
-          const host = yield* hostFor(command, null);
-          const project = yield* host.project(command, pivot.projectId);
-          const attachedFrom =
-            input.attachTo === undefined
-              ? null
-              : yield* attachTarget(command, pivot, host, input, input.attachTo);
-          const choice = chooseTeammateModel(
-            yield* teammateModels(pivot.projectId),
-            yield* teammateKindModels(pivot.projectId),
-            input,
+        if (choice.type === "refused") return yield* refuse(command, choice.reason);
+        const cap = yield* teammateCap;
+        const running = (yield* store.listTeammates({ includeTornDown: false })).filter(
+          (teammate) =>
+            teammate.pivotThreadId === pivot.threadId &&
+            (teammate.observedStatus === null ||
+              teammate.observedStatus === "working" ||
+              teammate.observedStatus === "waiting"),
+        );
+        if (cap !== null && running.length >= cap) {
+          return yield* refuse(
+            command,
+            `${running.length} teammates are already running, the most at once (${cap}). Queue this one and dispatch it when one finishes.`,
           );
-          if (choice.type === "refused") return yield* refuse(command, choice.reason);
-          const cap = yield* teammateCap;
-          const running = (yield* store.listTeammates({ includeTornDown: false })).filter(
-            (teammate) =>
-              teammate.pivotThreadId === pivot.threadId &&
-              (teammate.observedStatus === null ||
-                teammate.observedStatus === "working" ||
-                teammate.observedStatus === "waiting"),
-          );
-          if (cap !== null && running.length >= cap) {
-            return yield* refuse(
-              command,
-              `${running.length} teammates are already running, the most at once (${cap}). Queue this one and dispatch it when one finishes.`,
-            );
-          }
-          const pivotShell = yield* threads.shell(pivot.threadId);
-          const modelSelection =
-            choice.modelSelection ??
-            project.defaultModelSelection ??
-            pivotShell?.modelSelection ??
-            null;
-          if (modelSelection === null) {
-            return yield* refuse(command, "No model to run the teammate on. Name one.");
-          }
-          const checkoutSnapshot =
-            input.kind === "scout" ? yield* git.checkoutState(project.workspaceRoot) : null;
-          const launched = yield* host.launch({
-            projectId: pivot.projectId,
+        }
+        const pivotShell = yield* threads.shell(pivot.threadId);
+        const modelSelection =
+          choice.modelSelection ??
+          project.defaultModelSelection ??
+          pivotShell?.modelSelection ??
+          null;
+        if (modelSelection === null) {
+          return yield* refuse(command, "No model to run the teammate on. Name one.");
+        }
+        const checkoutSnapshot =
+          input.kind === "scout" ? yield* git.checkoutState(project.workspaceRoot) : null;
+        const launched = yield* host.launch({
+          projectId: pivot.projectId,
+          pivotThreadId: pivot.threadId,
+          title: input.title,
+          kind: input.kind,
+          intent: input.intent,
+          spec: input.spec,
+          baseBranch: input.baseBranch,
+          modelSelection,
+          shipDirectly: input.shipDirectly,
+          ...(attachedFrom === null
+            ? {}
+            : {
+                attach: {
+                  worktreePath: attachedFrom.worktreePath,
+                  branch: attachedFrom.branch,
+                  baseBranch: attachedFrom.baseBranch,
+                },
+              }),
+        });
+        // Recorded before the first run gets going, so its first report finds it.
+        yield* store
+          .dispatch({
+            type: "teammate.dispatch",
             pivotThreadId: pivot.threadId,
-            title: input.title,
-            kind: input.kind,
-            intent: input.intent,
-            spec: input.spec,
-            baseBranch: input.baseBranch,
-            modelSelection,
-            shipDirectly: input.shipDirectly,
-            ...(attachedFrom === null
-              ? {}
-              : {
-                  attach: {
-                    worktreePath: attachedFrom.worktreePath,
-                    branch: attachedFrom.branch,
-                    baseBranch: attachedFrom.baseBranch,
-                  },
-                }),
-          });
-          // Recorded before the first run gets going, so its first report finds it.
-          yield* store
-            .dispatch({
-              type: "teammate.dispatch",
-              pivotThreadId: pivot.threadId,
-              threadId: launched.threadId,
-              projectId: pivot.projectId,
-              kind: input.kind,
-              title: input.title,
-              branch: launched.branch,
-              baseBranch: launched.baseBranch,
-              worktreePath:
-                launched.runId === null && launched.start === undefined
-                  ? null
-                  : launched.worktreePath,
-              deliveryMode: launched.deliveryMode,
-              intent: input.intent,
-              spec: input.spec,
-              modelEntry: choice.entry,
-              shipDirectly: input.shipDirectly === true,
-              attachedFrom: attachedFrom?.threadId ?? null,
-              promotedFrom: promotedFrom?.threadId ?? null,
-              checkoutSnapshot,
-            })
-            .pipe(Effect.tapError(() => host.discard(launched.threadId).pipe(Effect.ignore)));
-          // The predecessor's record ended with it; its thread goes too, between turns.
-          const predecessor = attachedFrom ?? promotedFrom;
-          if (predecessor !== null) {
-            yield* host.discard(predecessor.threadId).pipe(
-              Effect.catchCause((cause) =>
-                Effect.logWarning("The teammate that handed over did not archive", {
-                  threadId: predecessor.threadId,
-                  cause,
-                }),
-              ),
-            );
-          }
-          const runId = launched.start === undefined ? launched.runId : yield* launched.start;
-          const start =
-            runId === null
-              ? ({ type: "failed", runId: null, detail: "The launch created no run." } as const)
-              : yield* host.awaitStart(launched.threadId, runId);
-          // A failing setup script still starts the teammate; the result says so.
-          const setup = yield* host.setupOutcome(launched.threadId);
-          return {
             threadId: launched.threadId,
-            title: input.title,
+            projectId: pivot.projectId,
             kind: input.kind,
+            title: input.title,
             branch: launched.branch,
             baseBranch: launched.baseBranch,
-            worktreePath: launched.worktreePath,
+            worktreePath:
+              launched.runId === null && launched.start === undefined
+                ? null
+                : launched.worktreePath,
             deliveryMode: launched.deliveryMode,
+            intent: input.intent,
+            spec: input.spec,
             modelEntry: choice.entry,
-            firstRun: start.type,
-            detail: start.type === "failed" ? start.detail : null,
-            setupScript: setup.status,
-            setupDetail: setup.detail,
-          };
-        }),
-      );
-    });
+            shipDirectly: input.shipDirectly === true,
+            attachedFrom: attachedFrom?.threadId ?? null,
+            promotedFrom: promotedFrom?.threadId ?? null,
+            checkoutSnapshot,
+          })
+          .pipe(Effect.tapError(() => host.discard(launched.threadId).pipe(Effect.ignore)));
+        // The predecessor's record ended with it; its thread goes too, between turns.
+        const predecessor = attachedFrom ?? promotedFrom;
+        if (predecessor !== null) {
+          yield* host.discard(predecessor.threadId).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("The teammate that handed over did not archive", {
+                threadId: predecessor.threadId,
+                cause,
+              }),
+            ),
+          );
+        }
+        const runId = launched.start === undefined ? launched.runId : yield* launched.start;
+        const start =
+          runId === null
+            ? ({ type: "failed", runId: null, detail: "The launch created no run." } as const)
+            : yield* host.awaitStart(launched.threadId, runId);
+        // A failing setup script still starts the teammate; the result says so.
+        const setup = yield* host.setupOutcome(launched.threadId);
+        return {
+          threadId: launched.threadId,
+          title: input.title,
+          kind: input.kind,
+          branch: launched.branch,
+          baseBranch: launched.baseBranch,
+          worktreePath: launched.worktreePath,
+          deliveryMode: launched.deliveryMode,
+          modelEntry: choice.entry,
+          firstRun: start.type,
+          detail: start.type === "failed" ? start.detail : null,
+          setupScript: setup.status,
+          setupDetail: setup.detail,
+        };
+      }),
+    );
+  });
 
-  const dispatchTeammate: PivotService["Service"]["dispatchTeammate"] = (caller, input) =>
-    Effect.gen(function* () {
-      const command = "dispatch_teammate";
-      const pivot = yield* activePivot(command, caller);
-      return yield* launchTeammate(command, pivot, input, null);
-    });
+  const dispatchTeammate: PivotService["Service"]["dispatchTeammate"] = Effect.fn(
+    "PivotService.dispatchTeammate",
+  )(function* (caller, input) {
+    const command = "dispatch_teammate";
+    const pivot = yield* activePivot(command, caller);
+    return yield* launchTeammate(command, pivot, input, null);
+  });
 
   const promoteScout: PivotService["Service"]["promoteScout"] = (caller, input) =>
     Effect.gen(function* () {
@@ -934,49 +933,48 @@ export const make = Effect.gen(function* () {
    * A ship batch's escalation as the user approves it: every teammate named once, a ship of
    * the Pivot's that reported done, and the merge order the leads' branches.
    */
-  const shipBatchEscalation = (
+  const shipBatchEscalation = Effect.fn("PivotService.shipBatchEscalation")(function* (
     command: string,
     pivot: PivotStore.PivotRow,
     escalation: PivotDecisionEscalation & { readonly shipGroups: ReadonlyArray<PivotShipGroup> },
-  ) =>
-    Effect.gen(function* () {
-      if (escalation.shipGroups.length === 0) {
-        return yield* refuse(command, "A ship batch names at least one PR group.");
+  ) {
+    if (escalation.shipGroups.length === 0) {
+      return yield* refuse(command, "A ship batch names at least one PR group.");
+    }
+    const seen = new Set<string>();
+    const branches = new Map<string, string>();
+    for (const threadId of escalation.shipGroups.flatMap((group) => [
+      group.lead,
+      ...group.members,
+    ])) {
+      if (seen.has(threadId)) {
+        return yield* refuse(command, `${threadId} is named twice in the ship batch.`);
       }
-      const seen = new Set<string>();
-      const branches = new Map<string, string>();
-      for (const threadId of escalation.shipGroups.flatMap((group) => [
-        group.lead,
-        ...group.members,
-      ])) {
-        if (seen.has(threadId)) {
-          return yield* refuse(command, `${threadId} is named twice in the ship batch.`);
-        }
-        seen.add(threadId);
-        const teammate = yield* ownTeammate(command, pivot, threadId);
-        if (teammate.kind !== "ship") {
-          return yield* refuse(command, `"${teammate.title}" is a scout; only ships ship.`);
-        }
-        if (teammate.report?.status !== "done") {
-          return yield* refuse(
-            command,
-            `"${teammate.title}" has not reported done, so its work cannot ship yet.`,
-          );
-        }
-        branches.set(threadId, teammate.branch);
+      seen.add(threadId);
+      const teammate = yield* ownTeammate(command, pivot, threadId);
+      if (teammate.kind !== "ship") {
+        return yield* refuse(command, `"${teammate.title}" is a scout; only ships ship.`);
       }
-      const mergeOrder = escalation.shipGroups.map((group) => branches.get(group.lead)!);
-      if (
-        escalation.mergeOrder !== undefined &&
-        escalation.mergeOrder.join("\n") !== mergeOrder.join("\n")
-      ) {
+      if (teammate.report?.status !== "done") {
         return yield* refuse(
           command,
-          "A ship batch merges in the order of its groups; leave mergeOrder out or match it.",
+          `"${teammate.title}" has not reported done, so its work cannot ship yet.`,
         );
       }
-      return { ...escalation, asksApproval: true, mergeOrder };
-    });
+      branches.set(threadId, teammate.branch);
+    }
+    const mergeOrder = escalation.shipGroups.map((group) => branches.get(group.lead)!);
+    if (
+      escalation.mergeOrder !== undefined &&
+      escalation.mergeOrder.join("\n") !== mergeOrder.join("\n")
+    ) {
+      return yield* refuse(
+        command,
+        "A ship batch merges in the order of its groups; leave mergeOrder out or match it.",
+      );
+    }
+    return { ...escalation, asksApproval: true, mergeOrder };
+  });
 
   const escalateDecision: PivotService["Service"]["escalateDecision"] = (caller, input) =>
     Effect.gen(function* () {
@@ -1096,19 +1094,20 @@ export const make = Effect.gen(function* () {
       } satisfies PivotMcpTeammateLine;
     });
 
-  const recordVerdict: PivotService["Service"]["recordVerdict"] = (caller, input) =>
-    Effect.gen(function* () {
-      const command = "record_verdict";
-      const pivot = yield* activePivot(command, caller);
-      const teammate = yield* ownTeammate(command, pivot, input.threadId);
-      yield* store.dispatch({
-        type: "teammate.record-verdict",
-        pivotThreadId: pivot.threadId,
-        threadId: teammate.threadId,
-        text: input.verdict,
-      });
-      return { threadId: teammate.threadId, verdict: input.verdict };
+  const recordVerdict: PivotService["Service"]["recordVerdict"] = Effect.fn(
+    "PivotService.recordVerdict",
+  )(function* (caller, input) {
+    const command = "record_verdict";
+    const pivot = yield* activePivot(command, caller);
+    const teammate = yield* ownTeammate(command, pivot, input.threadId);
+    yield* store.dispatch({
+      type: "teammate.record-verdict",
+      pivotThreadId: pivot.threadId,
+      threadId: teammate.threadId,
+      text: input.verdict,
     });
+    return { threadId: teammate.threadId, verdict: input.verdict };
+  });
 
   const listTeammates: PivotService["Service"]["listTeammates"] = (caller, input) =>
     Effect.gen(function* () {
@@ -1120,15 +1119,16 @@ export const make = Effect.gen(function* () {
       return { teammates: yield* Effect.forEach(teammates, teammateLine) };
     });
 
-  const readHandoff: PivotService["Service"]["readHandoff"] = (caller) =>
-    Effect.gen(function* () {
+  const readHandoff: PivotService["Service"]["readHandoff"] = Effect.fn("PivotService.readHandoff")(
+    function* (caller) {
       const pivot = yield* activePivot("read_handoff", caller);
       const predecessor = yield* store.getPredecessor(pivot.threadId);
       return {
         predecessorThreadId: predecessor?.threadId ?? null,
         handoff: predecessor?.handoff ?? null,
       };
-    });
+    },
+  );
 
   const teammateHistory: PivotService["Service"]["teammateHistory"] = (caller, input) =>
     Effect.gen(function* () {
@@ -1251,27 +1251,25 @@ export const make = Effect.gen(function* () {
    * The decision that delivers this ship: one about it, or a ship batch it leads, whose
    * merge order covers every group.
    */
-  const deliveryDecision = (
+  const deliveryDecision = Effect.fn("PivotService.deliveryDecision")(function* (
     command: string,
     pivot: PivotStore.PivotRow,
     teammate: PivotStore.TeammateRow,
     decisionId: PivotDecisionId,
-  ) =>
-    Effect.gen(function* () {
-      const decision = yield* store.getDecision(decisionId);
-      const leads =
-        decision?.escalation?.shipGroups?.some((group) => group.lead === teammate.threadId) ===
-        true;
-      if (
-        decision !== null &&
-        decision.pivotThreadId === pivot.threadId &&
-        decision.teammateThreadId === null &&
-        leads
-      ) {
-        return decision;
-      }
-      return yield* teammateDecision(command, pivot, teammate, decisionId);
-    });
+  ) {
+    const decision = yield* store.getDecision(decisionId);
+    const leads =
+      decision?.escalation?.shipGroups?.some((group) => group.lead === teammate.threadId) === true;
+    if (
+      decision !== null &&
+      decision.pivotThreadId === pivot.threadId &&
+      decision.teammateThreadId === null &&
+      leads
+    ) {
+      return decision;
+    }
+    return yield* teammateDecision(command, pivot, teammate, decisionId);
+  });
 
   /** Why a decision does not carry the user's approval, or null when it does. */
   const notApproved = (decision: PivotDecision, what: string): string | null => {
@@ -1534,82 +1532,80 @@ export const make = Effect.gen(function* () {
    * The lead of an approved ship batch group this ship is a member of, once the lead's work
    * landed: its PR merged, or its branch landed in a project with no remote. Null otherwise.
    */
-  const landedGroup = (
+  const landedGroup = Effect.fn("PivotService.landedGroup")(function* (
     command: string,
     pivot: PivotStore.PivotRow,
     member: PivotStore.TeammateRow,
-  ) =>
-    Effect.gen(function* () {
-      const decisions = yield* store.listDecisions({
-        pivotThreadId: pivot.threadId,
-        openOnly: false,
-      });
-      for (const decision of decisions) {
-        if (decision.userApproved !== true) continue;
-        for (const group of decision.escalation?.shipGroups ?? []) {
-          if (!group.members.includes(member.threadId)) continue;
-          const lead = yield* store.getTeammate(group.lead);
-          if (lead === null) continue;
-          if (lead.deliveryMode === "local-only") {
-            // land_teammate records the landing; once the lead is torn down its branch is gone.
-            const history = yield* store.teammateHistory({ threadId: lead.threadId, limit: 500 });
-            if (history.some((stored) => stored.event.type === "teammate.landed")) return lead;
-            const verdict = yield* (yield* hostOf(command, lead)).landed(command, {
-              projectId: lead.projectId,
-              worktreePath: lead.worktreePath,
-              branch: lead.branch,
-              mergedPullRequestHead: null,
-            });
-            if (verdict.landed) return lead;
-            continue;
-          }
-          const link = yield* linkedPullRequest(yield* withRecordedWorktree(lead));
-          if (link !== null && (yield* pullRequestMerged(command, lead, link))) return lead;
-        }
-      }
-      return null;
+  ) {
+    const decisions = yield* store.listDecisions({
+      pivotThreadId: pivot.threadId,
+      openOnly: false,
     });
+    for (const decision of decisions) {
+      if (decision.userApproved !== true) continue;
+      for (const group of decision.escalation?.shipGroups ?? []) {
+        if (!group.members.includes(member.threadId)) continue;
+        const lead = yield* store.getTeammate(group.lead);
+        if (lead === null) continue;
+        if (lead.deliveryMode === "local-only") {
+          // land_teammate records the landing; once the lead is torn down its branch is gone.
+          const history = yield* store.teammateHistory({ threadId: lead.threadId, limit: 500 });
+          if (history.some((stored) => stored.event.type === "teammate.landed")) return lead;
+          const verdict = yield* (yield* hostOf(command, lead)).landed(command, {
+            projectId: lead.projectId,
+            worktreePath: lead.worktreePath,
+            branch: lead.branch,
+            mergedPullRequestHead: null,
+          });
+          if (verdict.landed) return lead;
+          continue;
+        }
+        const link = yield* linkedPullRequest(yield* withRecordedWorktree(lead));
+        if (link !== null && (yield* pullRequestMerged(command, lead, link))) return lead;
+      }
+    }
+    return null;
+  });
 
   /**
    * Ends a scout once its report is recorded, or on the user's word without one. It works
    * in the project's own checkout, so nothing there is removed or reset.
    */
-  const teardownScout = (
+  const teardownScout = Effect.fn("PivotService.teardownScout")(function* (
     command: string,
     pivot: PivotStore.PivotRow,
     host: TeammateHost["Service"],
     teammate: PivotStore.TeammateRow,
     input: PivotMcpTeardownTeammateInput,
-  ) =>
-    Effect.gen(function* () {
-      let reason = "Its scout report is recorded.";
-      if (teammate.scoutReport === null) {
-        if (input.discardDecisionId === undefined) {
-          return yield* refuse(
-            command,
-            "Not torn down: the scout has not recorded its report. Ending it without one needs the user's word.",
-          );
-        }
-        yield* userApproval(command, pivot, teammate, input.discardDecisionId, "Discarding work");
-        reason = "Ended on the user's word, with no scout report recorded.";
+  ) {
+    let reason = "Its scout report is recorded.";
+    if (teammate.scoutReport === null) {
+      if (input.discardDecisionId === undefined) {
+        return yield* refuse(
+          command,
+          "Not torn down: the scout has not recorded its report. Ending it without one needs the user's word.",
+        );
       }
-      yield* host.teardown(command, {
-        projectId: pivot.projectId,
-        threadId: teammate.threadId,
-        worktreePath: teammate.worktreePath,
-        branch: teammate.branch,
-        worktreeExists: false,
-        force: false,
-        branchDisposal: "keep",
-        inMainCheckout: true,
-      });
-      yield* store.dispatch({
-        type: "teammate.tear-down",
-        pivotThreadId: pivot.threadId,
-        threadId: teammate.threadId,
-      });
-      return { threadId: teammate.threadId, reason, branch: teammate.branch };
+      yield* userApproval(command, pivot, teammate, input.discardDecisionId, "Discarding work");
+      reason = "Ended on the user's word, with no scout report recorded.";
+    }
+    yield* host.teardown(command, {
+      projectId: pivot.projectId,
+      threadId: teammate.threadId,
+      worktreePath: teammate.worktreePath,
+      branch: teammate.branch,
+      worktreeExists: false,
+      force: false,
+      branchDisposal: "keep",
+      inMainCheckout: true,
     });
+    yield* store.dispatch({
+      type: "teammate.tear-down",
+      pivotThreadId: pivot.threadId,
+      threadId: teammate.threadId,
+    });
+    return { threadId: teammate.threadId, reason, branch: teammate.branch };
+  });
 
   const teardownTeammate: PivotService["Service"]["teardownTeammate"] = (caller, input) =>
     Effect.gen(function* () {

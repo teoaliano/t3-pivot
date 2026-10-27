@@ -76,12 +76,12 @@ export const PivotEvent = Schema.Union([
   event("teammate.promoted", { threadId: ThreadId, spec: Schema.String }),
   /** A ship was dispatched from the scout's report, and the scout ended. */
   event("teammate.scout-promoted", { threadId: ThreadId, shipThreadId: ThreadId }),
+  /** The Pivot reviewed the teammate's `done`. */
+  event("teammate.verdict-recorded", { threadId: ThreadId, text: Schema.String }),
   /**
    * The teammate was told to push and open its PR: at dispatch when the user said to ship
    * directly (no decision), or by the approved ship batch `decisionId`.
    */
-  /** The Pivot reviewed the teammate's `done`. */
-  event("teammate.verdict-recorded", { threadId: ThreadId, text: Schema.String }),
   event("teammate.ship-ordered", {
     threadId: ThreadId,
     decisionId: Schema.NullOr(PivotDecisionId),

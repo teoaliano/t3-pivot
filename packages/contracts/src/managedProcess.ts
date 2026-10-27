@@ -64,7 +64,8 @@ export type ManagedProcessSubscribeInput = typeof ManagedProcessSubscribeInput.T
 /** The checkout is the thread's worktree, or its project's root when it has none. */
 export const ManagedProcessStartInput = Schema.Struct({
   threadId: ThreadId,
-  scriptId: TrimmedNonEmptyString,
+  /** Omitted, the checkout's dev server: the project's dev action, else its package.json dev script. */
+  scriptId: Schema.optional(TrimmedNonEmptyString),
   /** Move the checkout to a new port block first, the answer to a port conflict. */
   reallocate: Schema.optional(Schema.Boolean),
 });
