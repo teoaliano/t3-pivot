@@ -61,6 +61,7 @@ import {
 } from "@t3tools/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
+import * as ThreadAdmission from "./ThreadAdmission.ts";
 import {
   isRestartNoteContinuation,
   pendingRestartCancelledBackgroundWork,
@@ -159,6 +160,7 @@ export const layer: Layer.Layer<
     const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
     const runtimePolicy = yield* RuntimePolicy.RuntimePolicyV2;
     const agentScope = yield* AgentScope;
+    const threadAdmission = yield* ThreadAdmission.ThreadAdmission;
     const isManagedWorktreePath = yield* makeIsManagedWorktreePath;
 
     const recreateMissingWorktree = Effect.fn("ProviderTurnStartService.recreateMissingWorktree")(
@@ -494,7 +496,7 @@ export const layer: Layer.Layer<
           const memoryReason = Predicate.isTagged(failed.error, "AgentMemoryWaitError")
             ? undefined
             : oomKilled
-              ? "Couldn't start: the agent was killed because memory ran out. Stop idle dev servers or agents and retry."
+              ? "Couldn't start: the agent was killed because memory ran out. Stop idle dev servers or teammates and retry."
               : userFacingStartFailureMemory(memory);
           yield* settleRunBeforeStart({
             signal: failed.signal,
@@ -683,6 +685,7 @@ export const layer: Layer.Layer<
         const admission = yield* agentScope.admit({
           ticketId: run.id,
           threadId: projection.thread.id,
+          spaced: yield* threadAdmission.isBackgroundAgent(projection.thread.id),
         });
         if (admission._tag === "waiting") {
           return yield* new AgentMemoryDeferral({ status: admission.status });

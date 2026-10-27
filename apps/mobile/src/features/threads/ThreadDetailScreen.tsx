@@ -147,6 +147,7 @@ import {
   clearThreadComposerError,
   threadComposerErrorsAtom,
 } from "../../state/thread-composer-error";
+import { useRetiredPivot } from "../../state/pivot";
 import {
   environmentThreadDetails,
   environmentThreadShells,
@@ -155,6 +156,7 @@ import {
 import { appAtomRegistry } from "../../state/atom-registry";
 import { threadStreamHaptics } from "./threadStreamHaptics";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
 import { useDelayedStatus } from "../../lib/useDelayedStatus";
 import type {
   PendingApproval,
@@ -169,6 +171,7 @@ import { ComposerFeedback } from "./ComposerFeedback";
 import { ComposerUsageLimits } from "./ComposerUsageLimits";
 import { PendingUserInputCard } from "./PendingUserInputCard";
 import { ProviderSubagentBar } from "./ProviderSubagentBar";
+import { RetiredPivotBar } from "./RetiredPivotBar";
 import { ThreadCreationFailedCard } from "./ThreadCreationFailedCard";
 import {
   FLOATING_WORKING_CONTROL_COVERAGE,
@@ -362,6 +365,7 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
   const [composerOwnsKeyboard, setComposerOwnsKeyboard] = useState(false);
   if (sidebarSearchActive && composerOwnsKeyboard) setComposerOwnsKeyboard(false);
   const navigation = useNavigation();
+  const selectDetail = useSelectWorkspaceDetail();
   const openLinkedThread = useOpenLinkedThread();
   const openInspector = useOpenThreadInspector();
   const { session: voiceInputSession } = useGlobalVoiceInput();
@@ -450,6 +454,7 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
   const defaultComposerEditorRef = useRef<ComposerEditorHandle>(null);
   const composerEditorRef = props.draftMode?.editorRef ?? defaultComposerEditorRef;
   const isProviderSubagent = isProviderNativeSubagentThread(props.selectedThread.source);
+  const retiredPivot = useRetiredPivot(props.environmentId, props.selectedThread.id);
   const editingRunId = props.queuedRunEdit?.runId ?? null;
   useEffect(() => {
     if (editingRunId === null) return;
@@ -1564,6 +1569,30 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
                                 openLinkedThread({
                                   environmentId: String(props.environmentId),
                                   threadId: String(props.selectedThread.lineage.parentThreadId),
+                                })
+                        }
+                      />
+                    </View>
+                  ) : retiredPivot !== null ? (
+                    <View
+                      className="self-center px-3 pt-1.5"
+                      style={{
+                        width: "100%",
+                        maxWidth: contentMaxWidth,
+                        paddingBottom: composerBottomInset + 6,
+                      }}
+                    >
+                      <RetiredPivotBar
+                        onOpenSuccessor={
+                          retiredPivot.successorThreadId === null
+                            ? null
+                            : () =>
+                                selectDetail({
+                                  name: "Thread",
+                                  params: {
+                                    environmentId: String(props.environmentId),
+                                    threadId: String(retiredPivot.successorThreadId),
+                                  },
                                 })
                         }
                       />

@@ -36,7 +36,7 @@ describe("diagnoseStartFailureMemory", () => {
   it("reports a slice over its limit with the user-facing message", () => {
     const diagnosis = diagnoseStartFailureMemory({ read: slice(9.8e9, "9400000000") });
     expect(formatStartFailureMemory(diagnosis)).toBe(
-      "Couldn't start: the agent slice is over its memory limit (9.8 GB of 9.4 GB). Stop idle dev servers or agents and retry.",
+      "Couldn't start: the agent slice is over its memory limit (9.8 GB of 9.4 GB). Stop idle dev servers or teammates and retry.",
     );
   });
 

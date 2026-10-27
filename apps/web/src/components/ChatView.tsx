@@ -82,6 +82,7 @@ import {
 import {
   deriveProviderSubagentStatus,
   deriveReportedModelSelection,
+  runAsProviderSubagentStatus,
   formatModelSelectionEffort,
   deriveRunlessWorkStartedAt,
   deriveThreadActivityRun,
@@ -273,6 +274,7 @@ import { useCitedHistory } from "./chat/citationProcedure";
 import type { MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
 import { ThreadTimeline } from "./chat/ThreadTimeline";
 import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
+import { PivotComposerBar, PivotDecisionsStrip, usePivotChatRole } from "./pivot/PivotChatChrome";
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import {
   overlayComposerIsResting,
@@ -422,6 +424,7 @@ export default function ChatView(props: ChatViewProps) {
   } = props;
   const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const canOperateTerminal = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
+  const pivotRole = usePivotChatRole(environmentId, threadId);
   const draftId = routeKind === "draft" ? props.draftId : null;
   const handleNewThread = useNewThreadHandler();
   const routeThreadRef = scopeThreadRef(environmentId, threadId);
@@ -810,10 +813,13 @@ export default function ChatView(props: ChatViewProps) {
       ? run.id
       : null;
   })();
+  // A Pivot teammate reads like a subagent of its Pivot: it runs on its own,
+  // so its chat leads back to the Pivot instead of taking messages.
+  const pivotTeammateOf = pivotRole.kind === "teammate" ? pivotRole.pivotThreadId : null;
   const parentSubagentThreadId =
     activeThread?.lineage.relationshipToParent === "subagent"
       ? activeThread.lineage.parentThreadId
-      : null;
+      : pivotTeammateOf;
   const parentSubagentEnvironmentId = activeThread?.environmentId ?? null;
   const parentSubagentThreadRef = (() => {
     if (parentSubagentEnvironmentId === null || parentSubagentThreadId === null) {
@@ -849,6 +855,10 @@ export default function ChatView(props: ChatViewProps) {
       : {
           threadId: parentSubagentThreadRef.threadId,
           title: parentSubagentThread?.title ?? "Parent thread",
+          relation:
+            activeThread?.lineage.relationshipToParent !== "subagent" && pivotTeammateOf !== null
+              ? ("Teammate of" as const)
+              : ("Subagent of" as const),
         };
   const threadError = isServerThread
     ? (localServerError ?? serverRuntime?.lastError ?? null)
@@ -1643,8 +1653,17 @@ export default function ChatView(props: ChatViewProps) {
   }, [environmentId, gitStatusCwd, liveIsGitRepo]);
   const isGitRepo = liveIsGitRepo ?? recallCheckoutIsRepo(environmentId, gitStatusCwd) ?? true;
   // Provider-native subagents cannot take messages; approvals and questions go to the top-level parent.
-  const showProviderSubagentBar = isProviderSubagent;
-  const composerMounted = !showProviderSubagentBar;
+  // A Pivot teammate gets the same bar, but its approvals and questions arrive in its own
+  // thread, so the composer returns only to answer them.
+  const showProviderSubagentBar =
+    isProviderSubagent ||
+    (pivotTeammateOf !== null && pendingApprovals.length === 0 && pendingUserInputs.length === 0);
+  const subagentBarStatus = isProviderSubagent
+    ? providerSubagentStatus
+    : runAsProviderSubagentStatus(activeActivityRun);
+  // T3 Pivot: a retired Pivot is read-only history.
+  const showPivotComposerBar = pivotRole.kind === "pivot" && pivotRole.retired;
+  const composerMounted = !showProviderSubagentBar && !showPivotComposerBar;
   const providerSubagentModels = selectedProviderEntry?.models ?? EMPTY_PROVIDER_MODELS;
   // Providers can report dated model ids or aliases.
   const providerSubagentModelSlug = selectedProviderEntry
@@ -3447,6 +3466,9 @@ export default function ChatView(props: ChatViewProps) {
                         : undefined
                     }
                   >
+                    {pivotRole.kind === "pivot" && !pivotRole.retired ? (
+                      <PivotDecisionsStrip environmentId={environmentId} pivotThreadId={threadId} />
+                    ) : null}
                     <ComposerSurface.Shell
                       contextStrip={showComposerContextStrip || showComposerModelStrip}
                     >
@@ -3467,12 +3489,18 @@ export default function ChatView(props: ChatViewProps) {
                               }
                               modelLabel={providerSubagentModelLabel}
                               effortLabel={providerSubagentEffortLabel}
-                              status={providerSubagentStatus}
+                              status={subagentBarStatus}
                               onOpenParent={
                                 parentThreadLink
                                   ? () => onOpenRelatedThread(parentThreadLink.threadId)
                                   : null
                               }
+                            />
+                          ) : null}
+                          {pivotRole.kind === "pivot" && pivotRole.retired ? (
+                            <PivotComposerBar
+                              environmentId={environmentId}
+                              successorThreadId={pivotRole.successorThreadId}
                             />
                           ) : null}
                           {!composerMounted ? null : (
@@ -3677,7 +3705,8 @@ export default function ChatView(props: ChatViewProps) {
                                 projectId={activeThread.projectId}
                                 worktreePath={activeThread.worktreePath}
                                 isServerThread={isServerThread}
-                                showGitControls={isGitRepo}
+                                // A Pivot runs in its own home, so the branch and worktree controls do not apply.
+                                showGitControls={isGitRepo && draftThread?.pivot !== true}
                                 {...(routeKind === "draft" && draftId ? { draftId } : {})}
                                 onEnvModeChange={onEnvModeChangeStable}
                                 startFromOrigin={startFromOrigin}

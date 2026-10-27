@@ -74,6 +74,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   connectionProbe: Schema.optionalKey(Schema.Boolean),
   attachmentUploads: Schema.optionalKey(Schema.Boolean),
   questionAttachments: Schema.optionalKey(Schema.Boolean),
+  /** Images may accompany a Pivot decision's answer. */
+  pivotDecisionAttachments: Schema.optionalKey(Schema.Boolean),
   fileAttachments: Schema.optionalKey(
     Schema.Struct({
       maxUploadBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
@@ -84,6 +86,13 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Absent on older servers; serialize context as legacy text for them. */
   inlineMessageContext: Schema.optionalKey(Schema.Boolean),
   requiredWorktreeBootstrap: Schema.optionalKey(Schema.Boolean),
+  /** T3 Pivot: the server runs Pivot mode and serves the `pivot.*` methods. Absent on
+      T3 Code servers, so clients never subscribe to a stream they do not serve. */
+  pivotMode: Schema.optionalKey(Schema.Boolean),
+  /** T3 Pivot: the server can host teammates for another environment's Pivot and serves the
+      `pivotHost.*` methods. Absent means false, as on T3 Code servers and older T3 Pivot, so a
+      Pivot never offers one of them as a peer. */
+  pivotHost: Schema.optionalKey(Schema.Boolean),
   threadSettlement: Schema.optionalKey(Schema.Boolean),
   threadAutoSettlement: Schema.optionalKey(Schema.Boolean),
   storageCleanup: Schema.optionalKey(Schema.Boolean),

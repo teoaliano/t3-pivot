@@ -1,0 +1,170 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>C · Mode rail + Pivot board</title>
+    <link rel="stylesheet" href="shared.css" />
+  </head>
+  <body data-hint="Try: the ◆ rail button, pick a Pivot tile, then ← All Pivots">
+    <div class="app" id="app">
+      <nav class="rail" id="rail"></nav>
+      <aside class="sb" id="sb"></aside>
+      <main class="main" id="main"></main>
+    </div>
+    <script src="shared.js"></script>
+    <script src="bar.js"></script>
+    <script>
+      // Option C: a thin rail switches the whole app between Threads (today's T3) and Pivots.
+      // Pivots mode is a board of every Pivot across projects; a tile opens its Pivot view.
+      const { data, h, mountChat, mountPivotView, statusDot, STATUS } = Proto;
+      const app = document.getElementById("app"),
+        rail = document.getElementById("rail"),
+        sb = document.getElementById("sb"),
+        main = document.getElementById("main");
+      const ui = { mode: "threads", selected: null };
+
+      function renderRail() {
+        rail.replaceChildren(
+          h(
+            "button",
+            {
+              class: ui.mode === "threads" ? "on" : "",
+              title: "Threads",
+              onclick: () => setMode("threads"),
+            },
+            "💬",
+          ),
+          h(
+            "button",
+            {
+              class: ui.mode === "pivots" ? "on" : "",
+              title: "Pivots",
+              onclick: () => setMode("pivots"),
+            },
+            "◆",
+          ),
+        );
+      }
+      function setMode(mode) {
+        ui.mode = mode;
+        app.classList.remove("full");
+        sb.style.display = mode === "threads" ? "" : "none";
+        renderRail();
+        if (mode === "pivots") renderBoard();
+        else {
+          renderSidebar();
+          main.replaceChildren(h("div", { class: "empty" }, "Today's T3: ordinary chats"));
+        }
+      }
+      function counts(p) {
+        const tally = {};
+        for (const t of p.teammates) tally[t.status] = (tally[t.status] || 0) + 1;
+        return Object.entries(tally).map(([s, n]) =>
+          h("span", {}, statusDot(s), n, " ", STATUS[s].label),
+        );
+      }
+      function renderBoard() {
+        main.replaceChildren(
+          h(
+            "div",
+            { class: "header" },
+            h("div", { class: "left" }, h("b", {}, "Pivots")),
+            h("span"),
+            h(
+              "div",
+              { class: "right" },
+              h(
+                "button",
+                {
+                  class: "btn primary",
+                  onclick: () => Proto.toast("New Pivot: pick project, provider, model"),
+                },
+                "+ New Pivot",
+              ),
+            ),
+          ),
+          h(
+            "div",
+            { class: "board" },
+            data.pivots.map((p) =>
+              h(
+                "button",
+                { class: "tile", onclick: () => openPivotView(p.id) },
+                h(
+                  "div",
+                  { class: "label", style: "color:#e8913c" },
+                  "▣ ",
+                  Proto.projectName(p.project),
+                ),
+                h("div", { class: "t" }, p.title),
+                p.decisions.length
+                  ? h(
+                      "div",
+                      {},
+                      h("span", { class: "badge warn" }, p.decisions.length + " needs you"),
+                    )
+                  : null,
+                h("div", { class: "counts" }, counts(p)),
+                h(
+                  "div",
+                  { class: "label" },
+                  "Last: ",
+                  p.messages[p.messages.length - 1].text ||
+                    p.messages[p.messages.length - 1].summary,
+                ),
+              ),
+            ),
+            h(
+              "button",
+              {
+                class: "tile new",
+                onclick: () => Proto.toast("New Pivot: pick project, provider, model"),
+              },
+              "+ New Pivot",
+            ),
+          ),
+        );
+      }
+      function openPivotView(id) {
+        app.classList.add("full");
+        mountPivotView(main, id, {
+          exit: { label: "← All Pivots", onExit: () => setMode("pivots") },
+        });
+      }
+      function renderSidebar() {
+        const list = h("div", { class: "sb-list" });
+        for (const project of data.projects) {
+          list.append(h("div", { class: "sb-project" }, project.name));
+          for (const c of data.chats.filter((c) => c.project === project.id))
+            list.append(
+              h(
+                "button",
+                {
+                  class: "sb-item " + (ui.selected === c.id ? "on" : ""),
+                  onclick: () => {
+                    ui.selected = c.id;
+                    renderSidebar();
+                    mountChat(main, {
+                      title: c.title,
+                      project: c.project,
+                      messages: [
+                        { who: "user", text: "…" },
+                        { who: "pivot", text: "An ordinary T3 chat." },
+                      ],
+                    });
+                  },
+                },
+                h("span", { class: "grow" }, c.title),
+              ),
+            );
+        }
+        sb.replaceChildren(
+          h("div", { class: "sb-search" }, "Search"),
+          h("div", { class: "sb-row-actions" }, h("button", { class: "sb-new" }, "+ New chat")),
+          list,
+        );
+      }
+      setMode("threads");
+    </script>
+  </body>
+</html>
