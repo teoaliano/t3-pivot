@@ -30,6 +30,7 @@ export const usePivotStatesStore = create<{
 export function PivotStateSync(props: { environmentId: EnvironmentId }) {
   const state = usePivotState(props.environmentId);
   const set = usePivotStatesStore((store) => store.set);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- publishes the environment's Pivot state to the store for the sidebar and notifications until unmount
   useEffect(() => {
     set(props.environmentId, state);
     return () => set(props.environmentId, null);

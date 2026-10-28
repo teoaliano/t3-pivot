@@ -34,5 +34,6 @@ export function discardClosedDecisionDraft(decision: PivotDecision): void {
  * is answered.
  */
 export function useDiscardClosedDecisionDraft(decision: PivotDecision): void {
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- clears the composer draft store entry once the decision is closed
   useEffect(() => discardClosedDecisionDraft(decision), [decision]);
 }

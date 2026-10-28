@@ -120,6 +120,7 @@ function NewPivotCreation(props: { target: NewPivotTarget; onDone: () => void })
   // only once the project's Pivots have loaded so a replacement is never missed.
   const started = useRef(false);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- drives the one-shot create-Pivot flow (dialogs, navigation) once the project's Pivots have loaded
   useEffect(() => {
     if (started.current || pivotState === null) return;
     started.current = true;

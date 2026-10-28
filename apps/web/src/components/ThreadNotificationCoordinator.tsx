@@ -3,7 +3,7 @@ import {
   type PendingSubagentRequest,
   presentThreadShell,
 } from "@t3tools/client-runtime/state/models";
-import { pendingSubagentRequestsByThread } from "@t3tools/client-runtime/state/threads";
+import { isShownUnderParent } from "@t3tools/client-runtime/state/threads";
 import type { AnyRouter } from "@tanstack/react-router";
 import type { PivotState } from "@t3tools/client-runtime/pivot-state";
 import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
@@ -24,6 +24,7 @@ import { isWindowsPlatform } from "../lib/utils";
 import { environmentSummaries } from "../state/presentation";
 import { pivotStateAtom } from "../state/pivot";
 import { environmentShell } from "../state/shell";
+import { environmentThreadShells } from "../state/threads";
 import {
   hasDesktopNotifications,
   hasNotificationSound,
@@ -242,10 +243,22 @@ export function startThreadNotifications(
   ) => {
     const previous = entry.previous;
     const next = new Map<ThreadId, NotificationState>();
-    const subagentRequests = pendingSubagentRequestsByThread(threads);
+    // A parent here also hears of what its tasks on linked environments ask.
+    const subagentRequests = registry.get(
+      environmentThreadShells.pendingSubagentRequestsAtom(environmentId),
+    );
+    const delegatedUnderParent = registry.get(environmentThreadShells.delegatedUnderParentAtom);
     const changed: Array<[NotificationState | undefined, NotificationState]> = [];
     for (const rawThread of threads) {
-      if (rawThread.lineage.relationshipToParent === "subagent") continue;
+      if (
+        isShownUnderParent(
+          { environmentId, threadId: rawThread.id },
+          rawThread.lineage,
+          delegatedUnderParent,
+        )
+      ) {
+        continue;
+      }
       const prior = previous.get(rawThread.id);
       const subagentRequest = subagentRequests.get(rawThread.id) ?? null;
       if (prior?.raw === rawThread && prior.subagentRequest === subagentRequest) {
@@ -297,10 +310,11 @@ export function startThreadNotifications(
         if (state) present(environmentId, state, kind, entry.pivotState);
       }),
     };
+    let threads: ReadonlyArray<OrchestrationV2ThreadShell> | null = null;
     const unsubscribeShell = registry.subscribe(
       environmentShell.stateValueAtom(environmentId),
       (shell) => {
-        const threads =
+        threads =
           shell.status === "live" && Option.isSome(shell.snapshot)
             ? shell.snapshot.value.threads
             : null;
@@ -327,9 +341,22 @@ export function startThreadNotifications(
       },
       { immediate: true },
     );
+    const reobserve = () => {
+      if (threads !== null) observeThreads(environmentId, entry, threads);
+    };
+    const unsubscribeRequests = registry.subscribe(
+      environmentThreadShells.pendingSubagentRequestsAtom(environmentId),
+      reobserve,
+    );
+    const unsubscribeDelegated = registry.subscribe(
+      environmentThreadShells.delegatedUnderParentAtom,
+      reobserve,
+    );
     entry.unsubscribe = () => {
       unsubscribeShell();
       unsubscribePivot();
+      unsubscribeRequests();
+      unsubscribeDelegated();
       entry.gate.clear();
     };
     return entry;

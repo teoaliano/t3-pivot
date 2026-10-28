@@ -270,6 +270,7 @@ function QuestionDecision({
         : attachments.blockReason;
 
   // Number keys pick an option while focus is outside editable fields, like provider questions.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- window keydown listener that picks an option by number key while the card is active
   useEffect(() => {
     if (!active || sending || options.length === 0) return;
     const handler = (event: KeyboardEvent) => {

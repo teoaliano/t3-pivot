@@ -146,6 +146,7 @@ const fakeLayer = (world: World) =>
       setManagedPorts: () => Effect.void,
       terminalProcessIds: (input) =>
         Effect.sync(() => world.descendants.get(`${input.threadId}/${input.terminalId}`) ?? []),
+      trackAgent: () => () => undefined,
     }),
     Layer.mock(ProcessInspector)({
       isAlive: (pid) => Effect.sync(() => world.alive.has(pid)),

@@ -18,6 +18,7 @@ export function PivotAppChrome() {
   const environmentIds = useEnvironmentIds();
   const pivotEnvironmentIds = usePivotModeEnvironmentIds();
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- window keydown listener for the new-Pivot shortcut
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (pivotEnvironmentIds.size > 0 && isNewPivotShortcut(event, keybindings)) {

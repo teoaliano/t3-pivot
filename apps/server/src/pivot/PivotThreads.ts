@@ -411,7 +411,9 @@ export const make = Effect.gen(function* () {
             })
             .pipe(Effect.option);
           setup =
-            Option.isNone(started) || started.value.status === "no-script"
+            Option.isNone(started) ||
+            started.value.status === "no-script" ||
+            started.value.status === "skipped-for-link"
               ? { status: Option.isNone(started) ? "failed" : "none", detail: null }
               : started.value.async || started.value.completion === undefined
                 ? { status: "running", detail: null }
