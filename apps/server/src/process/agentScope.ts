@@ -187,7 +187,8 @@ function parseCgroupCounter(text: string, key: string): number | undefined {
 }
 
 // systemd's default 90 s stop timeout would outlast our leftover-agent wait.
-const STOP_TIMEOUT_OPTION = "--property=TimeoutStopSec=10s";
+// Delegation lets rootless containers (Podman, kind) manage their own cgroups.
+const SCOPE_OPTIONS = ["--property=TimeoutStopSec=10s", "--property=Delegate=yes"];
 const OOM_STOP_OPTION = "--property=OOMPolicy=stop";
 const OOM_CONTINUE_OPTION = "--property=OOMPolicy=continue";
 const STOPPING_POLL_INTERVAL = "100 millis";
@@ -302,7 +303,7 @@ export const make = Effect.gen(function* () {
       });
       // Each option set is proven before use, so a user manager without the memory
       // controller still gets scopes, just without per-scope limits.
-      const stopOptions = [STOP_TIMEOUT_OPTION];
+      const stopOptions = SCOPE_OPTIONS;
       const oomOptions = [OOM_STOP_OPTION];
       const memoryOptions = [
         `--property=MemoryHigh=${scopeLimits.high}`,

@@ -43,7 +43,6 @@ import { AgentScope } from "@t3tools/shared/AgentScope";
 import { AgentScopeOwner } from "../process/agentScope.ts";
 import { procHost, stopWorktreeProcesses } from "../process/scopeReaper.ts";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
-import * as ThreadLifecycle from "../orchestration-v2/ThreadLifecycleService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 
 export class PivotThreadsError extends Schema.TaggedError<PivotThreadsError>()(
@@ -244,7 +243,6 @@ export class PivotThreads extends Context.Service<
 export const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const launches = yield* ThreadLaunch.ThreadLaunchService;
-  const lifecycle = yield* ThreadLifecycle.ThreadLifecycleService;
   const projects = yield* ProjectService.ProjectService;
   const pullRequests = yield* PullRequestService.PullRequestService;
   const processes = yield* ManagedProcesses.ManagedProcesses;
@@ -500,7 +498,11 @@ export const make = Effect.gen(function* () {
 
     archive: (threadId) =>
       Effect.gen(function* () {
-        yield* lifecycle.archive({ commandId: yield* commandId("archive"), threadId });
+        yield* threads.dispatch({
+          type: "thread.archive",
+          commandId: yield* commandId("archive"),
+          threadId,
+        });
       }).pipe(Effect.mapError(fail("archive", threadId))),
 
     settle: (threadId) =>
