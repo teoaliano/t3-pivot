@@ -326,22 +326,23 @@ export const make = Effect.gen(function* () {
       ),
     );
 
-  const createGrant: PivotHostStore["Service"]["createGrant"] = ({ allowedProjectIds }) =>
-    Effect.gen(function* () {
-      const grantId = `grant-${yield* randomUuidV4}`;
-      const createdAt = yield* now;
-      return yield* write(
-        "createGrant",
-        () => null,
-        Effect.gen(function* () {
-          yield* sql`
+  const createGrant = Effect.fn("PivotHostStore.createGrant")(function* ({
+    allowedProjectIds,
+  }: Parameters<PivotHostStore["Service"]["createGrant"]>[0]) {
+    const grantId = `grant-${yield* randomUuidV4}`;
+    const createdAt = yield* now;
+    return yield* write(
+      "createGrant",
+      () => null,
+      Effect.gen(function* () {
+        yield* sql`
             INSERT INTO pivot_host_grants (grant_id, subject, allowed_project_ids, created_at)
             VALUES (${grantId}, ${pivotHostSubject(grantId)}, ${encodeAllowlist([...new Set(allowedProjectIds)])}, ${createdAt})
           `;
-          return (yield* readGrant(grantId))!;
-        }),
-      );
-    });
+        return (yield* readGrant(grantId))!;
+      }),
+    );
+  });
 
   const setAllowlist: PivotHostStore["Service"]["setAllowlist"] = (grantId, projectIds) =>
     write(
@@ -378,26 +379,25 @@ export const make = Effect.gen(function* () {
       ),
     );
 
-  const revokeGrant: PivotHostStore["Service"]["revokeGrant"] = (grantId) =>
-    Effect.gen(function* () {
-      const revokedAt = yield* now;
-      const revoked = yield* write(
-        "revokeGrant",
-        (result) => (result === null ? null : grantId),
-        Effect.gen(function* () {
-          const before = yield* readGrant(grantId);
-          if (before === null || before.revokedAt !== null) return null;
-          yield* sql`
+  const revokeGrant = Effect.fn("PivotHostStore.revokeGrant")(function* (grantId: string) {
+    const revokedAt = yield* now;
+    const revoked = yield* write(
+      "revokeGrant",
+      (result) => (result === null ? null : grantId),
+      Effect.gen(function* () {
+        const before = yield* readGrant(grantId);
+        if (before === null || before.revokedAt !== null) return null;
+        yield* sql`
             UPDATE pivot_host_grants
             SET allowed_project_ids = '[]', bound_home_environment_id = NULL, revoked_at = ${revokedAt}
             WHERE grant_id = ${grantId} AND revoked_at IS NULL
           `;
-          return yield* liveThreadIdsOf(grantId);
-        }),
-        (ids) => ids?.forEach((id) => live.delete(id)),
-      );
-      return revoked !== null;
-    });
+        return yield* liveThreadIdsOf(grantId);
+      }),
+      (ids) => ids?.forEach((id) => live.delete(id)),
+    );
+    return revoked !== null;
+  });
 
   const bindHome: PivotHostStore["Service"]["bindHome"] = (grantId, homeEnvironmentId) =>
     write(
@@ -416,17 +416,19 @@ export const make = Effect.gen(function* () {
       }),
     );
 
-  const recordTeammate: PivotHostStore["Service"]["recordTeammate"] = (input, options) =>
-    Effect.gen(function* () {
-      const createdAt = yield* now;
-      return yield* write(
-        "recordTeammate",
-        () => null,
-        Effect.gen(function* () {
-          // Inserted only while the link stands and allows the project, in the same
-          // statement, so a revoke or allowlist edit that lands while a launch runs cannot
-          // leave a record behind.
-          yield* sql`
+  const recordTeammate = Effect.fn("PivotHostStore.recordTeammate")(function* (
+    input: Parameters<PivotHostStore["Service"]["recordTeammate"]>[0],
+    options?: Parameters<PivotHostStore["Service"]["recordTeammate"]>[1],
+  ) {
+    const createdAt = yield* now;
+    return yield* write(
+      "recordTeammate",
+      () => null,
+      Effect.gen(function* () {
+        // Inserted only while the link stands and allows the project, in the same
+        // statement, so a revoke or allowlist edit that lands while a launch runs cannot
+        // leave a record behind.
+        yield* sql`
             INSERT INTO pivot_hosted_teammates (
               thread_id, grant_id, dispatch_id, project_id, pivot_thread_id, pivot_label, kind,
               title, branch, base_branch, worktree_path, delivery_mode, first_run_id, created_at
@@ -447,63 +449,67 @@ export const make = Effect.gen(function* () {
               ) < ${options?.maxLive ?? Number.MAX_SAFE_INTEGER}
             ON CONFLICT (grant_id, dispatch_id) DO NOTHING
           `;
-          const teammate = yield* readByDispatch(input.grantId, input.dispatchId);
-          return teammate === null
-            ? null
-            : { teammate, created: teammate.threadId === input.threadId };
-        }),
-        (recorded) => {
-          if (recorded?.created) live.add(recorded.teammate.threadId);
-        },
-      );
-    });
+        const teammate = yield* readByDispatch(input.grantId, input.dispatchId);
+        return teammate === null
+          ? null
+          : { teammate, created: teammate.threadId === input.threadId };
+      }),
+      (recorded) => {
+        if (recorded?.created) live.add(recorded.teammate.threadId);
+      },
+    );
+  });
 
-  const markTornDown: PivotHostStore["Service"]["markTornDown"] = (threadId) =>
-    Effect.gen(function* () {
-      const tornDownAt = yield* now;
-      yield* write(
-        "markTornDown",
-        () => null,
-        sql`
+  const markTornDown = Effect.fn("PivotHostStore.markTornDown")(function* (threadId: ThreadId) {
+    const tornDownAt = yield* now;
+    yield* write(
+      "markTornDown",
+      () => null,
+      sql`
           UPDATE pivot_hosted_teammates SET torn_down_at = ${tornDownAt}
           WHERE thread_id = ${threadId} AND torn_down_at IS NULL
         `,
-        () => live.delete(threadId),
-      );
-    });
+      () => live.delete(threadId),
+    );
+  });
 
-  const appendEvent: PivotHostStore["Service"]["appendEvent"] = ({ threadId, event }) =>
-    Effect.gen(function* () {
-      const occurredAt = yield* now;
-      const appended = yield* write(
-        "appendEvent",
-        (result) => result?.grantId ?? null,
-        Effect.gen(function* () {
-          const teammate = yield* readTeammate(threadId);
-          if (teammate === null) return null;
-          const rows = yield* sql<{ readonly sequence: number }>`
+  const appendEvent = Effect.fn("PivotHostStore.appendEvent")(function* ({
+    threadId,
+    event,
+  }: Parameters<PivotHostStore["Service"]["appendEvent"]>[0]) {
+    const occurredAt = yield* now;
+    const appended = yield* write(
+      "appendEvent",
+      (result) => result?.grantId ?? null,
+      Effect.gen(function* () {
+        const teammate = yield* readTeammate(threadId);
+        if (teammate === null) return null;
+        const rows = yield* sql<{ readonly sequence: number }>`
             INSERT INTO pivot_hosted_events (grant_id, thread_id, project_id, payload_json, occurred_at)
             VALUES (${teammate.grantId}, ${threadId}, ${teammate.projectId}, ${encodeEvent(event)}, ${occurredAt})
             RETURNING sequence
           `;
-          return {
-            grantId: teammate.grantId,
-            entry: {
-              sequence: rows[0]!.sequence,
-              threadId,
-              projectId: teammate.projectId,
-              occurredAt,
-              event,
-            } satisfies HostedEntry,
-          };
-        }),
-      );
-      return appended?.entry ?? null;
-    });
+        return {
+          grantId: teammate.grantId,
+          entry: {
+            sequence: rows[0]!.sequence,
+            threadId,
+            projectId: teammate.projectId,
+            occurredAt,
+            event,
+          } satisfies HostedEntry,
+        };
+      }),
+    );
+    return appended?.entry ?? null;
+  });
 
   return PivotHostStore.of({
     createGrant,
-    getGrant: (grantId) => read("getGrant", readGrant(grantId)),
+    // Reads and liveness checks run per hosted event and per poll, so they stay untraced.
+    getGrant: Effect.fnUntraced(function* (grantId) {
+      return yield* read("getGrant", readGrant(grantId));
+    }),
     listGrants: read(
       "listGrants",
       sql<GrantSqlRow>`SELECT * FROM pivot_host_grants ORDER BY created_at, rowid`.pipe(
@@ -514,24 +520,32 @@ export const make = Effect.gen(function* () {
     revokeGrant,
     bindHome,
     recordTeammate,
-    countLive: (grantId) =>
-      read(
+    countLive: Effect.fnUntraced(function* (grantId) {
+      return yield* read(
         "countLive",
         sql<{ readonly live: number }>`
           SELECT COUNT(*) AS live FROM pivot_hosted_teammates
           WHERE grant_id = ${grantId} AND torn_down_at IS NULL
         `.pipe(Effect.map((rows) => rows[0]?.live ?? 0)),
-      ),
-    liveThreadIdsOf: (grantId) => read("liveThreadIdsOf", liveThreadIdsOf(grantId)),
-    findByDispatch: (grantId, dispatchId) =>
-      read("findByDispatch", readByDispatch(grantId, dispatchId)),
-    getTeammate: (threadId) => read("getTeammate", readTeammate(threadId)),
-    isLive: (threadId) => Effect.sync(() => live.has(threadId)),
+      );
+    }),
+    liveThreadIdsOf: Effect.fnUntraced(function* (grantId) {
+      return yield* read("liveThreadIdsOf", liveThreadIdsOf(grantId));
+    }),
+    findByDispatch: Effect.fnUntraced(function* (grantId, dispatchId) {
+      return yield* read("findByDispatch", readByDispatch(grantId, dispatchId));
+    }),
+    getTeammate: Effect.fnUntraced(function* (threadId) {
+      return yield* read("getTeammate", readTeammate(threadId));
+    }),
+    isLive: Effect.fnUntraced(function* (threadId) {
+      return live.has(threadId);
+    }),
     liveThreadIds: Effect.sync(() => [...live] as Array<ThreadId>),
     markTornDown,
     appendEvent,
-    entriesAfter: ({ grantId, afterSequence, limit }) =>
-      read(
+    entriesAfter: Effect.fnUntraced(function* ({ grantId, afterSequence, limit }) {
+      return yield* read(
         "entriesAfter",
         sql<EntrySqlRow>`
           SELECT sequence, thread_id, project_id, payload_json, occurred_at
@@ -540,7 +554,8 @@ export const make = Effect.gen(function* () {
           ORDER BY sequence
           LIMIT ${limit}
         `.pipe(Effect.map((rows) => rows.map(toEntry))),
-      ),
+      );
+    }),
     subscribe: Effect.map(PubSub.subscribe(signals), (subscription) =>
       Stream.fromSubscription(subscription),
     ),

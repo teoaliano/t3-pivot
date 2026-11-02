@@ -5,7 +5,7 @@ also lists the command IDs and defaults available in your version.
 
 ## Composer controls
 
-In **Settings → General → Send shortcut**, choose whether Enter sends, requires
+In **Settings → Chat → Send shortcut**, choose whether Enter sends, requires
 `mod+Enter` for multiline prompts, or always requires `mod+Enter`. `Shift+Enter`
 inserts a new line. This applies to the web and desktop composer at desktop widths.
 
@@ -163,7 +163,6 @@ through the pages you have visited, like a browser's back and forward buttons.
 (`mod+alt+n`) starts a thread [without a project](./thread-sidebar.md#start-without-a-project).
 
 `pivot.new` (`mod+alt+p`) starts a [Pivot](./pivot-mode.md) in the current thread's project.
-`pivot.toggleView` (`mod+alt+v`) switches a Pivot between its chat and the Pivot view.
 
 ## Reserved shortcuts
 

@@ -598,49 +598,52 @@ export const make = Effect.gen(function* () {
   const decide = Effect.fn("PivotStore.decide")(function* (command: PivotCommand, now: string) {
     const refuse = (reason: string) => new PivotRefusedError({ command: command.type, reason });
 
+    // Untraced: these guards run inside the decide span.
     // A teammate the caller may act on: its own, live. Retired Pivots act on nothing.
-    const ownLiveTeammate = (pivotThreadId: ThreadId, threadId: ThreadId) =>
-      Effect.gen(function* () {
-        const pivot = yield* readPivot(pivotThreadId);
-        if (pivot === null) return yield* refuse("Only a Pivot can do this.");
-        if (pivot.retiredAt !== null) return yield* refuse("This Pivot is retired.");
-        const teammate = yield* readTeammate(threadId);
-        if (teammate === null || teammate.pivotThreadId !== pivotThreadId) {
-          return yield* refuse(`Thread ${threadId} is not one of this Pivot's teammates.`);
-        }
-        if (teammate.tornDownAt !== null) {
-          return yield* refuse(`Teammate ${threadId} was torn down.`);
-        }
-        return teammate;
-      });
-    const anyTeammate = (threadId: ThreadId) =>
-      Effect.gen(function* () {
-        const teammate = yield* readTeammate(threadId);
-        if (teammate === null) return yield* refuse(`Thread ${threadId} is not a teammate.`);
-        return teammate;
-      });
-    const liveTeammate = (threadId: ThreadId) =>
-      Effect.gen(function* () {
-        const teammate = yield* anyTeammate(threadId);
-        if (teammate.tornDownAt !== null) {
-          return yield* refuse(`Teammate ${threadId} was torn down.`);
-        }
-        return teammate;
-      });
-    const ownOpenDecision = (pivotThreadId: ThreadId, decisionId: PivotDecisionId) =>
-      Effect.gen(function* () {
-        const pivot = yield* readPivot(pivotThreadId);
-        if (pivot === null) return yield* refuse("Only a Pivot can do this.");
-        if (pivot.retiredAt !== null) return yield* refuse("This Pivot is retired.");
-        const decision = yield* readDecision(decisionId);
-        if (decision === null || decision.pivotThreadId !== pivotThreadId) {
-          return yield* refuse(`Decision ${decisionId} is not one of this Pivot's decisions.`);
-        }
-        if (decision.resolution !== null) {
-          return yield* refuse(`Decision ${decisionId} is already closed.`);
-        }
-        return decision;
-      });
+    const ownLiveTeammate = Effect.fnUntraced(function* (
+      pivotThreadId: ThreadId,
+      threadId: ThreadId,
+    ) {
+      const pivot = yield* readPivot(pivotThreadId);
+      if (pivot === null) return yield* refuse("Only a Pivot can do this.");
+      if (pivot.retiredAt !== null) return yield* refuse("This Pivot is retired.");
+      const teammate = yield* readTeammate(threadId);
+      if (teammate === null || teammate.pivotThreadId !== pivotThreadId) {
+        return yield* refuse(`Thread ${threadId} is not one of this Pivot's teammates.`);
+      }
+      if (teammate.tornDownAt !== null) {
+        return yield* refuse(`Teammate ${threadId} was torn down.`);
+      }
+      return teammate;
+    });
+    const anyTeammate = Effect.fnUntraced(function* (threadId: ThreadId) {
+      const teammate = yield* readTeammate(threadId);
+      if (teammate === null) return yield* refuse(`Thread ${threadId} is not a teammate.`);
+      return teammate;
+    });
+    const liveTeammate = Effect.fnUntraced(function* (threadId: ThreadId) {
+      const teammate = yield* anyTeammate(threadId);
+      if (teammate.tornDownAt !== null) {
+        return yield* refuse(`Teammate ${threadId} was torn down.`);
+      }
+      return teammate;
+    });
+    const ownOpenDecision = Effect.fnUntraced(function* (
+      pivotThreadId: ThreadId,
+      decisionId: PivotDecisionId,
+    ) {
+      const pivot = yield* readPivot(pivotThreadId);
+      if (pivot === null) return yield* refuse("Only a Pivot can do this.");
+      if (pivot.retiredAt !== null) return yield* refuse("This Pivot is retired.");
+      const decision = yield* readDecision(decisionId);
+      if (decision === null || decision.pivotThreadId !== pivotThreadId) {
+        return yield* refuse(`Decision ${decisionId} is not one of this Pivot's decisions.`);
+      }
+      if (decision.resolution !== null) {
+        return yield* refuse(`Decision ${decisionId} is already closed.`);
+      }
+      return decision;
+    });
     const nonEmpty = (text: string, what: string) =>
       text.trim().length === 0 ? Effect.fail(refuse(`${what} is empty.`)) : Effect.succeed(text);
     const newDecisionId = randomUuidV4.pipe(
@@ -1497,23 +1500,28 @@ export const make = Effect.gen(function* () {
 
   return PivotStore.of({
     dispatch,
-    getPivot: (threadId) => read("getPivot", readPivot(threadId)),
-    getActivePivot: (projectId) => read("getActivePivot", readActivePivot(projectId)),
+    getPivot: Effect.fn("PivotStore.getPivot")((threadId) => read("getPivot", readPivot(threadId))),
+    getActivePivot: Effect.fn("PivotStore.getActivePivot")((projectId) =>
+      read("getActivePivot", readActivePivot(projectId)),
+    ),
     listActivePivots: read(
       "listActivePivots",
       sql<PivotSqlRow>`${pivotSelect} WHERE p.retired_at IS NULL`.pipe(
         Effect.map((rows) => rows.map(toPivot)),
       ),
     ),
-    getPredecessor: (threadId) =>
+    getPredecessor: Effect.fn("PivotStore.getPredecessor")((threadId) =>
       read(
         "getPredecessor",
         sql<PivotSqlRow>`${pivotSelect} WHERE p.successor_thread_id = ${threadId}`.pipe(
           Effect.map((rows) => (rows[0] ? toPivot(rows[0]) : null)),
         ),
       ),
-    getTeammate: (threadId) => read("getTeammate", readTeammate(threadId)),
-    listTeammates: ({ pivotThreadId, includeTornDown }) =>
+    ),
+    getTeammate: Effect.fn("PivotStore.getTeammate")((threadId) =>
+      read("getTeammate", readTeammate(threadId)),
+    ),
+    listTeammates: Effect.fn("PivotStore.listTeammates")(({ pivotThreadId, includeTornDown }) =>
       read(
         "listTeammates",
         sql<TeammateSqlRow>`
@@ -1523,8 +1531,11 @@ export const make = Effect.gen(function* () {
           ORDER BY t.dispatched_at, t.rowid
         `.pipe(Effect.map((rows) => rows.map(toTeammate))),
       ),
-    getDecision: (decisionId) => read("getDecision", readDecision(decisionId)),
-    listDecisions: ({ pivotThreadId, openOnly }) =>
+    ),
+    getDecision: Effect.fn("PivotStore.getDecision")((decisionId) =>
+      read("getDecision", readDecision(decisionId)),
+    ),
+    listDecisions: Effect.fn("PivotStore.listDecisions")(({ pivotThreadId, openOnly }) =>
       read(
         "listDecisions",
         sql<DecisionSqlRow>`
@@ -1534,10 +1545,12 @@ export const make = Effect.gen(function* () {
           ORDER BY opened_at, rowid
         `.pipe(Effect.map((rows) => rows.map(toDecision))),
       ),
-    teammateHistory: ({ threadId, beforeSequence, limit }) =>
-      read(
-        "teammateHistory",
-        sql<EventSqlRow>`
+    ),
+    teammateHistory: Effect.fn("PivotStore.teammateHistory")(
+      ({ threadId, beforeSequence, limit }) =>
+        read(
+          "teammateHistory",
+          sql<EventSqlRow>`
           SELECT e.sequence, e.occurred_at, e.wakes, e.payload_json FROM pivot_events e
           WHERE (e.teammate_thread_id = ${threadId}
               OR e.decision_id IN (
@@ -1546,8 +1559,9 @@ export const make = Effect.gen(function* () {
           ORDER BY e.sequence DESC
           LIMIT ${limit}
         `.pipe(Effect.map((rows) => rows.map(toStoredEvent))),
-      ),
-    pendingWake: (pivotThreadId, afterSequence) =>
+        ),
+    ),
+    pendingWake: Effect.fn("PivotStore.pendingWake")((pivotThreadId, afterSequence) =>
       read(
         "pendingWake",
         sql<EventSqlRow>`
@@ -1561,6 +1575,7 @@ export const make = Effect.gen(function* () {
           ORDER BY e.sequence
         `.pipe(Effect.map((rows) => rows.map(toStoredEvent))),
       ),
+    ),
     stream,
   });
 });

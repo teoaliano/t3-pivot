@@ -272,57 +272,61 @@ export const make = Effect.gen(function* () {
   );
 
   /** Waits until `runId` leaves preparation: started, or failed with V2's last error. */
-  const awaitRunStart = (threadId: ThreadId, runId: RunId) =>
-    Effect.gen(function* () {
-      const afterSequence = yield* threads.getThreadEventSequence(threadId);
-      const readStatus = threads
-        .getThreadRecords(threadId, ["runs"], { runIds: [runId] })
+  const awaitRunStart = Effect.fn("PivotThreads.awaitRunStart")(function* (
+    threadId: ThreadId,
+    runId: RunId,
+  ) {
+    const afterSequence = yield* threads.getThreadEventSequence(threadId);
+    const readStatus = threads
+      .getThreadRecords(threadId, ["runs"], { runIds: [runId] })
+      .pipe(
+        Effect.map((records) => records.runs.find((candidate) => candidate.id === runId)?.status),
+      );
+    const settled = (status: string | undefined) =>
+      status !== undefined && status !== "preparing" && status !== "queued";
+    let status = yield* readStatus;
+    if (!settled(status)) {
+      const next = yield* threads
+        .streamStoredEventsFrom({ threadId, afterSequence, eventType: "run.updated" })
         .pipe(
-          Effect.map((records) => records.runs.find((candidate) => candidate.id === runId)?.status),
+          Stream.mapEffect(() => readStatus),
+          Stream.filter(settled),
+          Stream.runHead,
         );
-      const settled = (status: string | undefined) =>
-        status !== undefined && status !== "preparing" && status !== "queued";
-      let status = yield* readStatus;
-      if (!settled(status)) {
-        const next = yield* threads
-          .streamStoredEventsFrom({ threadId, afterSequence, eventType: "run.updated" })
-          .pipe(
-            Stream.mapEffect(() => readStatus),
-            Stream.filter(settled),
-            Stream.runHead,
-          );
-        status = Option.getOrUndefined(next);
-      }
-      if (status === "failed" || status === "cancelled" || status === undefined) {
-        const shell = yield* threads.getThreadShell(threadId);
-        const detail =
-          shell?.lastError ??
-          (status === "cancelled" ? "The run was cancelled." : "The run failed to start.");
-        return { type: "failed", runId, detail } satisfies RunStart as RunStart;
-      }
-      return { type: "started", runId } satisfies RunStart as RunStart;
-    });
+      status = Option.getOrUndefined(next);
+    }
+    if (status === "failed" || status === "cancelled" || status === undefined) {
+      const shell = yield* threads.getThreadShell(threadId);
+      const detail =
+        shell?.lastError ??
+        (status === "cancelled" ? "The run was cancelled." : "The run failed to start.");
+      return { type: "failed", runId, detail } satisfies RunStart as RunStart;
+    }
+    return { type: "started", runId } satisfies RunStart as RunStart;
+  });
 
   const latestRunId = (threadId: ThreadId) =>
     threads.getThreadShell(threadId).pipe(Effect.map((shell) => shell?.latestRunId ?? null));
 
-  const detachSessions = (threadId: ThreadId, operation: string) =>
-    Effect.gen(function* () {
-      const projection = yield* threads.getThreadProjection(threadId);
-      const base = yield* commandId(operation);
-      for (const session of projection.providerSessions) {
-        yield* threads.dispatch({
-          type: "provider-session.detach",
-          commandId: CommandId.make(`${base}:detach:${session.id}`),
-          threadId,
-          providerSessionId: session.id,
-          reason: "client-requested",
-        });
-      }
-    });
+  const detachSessions = Effect.fn("PivotThreads.detachSessions")(function* (
+    threadId: ThreadId,
+    operation: string,
+  ) {
+    const projection = yield* threads.getThreadProjection(threadId);
+    const base = yield* commandId(operation);
+    for (const session of projection.providerSessions) {
+      yield* threads.dispatch({
+        type: "provider-session.detach",
+        commandId: CommandId.make(`${base}:detach:${session.id}`),
+        threadId,
+        providerSessionId: session.id,
+        reason: "client-requested",
+      });
+    }
+  });
 
   return PivotThreads.of({
-    project: (projectId) =>
+    project: Effect.fn("PivotThreads.project")((projectId) =>
       projects.getById(projectId).pipe(
         Effect.map(
           Option.match({
@@ -338,9 +342,10 @@ export const make = Effect.gen(function* () {
         ),
         Effect.mapError(fail("read project")),
       ),
+    ),
 
-    createPivotThread: ({ projectId, homePath, modelSelection, threadId: requestedThreadId }) =>
-      Effect.gen(function* () {
+    createPivotThread: Effect.fn("PivotThreads.createPivotThread")(
+      function* ({ projectId, homePath, modelSelection, threadId: requestedThreadId }) {
         const threadId = requestedThreadId ?? ThreadId.make(`thread-pivot-${yield* randomUuidV4}`);
         // Created directly rather than launched: a launch runs the project's
         // setup script in its workspace, and the home is not the project.
@@ -366,7 +371,9 @@ export const make = Effect.gen(function* () {
           enabled: false,
         });
         return threadId;
-      }).pipe(Effect.mapError(fail("create the Pivot thread"))),
+      },
+      Effect.mapError(fail("create the Pivot thread")),
+    ),
 
     createTeammateThread: Effect.fn("PivotThreads.createTeammateThread")(
       function* (input) {
@@ -390,8 +397,8 @@ export const make = Effect.gen(function* () {
       Effect.mapError(fail("create the teammate thread")),
     ),
 
-    launchTeammate: (input) =>
-      Effect.gen(function* () {
+    launchTeammate: Effect.fn("PivotThreads.launchTeammate")(
+      function* (input) {
         const launched = yield* launches.launch({
           commandId: yield* commandId("dispatch"),
           projectId: input.projectId,
@@ -416,12 +423,17 @@ export const make = Effect.gen(function* () {
           creationSource: "mcp",
         });
         return { threadId: launched.threadId, runId: launched.projection.runs[0]?.id ?? null };
-      }).pipe(Effect.mapError(fail("launch the teammate"))),
+      },
+      Effect.mapError(fail("launch the teammate")),
+    ),
 
-    awaitStart: (threadId, runId) =>
+    awaitStart: Effect.fn("PivotThreads.awaitStart")((threadId, runId) =>
       awaitRunStart(threadId, runId).pipe(Effect.mapError(fail("await the run", threadId))),
+    ),
 
-    setupOutcome: (threadId) => setupTracker.get(threadId).pipe(Effect.map(setupScriptOutcome)),
+    setupOutcome: Effect.fn("PivotThreads.setupOutcome")((threadId) =>
+      setupTracker.get(threadId).pipe(Effect.map(setupScriptOutcome)),
+    ),
 
     retryLaunch: (threadId) =>
       Effect.gen(function* () {
@@ -497,7 +509,7 @@ export const make = Effect.gen(function* () {
       (effect, { threadId }) => effect.pipe(Effect.mapError(fail("send the request", threadId))),
     ),
 
-    runReply: (threadId, runId) =>
+    runReply: Effect.fn("PivotThreads.runReply")((threadId, runId) =>
       threads.getThreadRecords(threadId, ["runs", "messages"], { runIds: [runId] }).pipe(
         Effect.map((records) => {
           const run = records.runs.find((candidate) => candidate.id === runId);
@@ -516,6 +528,7 @@ export const make = Effect.gen(function* () {
         }),
         Effect.mapError(fail("read the reply", threadId)),
       ),
+    ),
 
     stop: (threadId) =>
       Effect.gen(function* () {
@@ -559,8 +572,9 @@ export const make = Effect.gen(function* () {
         return yield* awaitRunStart(threadId, sent.run.id);
       }).pipe(Effect.mapError(fail("relaunch", threadId))),
 
-    shell: (threadId) =>
+    shell: Effect.fn("PivotThreads.shell")((threadId) =>
       threads.getThreadShell(threadId).pipe(Effect.mapError(fail("read", threadId))),
+    ),
 
     events: threads.streamLiveStoredEvents.pipe(
       Stream.flatMap((stored) => Stream.fromIterable(toPivotThreadEvents(stored))),
@@ -589,7 +603,7 @@ export const make = Effect.gen(function* () {
         });
       }).pipe(Effect.mapError(fail("wake", pivotThreadId))),
 
-    hasQueuedWake: (pivotThreadId) =>
+    hasQueuedWake: Effect.fn("PivotThreads.hasQueuedWake")((pivotThreadId) =>
       threads.getThreadRecords(pivotThreadId, ["runs", "messages"]).pipe(
         Effect.map((records) =>
           records.runs.some(
@@ -604,6 +618,7 @@ export const make = Effect.gen(function* () {
         ),
         Effect.mapError(fail("read the queue", pivotThreadId)),
       ),
+    ),
 
     releaseHeldQueue: (threadId) =>
       Effect.gen(function* () {
@@ -616,15 +631,18 @@ export const make = Effect.gen(function* () {
         });
       }).pipe(Effect.mapError(fail("release the queue", threadId))),
 
-    pullRequestDetail: (ref) => pullRequests.detail(ref).pipe(Effect.mapError(fail("read the PR"))),
+    pullRequestDetail: Effect.fn("PivotThreads.pullRequestDetail")((ref) =>
+      pullRequests.detail(ref).pipe(Effect.mapError(fail("read the PR"))),
+    ),
 
-    mergePullRequest: ({ expectedHeadSha, ...ref }) =>
+    mergePullRequest: Effect.fn("PivotThreads.mergePullRequest")(({ expectedHeadSha, ...ref }) =>
       pullRequests
         .runAction({ ...ref, action: "merge", mergeMethod: "squash", expectedHeadSha })
         .pipe(Effect.mapError(fail("merge the PR"))),
+    ),
 
     // Terminals and dev servers are found by working directory, not by name.
-    stopProcesses: (worktreePath) =>
+    stopProcesses: Effect.fn("PivotThreads.stopProcesses")((worktreePath) =>
       processes
         .stopAllForCheckout(worktreePath, { releaseReservation: true })
         .pipe(
@@ -632,24 +650,31 @@ export const make = Effect.gen(function* () {
             stopWorktreeProcesses(procHost, { worktreePath, owner: scopeOwner, self: process.pid }),
           ),
         ),
+    ),
 
-    stopServers: (worktreePath) => processes.stopAllForCheckout(worktreePath),
+    stopServers: Effect.fn("PivotThreads.stopServers")((worktreePath) =>
+      processes.stopAllForCheckout(worktreePath),
+    ),
 
-    recreateWorktree: ({ projectRoot, worktreePath, branch }) =>
-      git
-        .pruneWorktrees({ cwd: projectRoot })
-        .pipe(
-          Effect.andThen(
-            git.createWorktree({ cwd: projectRoot, refName: branch, path: worktreePath }),
+    recreateWorktree: Effect.fn("PivotThreads.recreateWorktree")(
+      ({ projectRoot, worktreePath, branch }) =>
+        git
+          .pruneWorktrees({ cwd: projectRoot })
+          .pipe(
+            Effect.andThen(
+              git.createWorktree({ cwd: projectRoot, refName: branch, path: worktreePath }),
+            ),
+            Effect.asVoid,
+            Effect.mapError(fail("recreate the worktree")),
           ),
-          Effect.asVoid,
-          Effect.mapError(fail("recreate the worktree")),
-        ),
+    ),
 
-    removeWorktree: ({ projectRoot, worktreePath, force }) =>
-      git
-        .removeWorktree({ cwd: projectRoot, path: worktreePath, force })
-        .pipe(Effect.mapError(fail("remove the worktree"))),
+    removeWorktree: Effect.fn("PivotThreads.removeWorktree")(
+      ({ projectRoot, worktreePath, force }) =>
+        git
+          .removeWorktree({ cwd: projectRoot, path: worktreePath, force })
+          .pipe(Effect.mapError(fail("remove the worktree"))),
+    ),
   });
 });
 

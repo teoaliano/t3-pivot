@@ -1,6 +1,5 @@
 import type {
   OrchestrationV2ThreadShell,
-  TeammateEvidence,
   TeammateRecord,
   TeammateStatus,
   ThreadId,
@@ -12,7 +11,7 @@ import * as DateTime from "effect/DateTime";
 import { deriveTeammateStatus, type TeammateStatusInput } from "@t3tools/shared/teammateStatus";
 
 /**
- * The teammate cards in the Pivot view, as data. A card shows its status (dot,
+ * A Pivot's teammates as cards, as data. A card shows its status (dot,
  * elapsed time, label), title, PR number or "Scout", and provider. Cards keep
  * dispatch order; finished teammates fold into one chip at the end.
  */
@@ -66,11 +65,7 @@ export interface TeammateCard {
   readonly detail: string | null;
   /** Before its first report, the card follows the worktree setup. */
   readonly followsSetup: boolean;
-  readonly review: {
-    readonly evidence: TeammateEvidence | null;
-    readonly verdict: string | null;
-    readonly tryIt: boolean;
-  } | null;
+  readonly readyForReview: boolean;
 }
 
 export interface TeammateCards {
@@ -122,17 +117,11 @@ export function teammateCard(
       ? teammate.report.reportedAt
       : null;
   const attention = needsYou || ATTENTION.has(derived.status);
-  const review =
+  const readyForReview =
     teammate.kind === "ship" &&
     teammate.tornDownAt === null &&
     derived.status === "done" &&
-    teammate.shipOrderedAt == null
-      ? {
-          evidence: teammate.report?.evidence ?? null,
-          verdict: teammate.verdict?.text ?? null,
-          tryIt: teammate.report?.evidence?.devServer === true,
-        }
-      : null;
+    teammate.shipOrderedAt == null;
   return {
     threadId: teammate.threadId,
     title: shell?.title || teammate.title,
@@ -142,7 +131,7 @@ export function teammateCard(
       ? "Needs you"
       : memoryWait !== null
         ? "Waiting for memory"
-        : review !== null
+        : readyForReview
           ? "Ready for review"
           : STATUS_LABEL[derived.status],
     attention,
@@ -169,7 +158,7 @@ export function teammateCard(
     providerInstanceId: shell?.providerInstanceId ?? null,
     detail: memoryWait ?? derived.detail,
     followsSetup: teammate.report === null && teammate.tornDownAt === null,
-    review,
+    readyForReview,
   };
 }
 
@@ -184,7 +173,7 @@ export function teammateCards(
     const card = teammateCard(teammate, shellOf(teammate.threadId));
     const isFinished =
       teammate.tornDownAt !== null ||
-      (card.status === "done" && !card.needsYou && card.review === null);
+      (card.status === "done" && !card.needsYou && !card.readyForReview);
     (isFinished ? finished : live).push(card);
   }
   return { live, finished };

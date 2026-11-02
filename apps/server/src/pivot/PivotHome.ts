@@ -74,16 +74,14 @@ export const make = Effect.gen(function* () {
 
     const git = (...args: ReadonlyArray<string>) =>
       runner.run({ command: "git", args, cwd: homePath }).pipe(
-        Effect.flatMap((output) =>
-          output.code === 0
-            ? Effect.succeed(output)
-            : Effect.fail(
-                new GitExitError({
-                  subcommand: args[0] ?? "",
-                  exitCode: output.code,
-                  stderr: output.stderr,
-                }),
-              ),
+        Effect.filterOrFail(
+          (output) => output.code === 0,
+          (output) =>
+            new GitExitError({
+              subcommand: args[0] ?? "",
+              exitCode: output.code,
+              stderr: output.stderr,
+            }),
         ),
       );
 
@@ -139,8 +137,10 @@ export const make = Effect.gen(function* () {
   });
 
   return PivotHome.of({
-    ensure: (projectId, teammateModels) =>
-      gate.withPermits(1)(ensureOnce(projectId, teammateModels)),
+    // Untraced: ensureOnce carries the span.
+    ensure: Effect.fnUntraced(function* (projectId: ProjectId, teammateModels: string) {
+      return yield* gate.withPermits(1)(ensureOnce(projectId, teammateModels));
+    }),
   });
 });
 

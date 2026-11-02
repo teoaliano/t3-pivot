@@ -45,175 +45,185 @@ export const make = Effect.gen(function* () {
     );
 
   /** The project, refusing one that is gone or not a git repository. */
-  const gitProject = (command: string, projectId: Parameters<typeof threads.project>[0]) =>
-    Effect.gen(function* () {
-      const project = yield* threads.project(projectId);
-      if (project === null) return yield* refuse(command, `Project ${projectId} was not found.`);
-      if (!(yield* git.isRepository(project.workspaceRoot))) {
-        return yield* refuse(
-          command,
-          "Pivot mode needs a git repository: every teammate works in its own worktree.",
-        );
-      }
-      return project;
-    });
+  const gitProject = Effect.fn("LocalTeammateHost.gitProject")(function* (
+    command: string,
+    projectId: Parameters<typeof threads.project>[0],
+  ) {
+    const project = yield* threads.project(projectId);
+    if (project === null) return yield* refuse(command, `Project ${projectId} was not found.`);
+    if (!(yield* git.isRepository(project.workspaceRoot))) {
+      return yield* refuse(
+        command,
+        "Pivot mode needs a git repository: every teammate works in its own worktree.",
+      );
+    }
+    return project;
+  });
 
   return TeammateHost.of({
     withProjectLock: projectLocks.withLock,
     project: gitProject,
 
-    launch: (input) =>
-      Effect.gen(function* () {
-        const command = "dispatch_teammate";
-        const project = yield* gitProject(command, input.projectId);
-        const deliveryMode = (yield* git.hasRemote(project.workspaceRoot))
-          ? ("direct-pr" as const)
-          : ("local-only" as const);
-        const briefFor = Effect.fn("LocalTeammateHost.briefFor")(function* (checkout: {
-          readonly branch: string;
-          readonly baseBranch: string;
-          readonly worktreePath: string;
-        }) {
-          return renderBrief(yield* text(BRIEF_TEXTS.brief), {
-            title: input.title,
-            kind: input.kind,
-            intent: input.intent,
-            spec: input.spec,
-            ...checkout,
-            definitionOfDone: yield* text(
-              definitionOfDoneText(input.kind, deliveryMode, input.shipDirectly === true),
-            ),
-          });
-        });
-        const existing =
-          input.attach ??
-          (input.kind === "scout"
-            ? yield* git.currentBranch(project.workspaceRoot).pipe(
-                Effect.map((branch) => ({
-                  branch,
-                  baseBranch: branch,
-                  worktreePath: project.workspaceRoot,
-                })),
-              )
-            : null);
-        if (existing !== null) {
-          const brief = yield* briefFor(existing);
-          const threadId = yield* threads.createTeammateThread({
-            projectId: input.projectId,
-            title: input.title,
-            branch: input.kind === "scout" ? null : existing.branch,
-            worktreePath: input.kind === "scout" ? null : existing.worktreePath,
-            modelSelection: input.modelSelection,
-          });
-          return {
-            threadId,
-            runId: null,
-            start: threads.request({ threadId, senderThreadId: input.pivotThreadId, text: brief }),
-            ...existing,
-            deliveryMode,
-          };
-        }
-        const baseBranch = input.baseBranch ?? (yield* git.defaultBranch(project.workspaceRoot));
-        const taken = new Set<string>(yield* git.listBranches(project.workspaceRoot, "pivot/"));
-        for (const teammate of yield* store.listTeammates({ includeTornDown: true })) {
-          if (teammate.projectId === input.projectId) taken.add(teammate.branch);
-        }
-        const repoName = path.basename(project.workspaceRoot);
-        const worktreeFor = (branch: string) =>
-          path.join(config.worktreesDir, repoName, branch.replace(/\//g, "-"));
-        // A leftover directory would make `git worktree add` fail, so it counts as taken.
-        const base = teammateBranchBase(input.title);
-        let branch = uniqueBranch(base, (candidate) => taken.has(candidate));
-        while (yield* fs.exists(worktreeFor(branch)).pipe(Effect.orElseSucceed(() => false))) {
-          taken.add(branch);
-          branch = uniqueBranch(base, (candidate) => taken.has(candidate));
-        }
-        const worktreePath = worktreeFor(branch);
-        const brief = yield* briefFor({ branch, baseBranch, worktreePath });
-        const launched = yield* threads.launchTeammate({
-          projectId: input.projectId,
-          pivotThreadId: input.pivotThreadId,
+    launch: Effect.fn("TeammateHost.launch")(function* (input) {
+      const command = "dispatch_teammate";
+      const project = yield* gitProject(command, input.projectId);
+      const deliveryMode = (yield* git.hasRemote(project.workspaceRoot))
+        ? ("direct-pr" as const)
+        : ("local-only" as const);
+      const briefFor = Effect.fn("LocalTeammateHost.briefFor")(function* (checkout: {
+        readonly branch: string;
+        readonly baseBranch: string;
+        readonly worktreePath: string;
+      }) {
+        return renderBrief(yield* text(BRIEF_TEXTS.brief), {
           title: input.title,
-          branch,
-          baseBranch,
+          kind: input.kind,
+          intent: input.intent,
+          spec: input.spec,
+          ...checkout,
+          definitionOfDone: yield* text(
+            definitionOfDoneText(input.kind, deliveryMode, input.shipDirectly === true),
+          ),
+        });
+      });
+      const existing =
+        input.attach ??
+        (input.kind === "scout"
+          ? yield* git.currentBranch(project.workspaceRoot).pipe(
+              Effect.map((branch) => ({
+                branch,
+                baseBranch: branch,
+                worktreePath: project.workspaceRoot,
+              })),
+            )
+          : null);
+      if (existing !== null) {
+        const brief = yield* briefFor(existing);
+        const threadId = yield* threads.createTeammateThread({
+          projectId: input.projectId,
+          title: input.title,
+          branch: input.kind === "scout" ? null : existing.branch,
+          worktreePath: input.kind === "scout" ? null : existing.worktreePath,
           modelSelection: input.modelSelection,
-          text: brief,
         });
         return {
-          threadId: launched.threadId,
-          runId: launched.runId,
-          branch,
-          baseBranch,
-          worktreePath,
+          threadId,
+          runId: null,
+          start: threads.request({ threadId, senderThreadId: input.pivotThreadId, text: brief }),
+          ...existing,
           deliveryMode,
         };
-      }),
+      }
+      const baseBranch = input.baseBranch ?? (yield* git.defaultBranch(project.workspaceRoot));
+      const taken = new Set<string>(yield* git.listBranches(project.workspaceRoot, "pivot/"));
+      for (const teammate of yield* store.listTeammates({ includeTornDown: true })) {
+        if (teammate.projectId === input.projectId) taken.add(teammate.branch);
+      }
+      const repoName = path.basename(project.workspaceRoot);
+      const worktreeFor = (branch: string) =>
+        path.join(config.worktreesDir, repoName, branch.replace(/\//g, "-"));
+      // A leftover directory would make `git worktree add` fail, so it counts as taken.
+      const base = teammateBranchBase(input.title);
+      let branch = uniqueBranch(base, (candidate) => taken.has(candidate));
+      while (yield* fs.exists(worktreeFor(branch)).pipe(Effect.orElseSucceed(() => false))) {
+        taken.add(branch);
+        branch = uniqueBranch(base, (candidate) => taken.has(candidate));
+      }
+      const worktreePath = worktreeFor(branch);
+      const brief = yield* briefFor({ branch, baseBranch, worktreePath });
+      const launched = yield* threads.launchTeammate({
+        projectId: input.projectId,
+        pivotThreadId: input.pivotThreadId,
+        title: input.title,
+        branch,
+        baseBranch,
+        modelSelection: input.modelSelection,
+        text: brief,
+      });
+      return {
+        threadId: launched.threadId,
+        runId: launched.runId,
+        branch,
+        baseBranch,
+        worktreePath,
+        deliveryMode,
+      };
+    }),
 
     awaitStart: threads.awaitStart,
     setupOutcome: threads.setupOutcome,
     // Archiving does not interrupt a run still preparing its worktree, which would go on to run
     // the setup script and start an agent. A stop does, so it comes first; if it fails the thread
     // is archived anyway.
-    discard: (threadId) =>
-      threads.stop(threadId).pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("Could not stop a discarded teammate thread", { threadId, cause }),
-        ),
-        Effect.andThen(threads.archive(threadId)),
-      ),
-    send: ({ threadId, senderThreadId, text, attachments }) =>
-      threads.send({ threadId, senderThreadId, text, attachments, mode: "queue" }),
+    discard: Effect.fn("TeammateHost.discard")(function* (threadId) {
+      yield* threads
+        .stop(threadId)
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Could not stop a discarded teammate thread", { threadId, cause }),
+          ),
+        );
+      yield* threads.archive(threadId);
+    }),
+    send: Effect.fn("TeammateHost.send")(function* ({
+      threadId,
+      senderThreadId,
+      text,
+      attachments,
+    }) {
+      return yield* threads.send({ threadId, senderThreadId, text, attachments, mode: "queue" });
+    }),
     stop: threads.stop,
     stopServers: threads.stopServers,
     // Landed or merged: the session stops first, so the agent never sees its own process
     // killed under it, and then what its scope still runs goes.
-    stopScope: (threadId) =>
-      threads
+    stopScope: Effect.fn("TeammateHost.stopScope")(function* (threadId) {
+      yield* threads
         .stop(threadId)
         .pipe(
           Effect.catch((cause) =>
             Effect.logWarning("Could not stop the landed teammate's session", { threadId, cause }),
           ),
-        ),
+        );
+    }),
     retryLaunch: threads.retryLaunch,
     relaunch: threads.relaunch,
     pullRequestDetail: threads.pullRequestDetail,
     mergePullRequest: threads.mergePullRequest,
 
-    landed: (command, input) =>
-      Effect.gen(function* () {
-        const project = yield* gitProject(command, input.projectId);
-        return yield* git.landed({
-          projectRoot: project.workspaceRoot,
-          worktreePath: input.worktreePath,
-          branch: input.branch,
-          defaultBranch: yield* git.defaultBranch(project.workspaceRoot),
-          mergedPullRequestHead: input.mergedPullRequestHead,
-        });
-      }),
+    landed: Effect.fn("TeammateHost.landed")(function* (command, input) {
+      const project = yield* gitProject(command, input.projectId);
+      return yield* git.landed({
+        projectRoot: project.workspaceRoot,
+        worktreePath: input.worktreePath,
+        branch: input.branch,
+        defaultBranch: yield* git.defaultBranch(project.workspaceRoot),
+        mergedPullRequestHead: input.mergedPullRequestHead,
+      });
+    }),
 
-    land: (command, input) =>
-      Effect.gen(function* () {
-        const project = yield* gitProject(command, input.projectId);
-        if (!(yield* git.isClean(input.worktreePath))) {
-          return {
-            type: "refused",
-            reason: "The teammate's worktree has uncommitted changes; it commits them first.",
-          } as const;
-        }
-        const defaultBranch = yield* git.defaultBranch(project.workspaceRoot);
-        const result = yield* git.fastForward({
-          projectRoot: project.workspaceRoot,
-          branch: input.branch,
-          defaultBranch,
-        });
-        return result.landed
-          ? ({ type: "landed", head: result.head, defaultBranch } as const)
-          : ({ type: "refused", reason: result.reason } as const);
-      }),
+    land: Effect.fn("TeammateHost.land")(function* (command, input) {
+      const project = yield* gitProject(command, input.projectId);
+      if (!(yield* git.isClean(input.worktreePath))) {
+        return {
+          type: "refused",
+          reason: "The teammate's worktree has uncommitted changes; it commits them first.",
+        } as const;
+      }
+      const defaultBranch = yield* git.defaultBranch(project.workspaceRoot);
+      const result = yield* git.fastForward({
+        projectRoot: project.workspaceRoot,
+        branch: input.branch,
+        defaultBranch,
+      });
+      return result.landed
+        ? ({ type: "landed", head: result.head, defaultBranch } as const)
+        : ({ type: "refused", reason: result.reason } as const);
+    }),
 
-    worktreeExists: (worktreePath) =>
-      fs.exists(worktreePath).pipe(Effect.orElseSucceed(() => false)),
+    worktreeExists: Effect.fn("TeammateHost.worktreeExists")(function* (worktreePath) {
+      return yield* fs.exists(worktreePath).pipe(Effect.orElseSucceed(() => false));
+    }),
     worktreeClean: git.isClean,
 
     recreateWorktree: Effect.fn("LocalTeammateHost.recreateWorktree")(function* (command, input) {
@@ -232,47 +242,46 @@ export const make = Effect.gen(function* () {
       });
     }),
 
-    teardown: (command, input) =>
-      Effect.gen(function* () {
-        const project = yield* gitProject(command, input.projectId);
-        // The session goes first; if it will not stop, nothing else is touched.
-        yield* threads.stop(input.threadId);
-        if (input.inMainCheckout) {
-          yield* threads.archive(input.threadId);
-          return;
-        }
-        yield* threads.stopProcesses(input.worktreePath);
-        yield* removeTeammateTemp(input.worktreePath).pipe(
-          Effect.provideService(FileSystem.FileSystem, fs),
-          Effect.provideService(Path.Path, path),
-        );
-        if (input.worktreeExists) {
-          yield* Effect.logInfo("Removing teammate worktree", { path: input.worktreePath });
-          yield* threads.removeWorktree({
-            projectRoot: project.workspaceRoot,
-            worktreePath: input.worktreePath,
-            force: input.force,
-          });
-        }
+    teardown: Effect.fn("TeammateHost.teardown")(function* (command, input) {
+      const project = yield* gitProject(command, input.projectId);
+      // The session goes first; if it will not stop, nothing else is touched.
+      yield* threads.stop(input.threadId);
+      if (input.inMainCheckout) {
         yield* threads.archive(input.threadId);
-        // Last, so a teardown that stops early still finds the branch it verified.
-        if (input.branchDisposal !== "keep") {
-          // A branch that cannot go (checked out elsewhere, unmerged, moved past the
-          // verified tip) stays.
-          yield* git
-            .deleteBranch({
-              projectRoot: project.workspaceRoot,
-              branch: input.branch,
-              tip: input.branchDisposal === "safe" ? undefined : input.branchDisposal.tip,
-            })
-            .pipe(
-              Effect.tap(() => Effect.logInfo("Deleted teammate branch", { branch: input.branch })),
-              Effect.catch((cause) =>
-                Effect.logWarning("Kept teammate branch", { branch: input.branch, cause }),
-              ),
-            );
-        }
-      }),
+        return;
+      }
+      yield* threads.stopProcesses(input.worktreePath);
+      yield* removeTeammateTemp(input.worktreePath).pipe(
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Path.Path, path),
+      );
+      if (input.worktreeExists) {
+        yield* Effect.logInfo("Removing teammate worktree", { path: input.worktreePath });
+        yield* threads.removeWorktree({
+          projectRoot: project.workspaceRoot,
+          worktreePath: input.worktreePath,
+          force: input.force,
+        });
+      }
+      yield* threads.archive(input.threadId);
+      // Last, so a teardown that stops early still finds the branch it verified.
+      if (input.branchDisposal !== "keep") {
+        // A branch that cannot go (checked out elsewhere, unmerged, moved past the
+        // verified tip) stays.
+        yield* git
+          .deleteBranch({
+            projectRoot: project.workspaceRoot,
+            branch: input.branch,
+            tip: input.branchDisposal === "safe" ? undefined : input.branchDisposal.tip,
+          })
+          .pipe(
+            Effect.tap(() => Effect.logInfo("Deleted teammate branch", { branch: input.branch })),
+            Effect.catch((cause) =>
+              Effect.logWarning("Kept teammate branch", { branch: input.branch, cause }),
+            ),
+          );
+      }
+    }),
   });
 });
 

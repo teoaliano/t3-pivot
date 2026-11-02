@@ -18,8 +18,8 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const store = yield* PivotStore.PivotStore;
     return {
-      roleOf: (threadId) =>
-        Effect.gen(function* () {
+      roleOf: Effect.fn("PivotAwareness.roleOf")(
+        function* (threadId) {
           const pivot = yield* store.getPivot(threadId);
           if (pivot !== null) {
             return { kind: "pivot" as const, escalatedDecisions: pivot.escalatedDecisionCount };
@@ -27,7 +27,9 @@ export const layer = Layer.effect(
           return (yield* store.getTeammate(threadId)) === null
             ? null
             : { kind: "teammate" as const };
-        }).pipe(Effect.orElseSucceed(() => null)),
+        },
+        Effect.orElseSucceed(() => null),
+      ),
       changes: Stream.suspend(() => {
         const counts = new Map<string, number>();
         return store.stream.pipe(

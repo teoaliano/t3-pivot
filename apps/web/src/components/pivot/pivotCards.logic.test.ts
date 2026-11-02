@@ -149,32 +149,22 @@ describe("teammate cards", () => {
     expect(cards.finished.map((card) => card.threadId)).toEqual(["done", "gone"]);
   });
 
-  it("keeps a ship ready for review in view, with its evidence and the Pivot's verdict", () => {
-    const ready = teammate({
-      report: {
-        ...report("done", "2026-10-06T11:00:00.000Z"),
-        evidence: { text: "Signed in on Safari.", files: ["/tmp/safari.png"], devServer: true },
-      },
-      verdict: { text: "Small, matches the spec.", recordedAt: "2026-10-06T11:05:00.000Z" },
-    });
+  it("keeps a ship ready for review in view", () => {
+    const ready = teammate({ report: report("done", "2026-10-06T11:00:00.000Z") });
     const card = teammateCard(ready, shell({ status: "idle" }));
     expect(card.label).toBe("Ready for review");
-    expect(card.review).toEqual({
-      evidence: { text: "Signed in on Safari.", files: ["/tmp/safari.png"], devServer: true },
-      verdict: "Small, matches the spec.",
-      tryIt: true,
-    });
+    expect(card.readyForReview).toBe(true);
     expect(teammateCards([ready], () => shell({ status: "idle" })).live).toHaveLength(1);
 
     const shipping = teammateCard(
       teammate({ ...ready, shipOrderedAt: "2026-10-06T12:00:00.000Z" }),
       shell({ status: "idle" }),
     );
-    expect(shipping.review).toBeNull();
+    expect(shipping.readyForReview).toBe(false);
     expect(shipping.label).toBe("Done");
     expect(
-      teammateCard(teammate({ ...ready, kind: "scout" }), shell({ status: "idle" })).review,
-    ).toBeNull();
+      teammateCard(teammate({ ...ready, kind: "scout" }), shell({ status: "idle" })).readyForReview,
+    ).toBe(false);
   });
 
   it("wears the thread status colors and settles like a thread", () => {

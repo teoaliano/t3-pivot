@@ -150,11 +150,12 @@ export function formatStartFailureMemory(diagnosis: StartFailureMemoryDiagnosis)
 }
 
 /** Skips quietly (`undefined`) off Linux. */
-export const checkStartFailureMemory = (read: ReadText = readTextFromDisk) =>
-  Effect.gen(function* () {
+export const checkStartFailureMemory = Effect.fn("StartFailureDiagnosis.checkStartFailureMemory")(
+  function* (read: ReadText = readTextFromDisk) {
     const platform = yield* HostProcess.Platform;
     return platform === "linux" ? diagnoseStartFailureMemory({ read }) : undefined;
-  });
+  },
+);
 
 interface ErrorDetail {
   readonly name?: string;

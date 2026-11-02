@@ -68,7 +68,7 @@ export function nestPivotTeammates<T extends ThreadRef>(
 
 export interface SidebarPivotGroup {
   readonly retired: boolean;
-  /** Every teammate not settled, in dispatch order, as the Pivot view's cards. */
+  /** Every teammate not settled, in dispatch order, as cards. */
   readonly teammates: ReadonlyArray<TeammateCard>;
   /** Teammates that need the user (waiting, blocked, failed), plus the Pivot's own decisions. */
   readonly needYou: number;

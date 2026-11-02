@@ -1296,9 +1296,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   className={cn(
                     "min-w-0 flex-1 truncate",
                     isPivotRow
-                      ? shouldRecede
-                        ? "text-secondary-label text-sm"
-                        : "font-medium text-foreground text-sm"
+                      ? cn("text-foreground text-sm", shouldRecede ? "font-normal" : "font-medium")
                       : cn(
                           "text-secondary-label text-xs",
                           shouldRecede ? "font-normal" : "font-medium redesign:font-normal",
