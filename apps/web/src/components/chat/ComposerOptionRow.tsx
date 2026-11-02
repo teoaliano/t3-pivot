@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
+import { textDirection } from "~/textDirection";
 import { CheckboxMark } from "../ui/checkbox";
 import { Kbd } from "../ui/kbd";
 
@@ -15,12 +16,22 @@ export function ComposerOptionRow(props: {
   badge?: ReactNode;
   selected: boolean;
   multiSelect?: boolean | undefined;
+  textAlign?: "text-left" | "text-right";
   shortcutKey: number | null;
   disabled: boolean;
   onSelect: () => void;
 }) {
-  const { label, description, badge, selected, multiSelect, shortcutKey, disabled, onSelect } =
-    props;
+  const {
+    label,
+    description,
+    badge,
+    selected,
+    multiSelect,
+    textAlign = "text-left",
+    shortcutKey,
+    disabled,
+    onSelect,
+  } = props;
   return (
     <button
       type="button"
@@ -28,7 +39,8 @@ export function ComposerOptionRow(props: {
       aria-pressed={selected}
       onClick={onSelect}
       className={cn(
-        "group flex w-full items-start gap-2.5 rounded-md bg-transparent py-1.5 ps-2 text-left sm:ps-1.5 outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/25",
+        textAlign,
+        "group flex w-full items-start gap-2.5 rounded-md bg-transparent py-1.5 ps-2 sm:ps-1.5 outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/25",
         selected ? "text-foreground" : "text-foreground/70 hover:bg-muted/30",
         disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer",
       )}
@@ -38,12 +50,17 @@ export function ComposerOptionRow(props: {
         {multiSelect ? <CheckboxMark checked={selected} /> : <OptionRadio checked={selected} />}
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="flex min-w-0 items-center gap-1.5 text-sm font-medium">
+        <span
+          className="flex min-w-0 items-center gap-1.5 text-sm font-medium"
+          dir={textDirection(label)}
+        >
           {label}
           {badge}
         </span>
         {description && description !== label ? (
-          <span className="text-secondary-label text-2xs">{description}</span>
+          <span className="text-secondary-label text-2xs" dir={textDirection(description)}>
+            {description}
+          </span>
         ) : null}
       </div>
       {shortcutKey !== null ? (

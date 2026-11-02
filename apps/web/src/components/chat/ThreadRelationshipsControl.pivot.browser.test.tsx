@@ -96,7 +96,11 @@ const teammateShell = (id: string, status: string, title: string) => ({
 });
 
 const projectionOf = (threadId: string) => ({
-  thread: { id: threadId, lineage: { relationshipToParent: null }, activeProviderThreadId: null },
+  thread: {
+    id: threadId,
+    lineage: { parentThreadId: null, relationshipToParent: null },
+    activeProviderThreadId: null,
+  },
   runs: [],
   providerThreads: [],
   providerSessions: [],
@@ -136,7 +140,12 @@ describe("ThreadRelationshipsPanel in Pivot mode", () => {
       ],
     });
     await using screen = await render(
-      <ThreadRelationshipsPanel environmentId={environmentId} threadId={ThreadId.make("pivot")} />,
+      <ThreadRelationshipsPanel
+        environmentId={environmentId}
+        threadId={ThreadId.make("pivot")}
+        showLineage
+        showSideChats={false}
+      />,
     );
     const text = screen.container.textContent ?? "";
     expect(text).toContain("Teammates");
@@ -157,7 +166,12 @@ describe("ThreadRelationshipsPanel in Pivot mode", () => {
       shells: [teammateShell("first", "running", "First teammate")],
     });
     await using screen = await render(
-      <ThreadRelationshipsPanel environmentId={environmentId} threadId={ThreadId.make("plain")} />,
+      <ThreadRelationshipsPanel
+        environmentId={environmentId}
+        threadId={ThreadId.make("plain")}
+        showLineage
+        showSideChats={false}
+      />,
     );
     expect(screen.container.innerHTML).toBe("");
   });
