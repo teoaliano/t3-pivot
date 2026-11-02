@@ -56,7 +56,7 @@ export function usePivotProjectReadiness(
       ? null
       : vcsEnvironment.status({ environmentId, input: { cwd: workspaceRoot } }),
   );
-  if (status.data !== null && status.data.isRepo === false) {
+  if (status.data?.isRepo === false) {
     return {
       ready: false,
       reason: "Pivot mode needs a git repository: every teammate works in its own worktree.",

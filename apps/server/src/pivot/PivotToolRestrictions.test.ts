@@ -18,6 +18,7 @@ import {
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as RuntimePolicy from "../orchestration-v2/RuntimePolicy.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as PivotDatabase from "./PivotDatabase.ts";
 import * as PivotHostStore from "./PivotHostStore.ts";
 import * as PivotStore from "./PivotStore.ts";
@@ -77,6 +78,8 @@ const projectStore = Layer.mock(ProjectStore.ProjectStoreV2)({
       faviconPath: null,
       projectIcon: null,
       scripts: [],
+      pinnedAt: null,
+      archivedAt: null,
       createdAt: "2026-10-13T00:00:00.000Z",
       updatedAt: "2026-10-13T00:00:00.000Z",
       deletedAt: null,
@@ -84,6 +87,7 @@ const projectStore = Layer.mock(ProjectStore.ProjectStoreV2)({
 });
 
 const runtimePolicyLayer = RuntimePolicy.layerFromProjectStore.pipe(
+  Layer.provide(ServerSettings.layerTest({})),
   Layer.provide(
     Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
       getInstance: () => Effect.undefined,

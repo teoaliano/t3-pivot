@@ -1,4 +1,5 @@
 import { type RuntimeRequestId, type ScopedThreadRef } from "@t3tools/contracts";
+import { markdownProseDirection, textDirection } from "~/textDirection";
 import { memo, use, useEffect, useEffectEvent, useRef, useState } from "react";
 import { BackgroundThreadContext } from "./backgroundThread";
 import { useStableCallback } from "~/hooks/useStableCallback";
@@ -7,6 +8,7 @@ import type { PendingUserInputDraftAnswer } from "@t3tools/client-runtime/state/
 import { derivePendingUserInputProgress } from "../../pendingUserInput";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { cn } from "~/lib/utils";
+import { isInSideChatPane } from "~/lib/sideChatPane";
 import { ComposerBanner } from "./ComposerBanner";
 import { ComposerOptionRow } from "./ComposerOptionRow";
 import ChatMarkdown from "../ChatMarkdown";
@@ -150,6 +152,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     const handler = (event: globalThis.KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target;
+      if (isInSideChatPane(target)) return;
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
         return;
       }
@@ -176,8 +179,20 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     return null;
   }
 
+  const promptDirection = markdownProseDirection(
+    prompt.questions
+      .flatMap((question) => [
+        question.header,
+        question.question,
+        ...question.options.flatMap((option) => [option.label, option.description ?? ""]),
+      ])
+      .join(" "),
+  );
+  const questionTextAlign = promptDirection === "rtl" ? "text-right" : "text-left";
+
   return (
     <Collapsible
+      dir={promptDirection}
       open={!isCollapsed}
       onOpenChange={(open) => {
         setCollapsedQuestionId(open ? null : activeQuestion.id);
@@ -194,13 +209,17 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         <ComposerBanner.Content>
           <span
             className={cn("min-w-0 truncate text-muted-foreground", isCollapsed && "max-w-1/2")}
+            dir={textDirection(activeQuestion.header)}
           >
             {activeQuestion.header}
           </span>
           {isCollapsed ? (
             <>
               <ComposerBanner.Separator />
-              <span className="min-w-0 flex-1 truncate text-secondary-label">
+              <span
+                className={cn("min-w-0 flex-1 truncate text-secondary-label", questionTextAlign)}
+                dir={markdownProseDirection(activeQuestion.question)}
+              >
                 {activeQuestion.question}
               </span>
             </>
@@ -242,7 +261,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
               text={activeQuestion.question}
               cwd={cwd}
               threadRef={threadRef}
-              className="pt-2 text-foreground/85"
+              className={cn("pt-2 text-foreground/85", questionTextAlign)}
             />
             {/* Rows span the header row's width so the radios align with the question text and the shortcut column sits under the dismiss button. */}
             <div className="-ms-2 mt-1.5 sm:-ms-1.5">
@@ -259,6 +278,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                     selected={isOptimisticallySelected || draftSelectedOptions?.[index] === true}
                     shortcutKey={index < 9 ? index + 1 : null}
                     multiSelect={activeQuestion.multiSelect}
+                    textAlign={questionTextAlign}
                     disabled={disabled || isResponding}
                     onSelect={() => {
                       handleOptionSelection(activeQuestion.id, optionValue);

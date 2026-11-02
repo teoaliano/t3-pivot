@@ -63,6 +63,11 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
   /** Set for a teammate, whose shell may not merge or close PRs. */
   withoutForgeMerge: Schema.optional(Schema.Boolean),
   reasoningEffort: Schema.optional(Schema.String),
+  /**
+   * The administrator's ceiling, when a managed policy sets one. `runtimeMode` is already under
+   * it; adapters use it to refuse native mode choices a user makes beside T3 Code's own.
+   */
+  maxRuntimeMode: Schema.optional(RuntimeMode),
 });
 export type ProviderAdapterV2RuntimePolicy = typeof ProviderAdapterV2RuntimePolicy.Type;
 
@@ -166,6 +171,7 @@ export const ProviderAdapterV2Event = Schema.Union([
     runOrdinal: PositiveInt,
     status: Schema.Literals(["completed", "interrupted", "cancelled"]),
     failure: Schema.Null,
+    reason: Schema.optional(Schema.String),
     threadDisposition: Schema.Literals(["reusable", "broken"]),
   }),
   Schema.Struct({
@@ -511,6 +517,7 @@ export type ProviderAdapterV2RollbackTarget =
       readonly checkpointId: CheckpointId;
       readonly appRunOrdinal: number;
       readonly providerTurn: OrchestrationV2ProviderTurn;
+      readonly message?: Pick<OrchestrationV2ConversationMessage, "role" | "text" | "attachments">;
     };
 
 export interface ProviderAdapterV2RollbackThreadInput {
