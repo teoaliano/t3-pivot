@@ -14,8 +14,6 @@ import { ServerConfig } from "../config.ts";
 import {
   BRIEF_TEXTS,
   definitionOfDoneText,
-  inlineBranchBase,
-  PIVOT_WORKSPACE_DIRNAME,
   renderBrief,
   teammateBranchBase,
   uniqueBranch,
@@ -36,9 +34,6 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   // Creating a Pivot or a teammate spans two databases; one at a time per project.
   const projectLocks = yield* KeyedLock.make<string>();
-  // How the setup script went for an inline task that created the Pivot's workspace. V2's
-  // setup tracker never sees it: the workspace is not a launch's worktree.
-  const inlineSetups = new Map<string, PivotThreads.SetupScriptOutcome>();
 
   const refuse = (command: string, reason: string) =>
     new PivotStore.PivotRefusedError({ command, reason });
@@ -65,88 +60,6 @@ export const make = Effect.gen(function* () {
     return project;
   });
 
-  // An inline task: a small change made in the Pivot's workspace, one at a time per project.
-  // The workspace is made once, with the project's setup script, and reused after that.
-  const launchInline = Effect.fn("LocalTeammateHost.launchInline")(function* (
-    command: string,
-    input: Parameters<TeammateHost["Service"]["launch"]>[0],
-    projectRoot: string,
-    deliveryMode: "direct-pr" | "local-only",
-  ) {
-    const busy = (yield* store.listTeammates({ includeTornDown: false })).find(
-      (teammate) => teammate.projectId === input.projectId && teammate.kind === "inline",
-    );
-    if (busy !== undefined) {
-      return yield* refuse(
-        command,
-        `One inline task at a time: "${busy.title}" (${busy.threadId}) is still open. Tear it down once it lands, or dispatch a ship for this one.`,
-      );
-    }
-    if (input.baseBranch !== undefined) {
-      return yield* refuse(
-        command,
-        "An inline task starts from the default branch. Stack work on another branch with a ship.",
-      );
-    }
-    const baseBranch = yield* git.defaultBranch(projectRoot);
-    const taken = new Set<string>(yield* git.listBranches(projectRoot, "pivot-inline/"));
-    for (const teammate of yield* store.listTeammates({ includeTornDown: true })) {
-      if (teammate.projectId === input.projectId) taken.add(teammate.branch);
-    }
-    const branch = uniqueBranch(inlineBranchBase(input.title), (candidate) => taken.has(candidate));
-    const worktreePath = path.join(
-      config.worktreesDir,
-      path.basename(projectRoot),
-      PIVOT_WORKSPACE_DIRNAME,
-    );
-    const { created } = yield* git
-      .startWorkspaceBranch({ projectRoot, path: worktreePath, branch, defaultBranch: baseBranch })
-      .pipe(
-        Effect.catchTags({
-          PivotWorkspaceDirtyError: (error) =>
-            Effect.fail(
-              refuse(
-                command,
-                `${error.message} Find out whose they are before the next inline task; a teammate can commit or discard them.`,
-              ),
-            ),
-        }),
-      );
-    const definitionOfDone = [
-      yield* text(BRIEF_TEXTS.inline),
-      yield* text(definitionOfDoneText("ship", deliveryMode)),
-    ].join("\n\n");
-    const brief = renderBrief(yield* text(BRIEF_TEXTS.brief), {
-      title: input.title,
-      kind: input.kind,
-      intent: input.intent,
-      spec: input.spec,
-      branch,
-      baseBranch,
-      worktreePath,
-      definitionOfDone,
-    });
-    const launched = yield* threads.launchInline({
-      projectId: input.projectId,
-      pivotThreadId: input.pivotThreadId,
-      title: input.title,
-      branch,
-      worktreePath,
-      modelSelection: input.modelSelection,
-      text: brief,
-      runSetup: created,
-    });
-    if (launched.setup !== null) inlineSetups.set(launched.threadId, launched.setup);
-    return {
-      threadId: launched.threadId,
-      runId: launched.runId,
-      branch,
-      baseBranch,
-      worktreePath,
-      deliveryMode,
-    };
-  });
-
   return TeammateHost.of({
     withProjectLock: projectLocks.withLock,
     project: gitProject,
@@ -157,8 +70,49 @@ export const make = Effect.gen(function* () {
       const deliveryMode = (yield* git.hasRemote(project.workspaceRoot))
         ? ("direct-pr" as const)
         : ("local-only" as const);
-      if (input.kind === "inline") {
-        return yield* launchInline(command, input, project.workspaceRoot, deliveryMode);
+      const briefFor = Effect.fn("LocalTeammateHost.briefFor")(function* (checkout: {
+        readonly branch: string;
+        readonly baseBranch: string;
+        readonly worktreePath: string;
+      }) {
+        return renderBrief(yield* text(BRIEF_TEXTS.brief), {
+          title: input.title,
+          kind: input.kind,
+          intent: input.intent,
+          spec: input.spec,
+          ...checkout,
+          definitionOfDone: yield* text(
+            definitionOfDoneText(input.kind, deliveryMode, input.shipDirectly === true),
+          ),
+        });
+      });
+      const existing =
+        input.attach ??
+        (input.kind === "scout"
+          ? yield* git.currentBranch(project.workspaceRoot).pipe(
+              Effect.map((branch) => ({
+                branch,
+                baseBranch: branch,
+                worktreePath: project.workspaceRoot,
+              })),
+            )
+          : null);
+      if (existing !== null) {
+        const brief = yield* briefFor(existing);
+        const threadId = yield* threads.createTeammateThread({
+          projectId: input.projectId,
+          title: input.title,
+          branch: input.kind === "scout" ? null : existing.branch,
+          worktreePath: input.kind === "scout" ? null : existing.worktreePath,
+          modelSelection: input.modelSelection,
+        });
+        return {
+          threadId,
+          runId: null,
+          start: threads.request({ threadId, senderThreadId: input.pivotThreadId, text: brief }),
+          ...existing,
+          deliveryMode,
+        };
       }
       const baseBranch = input.baseBranch ?? (yield* git.defaultBranch(project.workspaceRoot));
       const taken = new Set<string>(yield* git.listBranches(project.workspaceRoot, "pivot/"));
@@ -176,16 +130,7 @@ export const make = Effect.gen(function* () {
         branch = uniqueBranch(base, (candidate) => taken.has(candidate));
       }
       const worktreePath = worktreeFor(branch);
-      const brief = renderBrief(yield* text(BRIEF_TEXTS.brief), {
-        title: input.title,
-        kind: input.kind,
-        intent: input.intent,
-        spec: input.spec,
-        branch,
-        baseBranch,
-        worktreePath,
-        definitionOfDone: yield* text(definitionOfDoneText(input.kind, deliveryMode)),
-      });
+      const brief = yield* briefFor({ branch, baseBranch, worktreePath });
       const launched = yield* threads.launchTeammate({
         projectId: input.projectId,
         pivotThreadId: input.pivotThreadId,
@@ -206,11 +151,7 @@ export const make = Effect.gen(function* () {
     }),
 
     awaitStart: threads.awaitStart,
-    // Polled while a launch starts, so it stays untraced.
-    setupOutcome: Effect.fnUntraced(function* (threadId) {
-      const inline = inlineSetups.get(threadId);
-      return yield* inline === undefined ? threads.setupOutcome(threadId) : Effect.succeed(inline);
-    }),
+    setupOutcome: threads.setupOutcome,
     // Archiving does not interrupt a run still preparing its worktree, which would go on to run
     // the setup script and start an agent. A stop does, so it comes first; if it fails the thread
     // is archived anyway.
@@ -233,6 +174,7 @@ export const make = Effect.gen(function* () {
       return yield* threads.send({ threadId, senderThreadId, text, attachments, mode: "queue" });
     }),
     stop: threads.stop,
+    stopServers: threads.stopServers,
     // Landed or merged: the session stops first, so the agent never sees its own process
     // killed under it, and then what its scope still runs goes.
     stopScope: Effect.fn("TeammateHost.stopScope")(function* (threadId) {
@@ -284,30 +226,36 @@ export const make = Effect.gen(function* () {
     }),
     worktreeClean: git.isClean,
 
+    recreateWorktree: Effect.fn("LocalTeammateHost.recreateWorktree")(function* (command, input) {
+      const project = yield* gitProject(command, input.projectId);
+      if (!(yield* git.branchExists(project.workspaceRoot, input.branch))) {
+        return yield* refuse(
+          command,
+          `Its worktree was reclaimed and its branch ${input.branch} is gone too, so there is nothing to relaunch onto.`,
+        );
+      }
+      yield* Effect.logInfo("Recreating teammate worktree", { path: input.worktreePath });
+      yield* threads.recreateWorktree({
+        projectRoot: project.workspaceRoot,
+        worktreePath: input.worktreePath,
+        branch: input.branch,
+      });
+    }),
+
     teardown: Effect.fn("TeammateHost.teardown")(function* (command, input) {
       const project = yield* gitProject(command, input.projectId);
       // The session goes first; if it will not stop, nothing else is touched.
       yield* threads.stop(input.threadId);
+      if (input.inMainCheckout) {
+        yield* threads.archive(input.threadId);
+        return;
+      }
       yield* threads.stopProcesses(input.worktreePath);
       yield* removeTeammateTemp(input.worktreePath).pipe(
         Effect.provideService(FileSystem.FileSystem, fs),
         Effect.provideService(Path.Path, path),
       );
-      if (input.inline === true) {
-        // The Pivot's workspace stays for the next inline task, back on a clean default branch.
-        inlineSetups.delete(input.threadId);
-        yield* git
-          .resetWorkspace({
-            path: input.worktreePath,
-            defaultBranch: yield* git.defaultBranch(project.workspaceRoot),
-            force: input.force,
-          })
-          .pipe(
-            Effect.catchTags({
-              PivotWorkspaceDirtyError: (error) => Effect.fail(refuse(command, error.message)),
-            }),
-          );
-      } else if (input.worktreeExists) {
+      if (input.worktreeExists) {
         yield* Effect.logInfo("Removing teammate worktree", { path: input.worktreePath });
         yield* threads.removeWorktree({
           projectRoot: project.workspaceRoot,

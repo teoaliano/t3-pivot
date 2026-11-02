@@ -80,4 +80,49 @@ const StartServerTool = Tool.make("preview_start_server", {
   .annotate(Tool.Idempotent, true)
   .annotate(Tool.OpenWorld, false);
 
-export const ManagedProcessToolkit = Toolkit.make(StartServerTool);
+export const StopServerInput = Schema.Struct({
+  script: Schema.optional(
+    TrimmedNonEmptyString.annotate({
+      description:
+        "Id or name of the project script to stop. Omit it to stop the dev server preview_start_server starts by default.",
+    }),
+  ),
+});
+
+export const StopServerResult = Schema.Struct({
+  stopped: Schema.Boolean.annotate({
+    description: "False when the server was not running, which is not an error.",
+  }),
+});
+export type StopServerResult = typeof StopServerResult.Type;
+
+export const StopServerError = Schema.Union([
+  OrchestratorMcpFailure,
+  PreviewAutomationUnavailableError,
+  ManagedProcessScriptNotFoundError,
+  ManagedProcessThreadNotFoundError,
+]);
+
+const StopServerTool = Tool.make("preview_stop_server", {
+  description:
+    "Stop this checkout's dev server that preview_start_server started, as soon as you have what you needed from it, so its memory comes back. It waits for the port to be free. The checkout keeps its reserved port, so a later start uses the same address. Succeeds when the server is not running.",
+  parameters: StopServerInput,
+  success: StopServerResult,
+  failure: StopServerError,
+  dependencies: [
+    McpInvocationContext.McpInvocationContext,
+    ManagedProcesses.ManagedProcesses,
+    ThreadManagementService,
+    ProjectStoreV2,
+    ServerSettingsService,
+    FileSystem.FileSystem,
+    Path.Path,
+  ],
+})
+  .annotate(Tool.Title, "Stop dev server")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, true)
+  .annotate(Tool.OpenWorld, false);
+
+export const ManagedProcessToolkit = Toolkit.make(StartServerTool, StopServerTool);

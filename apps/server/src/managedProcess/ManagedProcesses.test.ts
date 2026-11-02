@@ -764,10 +764,10 @@ describe("ManagedProcesses", () => {
           // The client's lease expired. The idle window starts from the last
           // sweep that saw the claim.
           world.claimedCheckouts.delete("/work/app");
-          yield* idleFor(20);
+          yield* idleFor(15);
           yield* service.sweep;
           const soonAfter = yield* statusOf(service, "/work/app");
-          yield* idleFor(15);
+          yield* idleFor(10);
           yield* service.sweep;
 
           expect(whileClaimed).toBe("starting");
@@ -814,14 +814,14 @@ describe("ManagedProcesses", () => {
       ),
     );
 
-    it.effect("reaps a process nobody has wanted for thirty minutes", () =>
+    it.effect("reaps a process nobody has wanted for twenty minutes", () =>
       withRegistry((registryPath) =>
         Effect.gen(function* () {
           const world = new World();
           const { service } = yield* boot(world, registryPath);
           yield* service.start(target("/work/app"));
 
-          yield* idleFor(29);
+          yield* idleFor(19);
           yield* service.sweep;
           const before = yield* statusOf(service, "/work/app");
           yield* idleFor(2);
@@ -829,6 +829,21 @@ describe("ManagedProcesses", () => {
 
           expect(before).toBe("starting");
           expect(yield* statusOf(service, "/work/app")).toBe("stopped");
+        }),
+      ),
+    );
+
+    it.effect("stops a live process and says so, and has nothing to stop the second time", () =>
+      withRegistry((registryPath) =>
+        Effect.gen(function* () {
+          const world = new World();
+          const { service } = yield* boot(world, registryPath);
+          yield* service.start(target("/work/app"));
+          const devServer = { checkoutPath: "/work/app", scriptId: "dev" };
+
+          expect(yield* service.stopIfLive(devServer)).toBe(true);
+          expect(yield* statusOf(service, "/work/app")).toBe("stopped");
+          expect(yield* service.stopIfLive(devServer)).toBe(false);
         }),
       ),
     );

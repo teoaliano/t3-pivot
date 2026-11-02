@@ -82,6 +82,7 @@ const makeHarness = (
     readonly worktreePath?: string;
     /** What the started process does next: serves a page, exits, or keeps compiling. */
     readonly outcome?: "running" | { readonly exited: string } | "compiling";
+    readonly running?: boolean;
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -97,7 +98,15 @@ const makeHarness = (
     } as unknown as OrchestrationV2ThreadShell;
     const starts: Array<{ checkoutPath: string; scriptId: string; reallocate: boolean }> = [];
     const commands: Array<string> = [];
+    const stops: Array<{ checkoutPath: string; scriptId: string }> = [];
+    const released: Array<string> = [];
     let lastStarted: ManagedProcess | null = null;
+    let existing: ManagedProcess | null = options.running
+      ? {
+          ...processOn(11000, options.worktreePath ?? "/worktrees/project/feature"),
+          status: "running",
+        }
+      : null;
     const outcome = options.outcome ?? "running";
     const dependencies = Layer.mergeAll(
       Layer.mock(ThreadManagementService)({
@@ -128,6 +137,17 @@ const makeHarness = (
             }
             lastStarted = processOn(reallocate ? 11010 : 11000, target.checkoutPath);
             return lastStarted;
+          }),
+        stopIfLive: (target) =>
+          Effect.sync(() => {
+            if (existing === null || existing.status === "stopped") return false;
+            stops.push({ checkoutPath: target.checkoutPath, scriptId: target.scriptId });
+            existing = { ...existing, status: "stopped" };
+            return true;
+          }),
+        stopAllForCheckout: (checkoutPath, stopOptions) =>
+          Effect.sync(() => {
+            if (stopOptions?.releaseReservation === true) released.push(checkoutPath);
           }),
         stream: (checkoutPath) => {
           const snapshot = (process: ManagedProcess) => ({ checkoutPath, processes: [process] });
@@ -167,7 +187,20 @@ const makeHarness = (
         Effect.provideService(McpInvocationContext.McpInvocationContext, invocation(capabilities)),
         Effect.provide(dependencies),
       );
-    return { starts, commands, call };
+    const stop = (params: { readonly script?: string }) =>
+      toolkit.handle("preview_stop_server", params).pipe(
+        Stream.unwrap,
+        Stream.runCollect,
+        Effect.map(
+          (chunk) =>
+            chunk.at(-1)!.result as Tool.Success<
+              (typeof ManagedProcessToolkit.tools)["preview_stop_server"]
+            >,
+        ),
+        Effect.provideService(McpInvocationContext.McpInvocationContext, invocation(["preview"])),
+        Effect.provide(dependencies),
+      );
+    return { starts, commands, stops, released, call, stop };
   });
 
 describe("managed process toolkit handlers", () => {
@@ -260,6 +293,44 @@ describe("managed process toolkit handlers", () => {
 
       expect(result.port).toBe(11000);
       expect(harness.commands).toEqual(["npm run dev -- --port $PORT --strictPort"]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("stops this checkout's dev server and keeps its port reservation", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({ running: true });
+      const result = yield* harness.stop({});
+
+      expect(result).toEqual({ stopped: true });
+      expect(harness.stops).toEqual([
+        { checkoutPath: "/worktrees/project/feature", scriptId: "dev" },
+      ]);
+      expect(harness.released).toEqual([]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("succeeds with nothing to stop when the dev server is not running", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const result = yield* harness.stop({});
+
+      expect(result).toEqual({ stopped: false });
+      expect(harness.stops).toEqual([]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("succeeds with nothing to stop when the checkout has no dev server at all", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const checkout = yield* fs.makeTempDirectoryScoped({ prefix: "t3-no-dev-" });
+      const harness = yield* makeHarness({
+        scripts: [project.scripts[0]!],
+        worktreePath: checkout,
+      });
+      const result = yield* harness.stop({});
+
+      expect(result).toEqual({ stopped: false });
+      expect(harness.stops).toEqual([]);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

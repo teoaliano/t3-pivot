@@ -844,7 +844,11 @@ describe("hosted teammate tools", () => {
         const worktree = attachWorktree(fake, workspaceRoot, ship.threadId, ship.branch);
 
         NodeFS.writeFileSync(NodePath.join(worktree, "login.txt"), "fixed\n");
-        const done = { status: "done", summary: "Fixed." } as const;
+        const done = {
+          status: "done",
+          summary: "Fixed.",
+          evidence: { text: "Tests pass." },
+        } as const;
         const refused = yield* pivots.reportStatus(ship.threadId, done).pipe(Effect.flip);
         assert.include(refused.message, "needs all work committed");
         assert.include(refused.message, "login.txt");
@@ -864,18 +868,38 @@ describe("hosted teammate tools", () => {
     },
   );
 
-  it.effect("records a scout's report in the log, and only a scout's", () => {
+  it.effect("refuses a scout, and logs the report of one an older release hosted", () => {
     const { layer } = hostSetup();
     return Effect.gen(function* () {
       const host = yield* PivotHost.PivotHost;
       const pivots = yield* PivotService.PivotService;
       const home = yield* newHome();
-      const scout = yield* launch(home, { kind: "scout" });
+      const refused = yield* host
+        .launchTeammate(home.caller, launchInput(home, { kind: "scout" }))
+        .pipe(Effect.flip);
+      assert.include(refused.message, "Scouts run on the Pivot's own environment");
+      const hostStore = yield* PivotHostStore.PivotHostStore;
+      const scout = { threadId: ThreadId.make("thread-old-scout") };
+      yield* hostStore.recordTeammate({
+        threadId: scout.threadId,
+        grantId: home.grantId,
+        dispatchId: "dispatch-old-scout",
+        projectId,
+        pivotThreadId: ThreadId.make("pivot-on-the-home"),
+        pivotLabel: "Pivot on Mac",
+        kind: "scout",
+        title: "Why is it slow",
+        branch: "pivot/why-is-it-slow",
+        baseBranch: "main",
+        worktreePath: "/worktrees/why-is-it-slow",
+        deliveryMode: "local-only",
+        firstRunId: null,
+      });
       const ship = yield* launch(home, { dispatchId: "dispatch-2" });
 
       assert.deepStrictEqual(
         yield* pivots.recordScoutReport(scout.threadId, { report: "It is the cache." }),
-        { recorded: true },
+        { recorded: true, checkoutChanges: [] },
       );
       assert.strictEqual(
         (yield* pivots.recordScoutReport(ship.threadId, { report: "Nope." }).pipe(Effect.flip))
@@ -1537,31 +1561,25 @@ describe("pull requests of a hosted teammate", () => {
 });
 
 describe("hosted `done` when the project delivers pull requests", () => {
-  it.effect("needs a linked PR on the right branch, and the branch pushed", () => {
+  it.effect("is committed work with evidence, with nothing pushed and no PR", () => {
     const { fake, workspaceRoot, layer } = hostSetup({ remote: true });
     return Effect.gen(function* () {
       const pivots = yield* PivotService.PivotService;
       const home = yield* newHome();
       const ship = yield* launch(home);
       assert.strictEqual(ship.deliveryMode, "direct-pr");
-      const worktree = attachWorktree(fake, workspaceRoot, ship.threadId, ship.branch);
-      const done = { status: "done", summary: "Fixed." } as const;
-      const refusal = () => pivots.reportStatus(ship.threadId, done).pipe(Effect.flip);
+      attachWorktree(fake, workspaceRoot, ship.threadId, ship.branch);
 
-      assert.include((yield* refusal()).message, "`done` needs a linked PR.");
-
-      const url = "https://github.com/acme/app/pull/7";
-      const thread = fake.threads.get(ship.threadId)!;
-      thread.shell = {
-        pullRequests: [{ url, snapshot: { headBranch: "pivot/somebody-else" } }],
-      } as never;
-      assert.include((yield* refusal()).message, "not your branch");
-
-      thread.shell = { pullRequests: [{ url, snapshot: { headBranch: ship.branch } }] } as never;
-      assert.include((yield* refusal()).message, "is not pushed");
-
-      sh(worktree, `git push -q origin ${ship.branch}`);
-      assert.strictEqual((yield* pivots.reportStatus(ship.threadId, done)).status, "done");
+      const bare = yield* pivots
+        .reportStatus(ship.threadId, { status: "done", summary: "Fixed." })
+        .pipe(Effect.flip);
+      assert.include(bare.message, "evidence");
+      const done = yield* pivots.reportStatus(ship.threadId, {
+        status: "done",
+        summary: "Fixed.",
+        evidence: { text: "Tests pass." },
+      });
+      assert.strictEqual(done.status, "done");
     }).pipe(Effect.provide(layer));
   });
 });

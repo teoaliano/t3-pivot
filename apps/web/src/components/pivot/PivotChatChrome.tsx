@@ -18,12 +18,18 @@ import {
   usePivotDecisionAttachments,
 } from "./pivotDecisionAttachments";
 import { PivotDecisionCard } from "./PivotDecisionCard";
+import { shipBatchLines } from "./pivotDecisions.logic";
 
 /** What a thread is in Pivot mode, for the chat around it. */
 export type PivotChatRole =
   | { readonly kind: "none" }
   | { readonly kind: "pivot"; readonly retired: false }
-  | { readonly kind: "pivot"; readonly retired: true; readonly successorThreadId: ThreadId | null }
+  | {
+      readonly kind: "pivot";
+      readonly retired: true;
+      readonly successorThreadId: ThreadId | null;
+      readonly hasHandoff: boolean;
+    }
   | { readonly kind: "teammate"; readonly pivotThreadId: ThreadId };
 
 export function usePivotChatRole(environmentId: EnvironmentId, threadId: ThreadId): PivotChatRole {
@@ -32,7 +38,12 @@ export function usePivotChatRole(environmentId: EnvironmentId, threadId: ThreadI
   if (pivot !== undefined) {
     return pivot.retiredAt === null
       ? { kind: "pivot", retired: false }
-      : { kind: "pivot", retired: true, successorThreadId: pivot.successorThreadId };
+      : {
+          kind: "pivot",
+          retired: true,
+          successorThreadId: pivot.successorThreadId,
+          hasHandoff: pivot.hasHandoff === true,
+        };
   }
   const teammate = state?.teammates[threadId];
   if (teammate !== undefined) return { kind: "teammate", pivotThreadId: teammate.pivotThreadId };
@@ -43,12 +54,16 @@ export function usePivotChatRole(environmentId: EnvironmentId, threadId: ThreadI
 export function PivotComposerBar(props: {
   environmentId: EnvironmentId;
   successorThreadId: ThreadId | null;
+  hasHandoff: boolean;
 }) {
   const navigate = useNavigate();
   const successor = props.successorThreadId;
   return (
     <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm text-muted-foreground">
-      <span>This Pivot is retired. Its live work moved to the Pivot that took over.</span>
+      <span>
+        This Pivot is retired. Its live work moved to the Pivot that took over
+        {props.hasHandoff ? ", which started from its handoff, its last message." : "."}
+      </span>
       {successor !== null ? (
         <Button
           size="xs"
@@ -87,6 +102,8 @@ export function PivotDecisionsStrip(props: {
     (decision.teammateThreadId === null
       ? null
       : state?.teammates[decision.teammateThreadId]?.title) ?? "The Pivot";
+  const batchOf = (decision: PivotDecision) =>
+    shipBatchLines(decision, (threadId) => state?.teammates[threadId]?.title ?? threadId);
   return (
     <div data-pivot-decisions-strip="true">
       {answered.map((decision) => (
@@ -94,6 +111,7 @@ export function PivotDecisionsStrip(props: {
           key={decision.decisionId}
           decision={decision}
           asker={askerOf(decision)}
+          shipBatch={batchOf(decision)}
           position={null}
           sending={false}
           onAnswer={() => {}}
@@ -105,6 +123,7 @@ export function PivotDecisionsStrip(props: {
           environmentId={props.environmentId}
           decision={current}
           asker={askerOf(current)}
+          shipBatch={batchOf(current)}
           position={waiting.length > 1 ? { index: 0, total: waiting.length } : null}
           canvasHeight={canvasHeight}
         />
@@ -117,6 +136,7 @@ function OpenPivotDecision(props: {
   environmentId: EnvironmentId;
   decision: PivotDecision;
   asker: string;
+  shipBatch: ReadonlyArray<string>;
   position: { index: number; total: number } | null;
   canvasHeight: number;
 }) {
@@ -162,6 +182,7 @@ function OpenPivotDecision(props: {
     <PivotDecisionCard
       decision={props.decision}
       asker={props.asker}
+      shipBatch={props.shipBatch}
       position={props.position}
       sending={sending}
       canvasHeight={props.canvasHeight}

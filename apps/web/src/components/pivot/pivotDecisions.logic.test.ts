@@ -6,6 +6,7 @@ import {
   decisionBodyDefaultMaxHeight,
   decisionLogEntry,
   recommendedOption,
+  shipBatchLines,
   userAnswerLabel,
 } from "./pivotDecisions.logic";
 
@@ -147,5 +148,30 @@ describe("decisionBodyDefaultMaxHeight", () => {
 
   it("is unset when the canvas height is unknown", () => {
     expect(decisionBodyDefaultMaxHeight(0)).toBeUndefined();
+  });
+});
+
+describe("ship batches", () => {
+  it("lists each PR in merge order, its lead first and the members that merge into it", () => {
+    const titles: Record<string, string> = { api: "Add the API", ui: "Add the UI", docs: "Docs" };
+    const batch = decision({
+      escalation: {
+        questions: ["Ship?"],
+        evidence: "Reviewed.",
+        consequence: "PRs open.",
+        options: [],
+        recommendation: "Ship",
+        asksApproval: true,
+        shipGroups: [
+          { lead: ThreadId.make("api"), members: [ThreadId.make("ui")] },
+          { lead: ThreadId.make("docs"), members: [] },
+        ],
+      },
+    });
+    expect(shipBatchLines(batch, (threadId) => titles[threadId] ?? threadId)).toEqual([
+      "1. Add the API, with Add the UI",
+      "2. Docs",
+    ]);
+    expect(shipBatchLines(decision(), (threadId) => threadId)).toEqual([]);
   });
 });

@@ -108,7 +108,7 @@ describe("PivotService.create", () => {
     }).pipe(Effect.provide(layer));
   });
 
-  it.effect("a takeover retires and settles the active Pivot", () => {
+  it.effect("a takeover retires the active Pivot and leaves it to write its handoff", () => {
     const { fake, layer } = setup();
     return Effect.gen(function* () {
       const pivots = yield* PivotService.PivotService;
@@ -118,7 +118,7 @@ describe("PivotService.create", () => {
       assert.strictEqual(second.predecessorThreadId, first.threadId);
       assert.isNotNull((yield* store.getPivot(first.threadId))?.retiredAt);
       assert.strictEqual((yield* store.getActivePivot(projectId))?.threadId, second.threadId);
-      assert.isTrue(fake.threads.get(first.threadId)?.settled);
+      assert.isFalse(fake.threads.get(first.threadId)?.settled);
       assert.isFalse(fake.threads.get(second.threadId)?.settled);
     }).pipe(Effect.provide(layer));
   });
@@ -189,7 +189,11 @@ describe("PivotService.decisionLog", () => {
 });
 
 /** A ship the Pivot dispatched, on a real worktree of the project's repository. */
-const dispatchShip = (fake: FakeThreads.FakeV2, repo: string) =>
+const dispatchShip = (
+  fake: FakeThreads.FakeV2,
+  repo: string,
+  options: { shipDirectly?: boolean } = {},
+) =>
   Effect.gen(function* () {
     const pivots = yield* PivotService.PivotService;
     const pivot = (yield* pivots.create({ projectId, modelSelection, takeover: false })).threadId;
@@ -198,6 +202,7 @@ const dispatchShip = (fake: FakeThreads.FakeV2, repo: string) =>
       kind: "ship",
       intent: "Make the login button work on Safari.",
       spec: "Reproduce, fix, test.",
+      ...options,
     });
     const worktree = attachWorktree(fake, repo, dispatched.threadId, dispatched.branch);
     return { teammate: dispatched.threadId, branch: dispatched.branch, worktree };
@@ -209,6 +214,8 @@ const commitFile = (worktree: string, name: string) => {
   sh(worktree, `git add -A && git commit -q -m "${name}"`);
 };
 
+const done = { status: "done", summary: "Fixed", evidence: { text: "Tests pass." } } as const;
+
 describe("PivotService.reportStatus done", () => {
   it.effect("refuses done for a ship with uncommitted work, and names it", () => {
     const { fake, workspaceRoot, layer } = setup();
@@ -217,9 +224,7 @@ describe("PivotService.reportStatus done", () => {
       const ship = yield* dispatchShip(fake, workspaceRoot);
       NodeFS.writeFileSync(NodePath.join(ship.worktree, "login.ts"), "export {};\n");
 
-      const reason = yield* refusal(
-        pivots.reportStatus(ship.teammate, { status: "done", summary: "Fixed" }),
-      );
+      const reason = yield* refusal(pivots.reportStatus(ship.teammate, done));
       assert.include(reason, "login.ts");
       assert.include(reason, "Commit it");
     }).pipe(Effect.provide(layer));
@@ -232,45 +237,34 @@ describe("PivotService.reportStatus done", () => {
       const ship = yield* dispatchShip(fake, workspaceRoot);
       commitFile(ship.worktree, "login.ts");
 
-      const reported = yield* pivots.reportStatus(ship.teammate, {
-        status: "done",
-        summary: "Fixed",
-      });
+      const reported = yield* pivots.reportStatus(ship.teammate, done);
       assert.strictEqual(reported.status, "done");
     }).pipe(Effect.provide(layer));
   });
 
-  it.effect(
-    "refuses done for a ship on a project with a remote while its commit is unpushed",
-    () => {
-      const { fake, workspaceRoot, layer } = setup({ remote: true });
-      return Effect.gen(function* () {
-        const pivots = yield* PivotService.PivotService;
-        const ship = yield* dispatchShip(fake, workspaceRoot);
-        fake.threads.get(ship.teammate)!.shell = {
-          linkedPullRequest: {
-            projectId,
-            repository: "acme/app",
-            number: 1,
-            url: "https://github.com/acme/app/pull/1",
-          },
-        };
-        commitFile(ship.worktree, "login.ts");
+  it.effect("refuses done for a ship told to ship directly while its commit is unpushed", () => {
+    const { fake, workspaceRoot, layer } = setup({ remote: true });
+    return Effect.gen(function* () {
+      const pivots = yield* PivotService.PivotService;
+      const ship = yield* dispatchShip(fake, workspaceRoot, { shipDirectly: true });
+      fake.threads.get(ship.teammate)!.shell = {
+        linkedPullRequest: {
+          projectId,
+          repository: "acme/app",
+          number: 1,
+          url: "https://github.com/acme/app/pull/1",
+        },
+      };
+      commitFile(ship.worktree, "login.ts");
 
-        const reason = yield* refusal(
-          pivots.reportStatus(ship.teammate, { status: "done", summary: "Fixed" }),
-        );
-        assert.include(reason, "is not pushed");
+      const reason = yield* refusal(pivots.reportStatus(ship.teammate, done));
+      assert.include(reason, "is not pushed");
 
-        sh(ship.worktree, `git push -q -u origin ${ship.branch}`);
-        const reported = yield* pivots.reportStatus(ship.teammate, {
-          status: "done",
-          summary: "Fixed",
-        });
-        assert.strictEqual(reported.status, "done");
-      }).pipe(Effect.provide(layer));
-    },
-  );
+      sh(ship.worktree, `git push -q -u origin ${ship.branch}`);
+      const reported = yield* pivots.reportStatus(ship.teammate, done);
+      assert.strictEqual(reported.status, "done");
+    }).pipe(Effect.provide(layer));
+  });
 });
 
 describe("PivotService.teardownTeammate", () => {
@@ -361,65 +355,8 @@ describe("PivotService teammate tools after teardown", () => {
   });
 });
 
-describe("PivotService inline tasks", () => {
-  const inline = (pivot: ThreadId, title: string) =>
-    Effect.flatMap(PivotService.PivotService, (pivots) =>
-      pivots.dispatchTeammate(pivot, {
-        title,
-        kind: "inline",
-        intent: "Fix the typo in the README.",
-        spec: "One-line change.",
-      }),
-    );
-
-  it.effect("makes the Pivot's workspace once, with the setup script, and reuses it", () => {
-    const { fake, workspaceRoot, layer } = setup();
-    return Effect.gen(function* () {
-      const pivots = yield* PivotService.PivotService;
-      const pivot = (yield* pivots.create({ projectId, modelSelection, takeover: false })).threadId;
-      const first = yield* inline(pivot, "Fix the README typo");
-      assert.strictEqual(NodePath.basename(first.worktreePath), "pivot-inline");
-      assert.match(first.branch, /^pivot-inline\/fix-the-readme-typo/);
-      assert.strictEqual(first.setupScript, "succeeded");
-      assert.strictEqual(sh(first.worktreePath, "git branch --show-current"), first.branch);
-
-      // A second inline task waits for the first to land.
-      assert.include(yield* refusal(inline(pivot, "Another typo")), "One inline task at a time");
-
-      commitFile(first.worktreePath, "README.md");
-      sh(workspaceRoot, `git merge -q --ff-only ${first.branch}`);
-      yield* pivots.teardownTeammate(pivot, { threadId: first.threadId });
-      // The workspace stays, back on the default branch with the inline branch gone.
-      assert.isTrue(NodeFS.existsSync(first.worktreePath));
-      assert.strictEqual(sh(first.worktreePath, "git branch --show-current"), "");
-      assert.strictEqual(sh(workspaceRoot, `git branch --list ${first.branch}`), "");
-
-      const second = yield* inline(pivot, "Another typo");
-      assert.strictEqual(second.worktreePath, first.worktreePath);
-      assert.strictEqual(second.setupScript, "none");
-      assert.deepStrictEqual(
-        fake.inlineSetups.map((launch) => launch.ran),
-        [true, false],
-      );
-    }).pipe(Effect.provide(layer));
-  });
-
-  it.effect("refuses an inline task while the workspace holds someone's uncommitted work", () => {
-    const { workspaceRoot, layer } = setup();
-    return Effect.gen(function* () {
-      const pivots = yield* PivotService.PivotService;
-      const pivot = (yield* pivots.create({ projectId, modelSelection, takeover: false })).threadId;
-      const first = yield* inline(pivot, "Fix the README typo");
-      commitFile(first.worktreePath, "README.md");
-      sh(workspaceRoot, `git merge -q --ff-only ${first.branch}`);
-      yield* pivots.teardownTeammate(pivot, { threadId: first.threadId });
-      NodeFS.writeFileSync(NodePath.join(first.worktreePath, "stray.txt"), "left behind\n");
-
-      assert.include(yield* refusal(inline(pivot, "Another typo")), "stray.txt");
-    }).pipe(Effect.provide(layer));
-  });
-
-  it.effect("caps running ships and scouts, but not inline tasks", () => {
+describe("PivotService teammate cap", () => {
+  it.effect("caps running ships and scouts", () => {
     const { layer } = setup({ settings: { pivotMaxTeammates: 1 } });
     return Effect.gen(function* () {
       const pivots = yield* PivotService.PivotService;
@@ -439,7 +376,6 @@ describe("PivotService inline tasks", () => {
         }),
       );
       assert.include(refused, "the most at once (1)");
-      yield* inline(pivot, "Fix the README typo");
     }).pipe(Effect.provide(layer));
   });
 });

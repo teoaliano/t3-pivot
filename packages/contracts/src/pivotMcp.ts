@@ -13,6 +13,7 @@ import {
   PivotDecisionEscalation,
   PivotDecisionId,
   PivotDeliveryMode,
+  TeammateEvidence,
   TeammateKind,
   TeammateReportedStatus,
   TeammateStatus,
@@ -29,6 +30,8 @@ export const PivotMcpDispatchTeammateInput = Schema.Struct({
   spec: TrimmedNonEmptyString,
   /** Stack on another branch instead of the origin's default branch. */
   baseBranch: Schema.optional(TrimmedNonEmptyString),
+  attachTo: Schema.optional(ThreadId),
+  shipDirectly: Schema.optional(Schema.Boolean),
   /** A teammate model from Settings, by name. Without one, the default entry runs it. */
   modelEntry: Schema.optional(TrimmedNonEmptyString),
   /**
@@ -67,6 +70,9 @@ export type PivotMcpTeammateTarget = typeof PivotMcpTeammateTarget.Type;
 export const PivotMcpPromoteScoutInput = Schema.Struct({
   threadId: ThreadId,
   spec: TrimmedNonEmptyString,
+  title: Schema.optional(TrimmedNonEmptyString),
+  baseBranch: Schema.optional(TrimmedNonEmptyString),
+  modelEntry: Schema.optional(TrimmedNonEmptyString),
 });
 export type PivotMcpPromoteScoutInput = typeof PivotMcpPromoteScoutInput.Type;
 
@@ -130,9 +136,12 @@ export const PivotMcpTeammateLine = Schema.Struct({
   branch: Schema.String,
   pullRequestUrl: Schema.NullOr(Schema.String),
   lastChangeAt: Schema.NullOr(IsoDateTime),
-  worktreePath: Schema.String,
+  worktreePath: Schema.NullOr(Schema.String),
   /** The teammate model it was dispatched on, if any. */
   modelEntry: Schema.NullOr(Schema.String),
+  evidence: Schema.NullOr(TeammateEvidence),
+  verdict: Schema.NullOr(Schema.String),
+  shipOrdered: Schema.Boolean,
   tornDown: Schema.Boolean,
 });
 export type PivotMcpTeammateLine = typeof PivotMcpTeammateLine.Type;
@@ -141,6 +150,15 @@ export const PivotMcpListTeammatesResult = Schema.Struct({
   teammates: Schema.Array(PivotMcpTeammateLine),
 });
 export type PivotMcpListTeammatesResult = typeof PivotMcpListTeammatesResult.Type;
+
+export const PivotMcpReadHandoffInput = Schema.Struct({});
+export type PivotMcpReadHandoffInput = typeof PivotMcpReadHandoffInput.Type;
+
+export const PivotMcpReadHandoffResult = Schema.Struct({
+  predecessorThreadId: Schema.NullOr(ThreadId),
+  handoff: Schema.NullOr(Schema.String),
+});
+export type PivotMcpReadHandoffResult = typeof PivotMcpReadHandoffResult.Type;
 
 export const PIVOT_HISTORY_DEFAULT_LIMIT = 20;
 export const PIVOT_HISTORY_MAX_LIMIT = 100;
@@ -168,6 +186,18 @@ export const PivotMcpControlResult = Schema.Struct({
   detail: Schema.NullOr(Schema.String),
 });
 export type PivotMcpControlResult = typeof PivotMcpControlResult.Type;
+
+export const PivotMcpRecordVerdictInput = Schema.Struct({
+  threadId: ThreadId,
+  verdict: TrimmedNonEmptyString,
+});
+export type PivotMcpRecordVerdictInput = typeof PivotMcpRecordVerdictInput.Type;
+
+export const PivotMcpRecordVerdictResult = Schema.Struct({
+  threadId: ThreadId,
+  verdict: Schema.String,
+});
+export type PivotMcpRecordVerdictResult = typeof PivotMcpRecordVerdictResult.Type;
 
 export const PivotMcpMergeTeammateInput = Schema.Struct({
   threadId: ThreadId,
@@ -226,6 +256,7 @@ export const PivotMcpReportStatusInput = Schema.Struct({
   summary: TrimmedNonEmptyString,
   /** Only for `paused`: when the wait should clear. */
   until: Schema.optional(IsoDateTime),
+  evidence: Schema.optional(TeammateEvidence),
   /** Names the decision a `needs-decision` or `blocked` report raises. */
   decisionKey: Schema.optional(TrimmedNonEmptyString),
   /** Closes your own blocker that cleared before anyone answered it. */
@@ -249,5 +280,8 @@ export const PivotMcpRecordScoutReportInput = Schema.Struct({
 });
 export type PivotMcpRecordScoutReportInput = typeof PivotMcpRecordScoutReportInput.Type;
 
-export const PivotMcpRecordScoutReportResult = Schema.Struct({ recorded: Schema.Boolean });
+export const PivotMcpRecordScoutReportResult = Schema.Struct({
+  recorded: Schema.Boolean,
+  checkoutChanges: Schema.Array(Schema.String),
+});
 export type PivotMcpRecordScoutReportResult = typeof PivotMcpRecordScoutReportResult.Type;

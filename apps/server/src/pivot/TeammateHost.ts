@@ -46,6 +46,14 @@ export interface LaunchTeammateInput {
   readonly spec: string;
   readonly baseBranch?: string | undefined;
   readonly modelSelection: ModelSelection;
+  readonly shipDirectly?: boolean | undefined;
+  readonly attach?:
+    | {
+        readonly worktreePath: string;
+        readonly branch: string;
+        readonly baseBranch: string;
+      }
+    | undefined;
 }
 
 /** A launched teammate: V2 accepted it, and the worktree is still being prepared. */
@@ -53,6 +61,7 @@ export interface LaunchedTeammate {
   readonly threadId: ThreadId;
   /** The first run. Null when the launch created none. */
   readonly runId: RunId | null;
+  readonly start?: Result<RunId | null> | undefined;
   readonly branch: string;
   readonly baseBranch: string;
   readonly worktreePath: string;
@@ -96,6 +105,7 @@ export class TeammateHost extends Context.Service<
       readonly attachments?: ReadonlyArray<ChatImageAttachment> | undefined;
     }) => Result<void>;
     readonly stop: (threadId: ThreadId) => Result<void>;
+    readonly stopServers: (worktreePath: string) => Effect.Effect<void>;
     /** Stops what the teammate's agent scope still runs, once its work is landed or merged. */
     readonly stopScope: (threadId: ThreadId) => Effect.Effect<void>;
     readonly retryLaunch: (threadId: ThreadId) => Result<PivotThreads.RunStart>;
@@ -122,6 +132,7 @@ export class TeammateHost extends Context.Service<
       | { readonly type: "refused"; readonly reason: string }
     >;
     readonly worktreeExists: (worktreePath: string) => Effect.Effect<boolean>;
+    readonly recreateWorktree: (command: string, input: TeammateCheckout) => Result<void>;
     /** Whether the worktree has no uncommitted or untracked changes. */
     readonly worktreeClean: (worktreePath: string) => Result<boolean>;
     /**
@@ -141,11 +152,7 @@ export class TeammateHost extends Context.Service<
          * git refuse an unmerged one, `keep` leaves it.
          */
         readonly branchDisposal: { readonly tip: string } | "safe" | "keep";
-        /**
-         * An inline task works in the Pivot's workspace, which stays: it goes back to a
-         * clean default branch instead of being removed.
-         */
-        readonly inline?: boolean | undefined;
+        readonly inMainCheckout: boolean;
       },
     ) => Result<void>;
   }

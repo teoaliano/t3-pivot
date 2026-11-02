@@ -47,6 +47,7 @@ const dispatchTeammate = (
     return yield* store.dispatch({
       type: "teammate.dispatch",
       modelEntry: null,
+      shipDirectly: false,
       pivotThreadId: options.pivotThreadId ?? pivotA,
       threadId,
       projectId,
@@ -74,6 +75,7 @@ const report = (
       status,
       summary: `${status} summary`,
       until: null,
+      evidence: null,
       runId: run1,
       decisionKey: null,
       clearedDecision: null,
@@ -188,6 +190,7 @@ describe("PivotStore", () => {
           store.dispatch({
             type: "teammate.dispatch",
             modelEntry: null,
+            shipDirectly: false,
             pivotThreadId: pivotB,
             threadId: shipA,
             projectId: ProjectId.make("project-2"),
@@ -750,26 +753,6 @@ describe("PivotStore", () => {
           }),
         );
         assert.include(stranger, "Only a Pivot");
-        assert.include(
-          yield* refusal(
-            store.dispatch({
-              type: "teammate.promote",
-              pivotThreadId: pivotA,
-              threadId: shipA,
-              spec: "s",
-            }),
-          ),
-          "Only a scout",
-        );
-        yield* store.dispatch({
-          type: "teammate.promote",
-          pivotThreadId: pivotA,
-          threadId: scoutA,
-          spec: "Now fix it",
-        });
-        const promoted = yield* store.getTeammate(scoutA);
-        assert.strictEqual(promoted?.kind, "ship");
-        assert.strictEqual(promoted?.spec, "Now fix it");
         yield* store.dispatch({
           type: "teammate.add-intent",
           pivotThreadId: pivotA,

@@ -8,22 +8,25 @@ import type { PivotDeliveryMode, TeammateKind } from "@t3tools/contracts";
 /** Names of the `text/*.md` files these renderers read. */
 export const BRIEF_TEXTS = {
   brief: "teammate-brief",
-  promotion: "promotion",
   scout: "definition-of-done.scout",
   shipPr: "definition-of-done.ship-pr",
   shipLocal: "definition-of-done.ship-local",
-  inline: "inline-task",
+  shipReview: "definition-of-done.ship-review",
+  shipOrder: "ship-order",
 } as const;
 
-/** The Pivot's workspace for inline tasks: `<worktrees>/<repo>/pivot-inline`. */
-export const PIVOT_WORKSPACE_DIRNAME = "pivot-inline";
-
-export const definitionOfDoneText = (kind: TeammateKind, deliveryMode: PivotDeliveryMode) =>
+export const definitionOfDoneText = (
+  kind: TeammateKind,
+  deliveryMode: PivotDeliveryMode,
+  shipOrdered = false,
+) =>
   kind === "scout"
     ? BRIEF_TEXTS.scout
-    : deliveryMode === "direct-pr"
-      ? BRIEF_TEXTS.shipPr
-      : BRIEF_TEXTS.shipLocal;
+    : !shipOrdered
+      ? BRIEF_TEXTS.shipReview
+      : deliveryMode === "direct-pr"
+        ? BRIEF_TEXTS.shipPr
+        : BRIEF_TEXTS.shipLocal;
 
 /** Drops the leading `<!-- ... -->` note a template carries for maintainers. */
 const stripTemplateNote = (template: string) => template.replace(/^\s*<!--[\s\S]*?-->\s*/, "");
@@ -61,13 +64,23 @@ export const renderBrief = (template: string, values: BriefValues) =>
     definitionOfDone: stripTemplateNote(values.definitionOfDone),
   });
 
-export const renderPromotion = (
+export const renderHandoffRequest = (
   template: string,
-  values: { readonly intent: string; readonly spec: string; readonly definitionOfDone: string },
+  values: { readonly successorThreadId: string },
+) => fill(template, { successorThreadId: values.successorThreadId });
+
+export const renderShipOrder = (
+  template: string,
+  values: {
+    readonly members: ReadonlyArray<{ readonly branch: string; readonly title: string }>;
+    readonly definitionOfDone: string;
+  },
 ) =>
   fill(template, {
-    intent: values.intent.trim(),
-    spec: values.spec.trim(),
+    members:
+      values.members.length === 0
+        ? "None: your PR carries your own work."
+        : values.members.map((member) => `- \`${member.branch}\`: ${member.title}`).join("\n"),
     definitionOfDone: stripTemplateNote(values.definitionOfDone),
   });
 
@@ -90,10 +103,6 @@ export const teammateBranchBase = (title: string) => {
     .replace(/-+$/g, "");
   return `pivot/${slug.length > 0 ? slug : "task"}`;
 };
-
-/** `pivot-inline/<slug of the title>`, the branch an inline task works on. */
-export const inlineBranchBase = (title: string) =>
-  teammateBranchBase(title).replace(/^pivot\//, "pivot-inline/");
 
 /** The first of `base`, `base-2`, `base-3`, ... that `taken` does not hold. */
 export const uniqueBranch = (base: string, taken: (branch: string) => boolean) => {

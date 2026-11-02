@@ -14,12 +14,8 @@ import { ChatImageAttachment } from "./chatAttachment.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import { TeammateModelEntry } from "./settings.ts";
 
-/**
- * A ship delivers a change; a scout investigates and leaves a report. An inline task
- * delivers a small change from the Pivot's own workspace: no worktree, setup run or dev
- * server of its own, one at a time per project.
- */
-export const TeammateKind = Schema.Literals(["ship", "scout", "inline"]);
+/** A ship delivers a change; a scout investigates and leaves a report. */
+export const TeammateKind = Schema.Literals(["ship", "scout"]);
 export type TeammateKind = typeof TeammateKind.Type;
 
 /** What a teammate can say about its latest run through `report_status`. */
@@ -57,6 +53,19 @@ export const TeammateStatus = Schema.Literals([
 ]);
 export type TeammateStatus = typeof TeammateStatus.Type;
 
+export const TeammateEvidence = Schema.Struct({
+  text: TrimmedNonEmptyString,
+  files: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  devServer: Schema.optional(Schema.Boolean),
+});
+export type TeammateEvidence = typeof TeammateEvidence.Type;
+
+export const TeammateVerdict = Schema.Struct({
+  text: TrimmedNonEmptyString,
+  recordedAt: IsoDateTime,
+});
+export type TeammateVerdict = typeof TeammateVerdict.Type;
+
 /** A report is scoped to the run it was made in, so a later silent run never reads stale. */
 export const TeammateReport = Schema.Struct({
   status: TeammateReportedStatus,
@@ -65,6 +74,7 @@ export const TeammateReport = Schema.Struct({
   summary: Schema.NullOr(TrimmedNonEmptyString),
   /** Only for `paused`: when the external wait should clear. */
   until: Schema.optional(Schema.NullOr(IsoDateTime)),
+  evidence: Schema.optional(Schema.NullOr(TeammateEvidence)),
   reportedAt: IsoDateTime,
 });
 export type TeammateReport = typeof TeammateReport.Type;
@@ -83,6 +93,12 @@ export type PivotDeliveryMode = typeof PivotDeliveryMode.Type;
 export const PivotDecisionId = TrimmedNonEmptyString.pipe(Schema.brand("PivotDecisionId"));
 export type PivotDecisionId = typeof PivotDecisionId.Type;
 
+export const PivotShipGroup = Schema.Struct({
+  lead: ThreadId,
+  members: Schema.Array(ThreadId),
+});
+export type PivotShipGroup = typeof PivotShipGroup.Type;
+
 /** What the Pivot hands the user when a decision needs their authority. */
 export const PivotDecisionEscalation = Schema.Struct({
   questions: Schema.NonEmptyArray(TrimmedNonEmptyString),
@@ -100,6 +116,7 @@ export const PivotDecisionEscalation = Schema.Struct({
    * order with the merge. Every unmerged PR of the Pivot's has to be in it.
    */
   mergeOrder: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  shipGroups: Schema.optional(Schema.Array(PivotShipGroup)),
 });
 export type PivotDecisionEscalation = typeof PivotDecisionEscalation.Type;
 
@@ -147,6 +164,7 @@ export const PivotRecord = Schema.Struct({
   retiredAt: Schema.NullOr(IsoDateTime),
   /** The Pivot that took over when this one was retired. */
   successorThreadId: Schema.NullOr(ThreadId),
+  hasHandoff: Schema.optional(Schema.Boolean),
   openDecisionCount: NonNegativeInt,
   /** Open decisions held for the user, for the sidebar badge. */
   escalatedDecisionCount: NonNegativeInt,
@@ -169,6 +187,8 @@ export const TeammateRecord = Schema.Struct({
   hasScoutReport: Schema.Boolean,
   /** Order among the Pivot's teammates, so cards keep dispatch order. */
   dispatchedAt: IsoDateTime,
+  shipOrderedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  verdict: Schema.optional(Schema.NullOr(TeammateVerdict)),
   tornDownAt: Schema.NullOr(IsoDateTime),
   /**
    * Why its agent has not started yet while the machine is short of memory, such as

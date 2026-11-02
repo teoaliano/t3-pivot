@@ -52,8 +52,7 @@ export const chooseTeammateModel = (
     }
     return { type: "chosen", modelSelection: entry.modelSelection, entry: entry.name };
   }
-  // An inline task is a small ship: it runs on the ship's model.
-  const kindModel = kindModels[input.kind === "inline" ? "ship" : input.kind];
+  const kindModel = kindModels[input.kind];
   if (kindModel !== null) return { type: "chosen", modelSelection: kindModel, entry: null };
   const fallback = defaultTeammateModel(entries);
   return {

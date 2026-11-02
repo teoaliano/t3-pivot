@@ -80,8 +80,12 @@ const writeAccess = Layer.effect(
       }
       // Any depth: a subagent's own subagent is still the Pivot's.
       const rootId = thread.lineage.rootThreadId;
-      if (thread.lineage.relationshipToParent !== "subagent" || rootId === thread.id) return null;
-      if ((yield* store.getPivot(rootId)) === null) return null;
+      const underScout = (yield* store.getTeammate(rootId))?.kind === "scout";
+      const underPivot =
+        thread.lineage.relationshipToParent === "subagent" &&
+        rootId !== thread.id &&
+        (yield* store.getPivot(rootId)) !== null;
+      if (!underScout && !underPivot) return null;
       const project = yield* projects.get(thread.projectId);
       if (Option.isNone(project)) {
         return yield* new PivotSubagentProjectMissingError({ threadId: thread.id });

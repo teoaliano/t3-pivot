@@ -34,16 +34,6 @@ export type LandedVerdict =
     }
   | { readonly landed: false; readonly reason: string };
 
-/** The Pivot's workspace holds changes nobody committed. */
-export class PivotWorkspaceDirtyError extends Schema.TaggedError<PivotWorkspaceDirtyError>()(
-  "PivotWorkspaceDirtyError",
-  { path: Schema.String, changes: Schema.Array(Schema.String) },
-) {
-  override get message() {
-    return `The Pivot workspace at ${this.path} has uncommitted changes: ${this.changes.slice(0, 5).join(", ")}.`;
-  }
-}
-
 export class PivotGit extends Context.Service<
   PivotGit,
   {
@@ -77,6 +67,10 @@ export class PivotGit extends Context.Service<
     readonly isClean: (cwd: string) => Effect.Effect<boolean, PivotGitError>;
     /** The uncommitted or untracked changes in the checkout, as `git status` shows them. */
     readonly uncommitted: (cwd: string) => Effect.Effect<ReadonlyArray<string>, PivotGitError>;
+    readonly checkoutState: (
+      cwd: string,
+    ) => Effect.Effect<Readonly<Record<string, string>>, PivotGitError>;
+    readonly currentBranch: (cwd: string) => Effect.Effect<string, PivotGitError>;
     /**
      * Whether a teammate's work has landed, so its worktree can go: reachable from a
      * remote-tracking ref, or its PR merged with a head containing the local work, or
@@ -90,27 +84,6 @@ export class PivotGit extends Context.Service<
       readonly defaultBranch: string;
       readonly mergedPullRequestHead: string | null;
     }) => Effect.Effect<LandedVerdict>;
-    /**
-     * Readies the Pivot's workspace for one inline change: creates the worktree at `path`
-     * when it is missing (`created`), then puts `branch` on the default branch's newest
-     * commit, from the origin when there is one. Refuses a workspace with uncommitted
-     * changes: they belong to the last inline change.
-     */
-    readonly startWorkspaceBranch: (input: {
-      readonly projectRoot: string;
-      readonly path: string;
-      readonly branch: string;
-      readonly defaultBranch: string;
-    }) => Effect.Effect<{ readonly created: boolean }, PivotGitError | PivotWorkspaceDirtyError>;
-    /**
-     * Returns the workspace to a clean, detached default branch once an inline change
-     * is done with. Refuses uncommitted changes unless `force`, which discards them.
-     */
-    readonly resetWorkspace: (input: {
-      readonly path: string;
-      readonly defaultBranch: string;
-      readonly force: boolean;
-    }) => Effect.Effect<void, PivotGitError | PivotWorkspaceDirtyError>;
     /**
      * Fast-forwards the default branch to `branch`, in the checkout that has it checked
      * out if any. Refuses a branch that does not contain the default branch's tip.
@@ -156,6 +129,8 @@ export const make = Effect.gen(function* () {
   const branchExists = (cwd: string, branch: string) =>
     succeeds(cwd, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
 
+  const currentBranch = (cwd: string) => git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+
   const defaultBranch = Effect.fn("PivotGit.defaultBranch")(function* (cwd: string) {
     if (yield* hasRemote(cwd)) {
       const head = yield* run(cwd, [
@@ -171,7 +146,7 @@ export const make = Effect.gen(function* () {
     for (const candidate of ["main", "master"]) {
       if (yield* branchExists(cwd, candidate)) return candidate;
     }
-    return yield* git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+    return yield* currentBranch(cwd);
   });
 
   const commitOf = (cwd: string, revision: string) =>
@@ -185,6 +160,34 @@ export const make = Effect.gen(function* () {
     );
 
   const isClean = (cwd: string) => uncommitted(cwd).pipe(Effect.map((lines) => lines.length === 0));
+
+  const checkoutState = Effect.fn("PivotGit.checkoutState")(function* (cwd: string) {
+    const status = yield* run(cwd, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
+    if (status.code !== 0) {
+      return yield* new PivotGitError({ subcommand: "status", exitCode: status.code });
+    }
+    const state: Record<string, string> = {};
+    const present: Array<string> = [];
+    const entries = status.stdout.split("\0");
+    for (let index = 0; index < entries.length; index += 1) {
+      const entry = entries[index]!;
+      if (entry.length < 4) continue;
+      const code = entry.slice(0, 2);
+      const file = entry.slice(3);
+      if (code[0] === "R" || code[0] === "C") index += 1;
+      if (code.includes("D")) state[file] = "deleted";
+      else present.push(file);
+    }
+    const hashes = (files: ReadonlyArray<string>) =>
+      run(cwd, ["hash-object", "--", ...files]).pipe(
+        Effect.map((output) => (output.code === 0 ? output.stdout.trim().split("\n") : null)),
+      );
+    const together = present.length === 0 ? [] : yield* hashes(present);
+    for (const [index, file] of present.entries()) {
+      state[file] = together?.[index] ?? (yield* hashes([file]))?.[0] ?? "unreadable";
+    }
+    return state;
+  });
 
   const landed = Effect.fn("PivotGit.landed")(
     function* (input: {
@@ -328,57 +331,9 @@ export const make = Effect.gen(function* () {
     return { landed: true as const, head };
   });
 
-  // The commit an inline change starts from: the origin's default branch, fetched now, or
-  // the local one when there is no remote.
-  const workspaceStart = Effect.fn("PivotGit.workspaceStart")(function* (
-    cwd: string,
-    defaultBranch: string,
-  ) {
-    if (!(yield* hasRemote(cwd))) return defaultBranch;
-    yield* git(cwd, ["fetch", "--quiet", "origin", defaultBranch]);
-    return `origin/${defaultBranch}`;
-  });
-
-  // A missing directory is no worktree, not a git failure.
-  const isWorktree = (path: string) =>
-    succeeds(path, ["rev-parse", "--is-inside-work-tree"]).pipe(Effect.orElseSucceed(() => false));
-
-  const cleanWorkspace = Effect.fn("PivotGit.cleanWorkspace")(function* (path: string) {
-    const changes = yield* uncommitted(path);
-    if (changes.length > 0) return yield* new PivotWorkspaceDirtyError({ path, changes });
-  });
-
-  const startWorkspaceBranch: PivotGit["Service"]["startWorkspaceBranch"] = Effect.fn(
-    "PivotGit.startWorkspaceBranch",
-  )(function* (input) {
-    const start = yield* workspaceStart(input.projectRoot, input.defaultBranch);
-    const created = !(yield* isWorktree(input.path));
-    if (created) {
-      yield* git(input.projectRoot, ["worktree", "add", "--detach", input.path, start]);
-    } else {
-      yield* cleanWorkspace(input.path);
-    }
-    yield* git(input.path, ["checkout", "--quiet", "-B", input.branch, start]);
-    return { created };
-  });
-
-  const resetWorkspace: PivotGit["Service"]["resetWorkspace"] = Effect.fn(
-    "PivotGit.resetWorkspace",
-  )(function* (input) {
-    if (!(yield* isWorktree(input.path))) return;
-    if (input.force) {
-      yield* git(input.path, ["reset", "--quiet", "--hard"]);
-      yield* git(input.path, ["clean", "--quiet", "-fd"]);
-    } else {
-      yield* cleanWorkspace(input.path);
-    }
-    const start = yield* workspaceStart(input.path, input.defaultBranch);
-    yield* git(input.path, ["checkout", "--quiet", "--detach", start]);
-  });
-
   return PivotGit.of({
-    startWorkspaceBranch,
-    resetWorkspace,
+    checkoutState,
+    currentBranch,
     isRepository: Effect.fn("PivotGit.isRepository")((cwd) =>
       succeeds(cwd, ["rev-parse", "--is-inside-work-tree"]).pipe(Effect.orElseSucceed(() => false)),
     ),

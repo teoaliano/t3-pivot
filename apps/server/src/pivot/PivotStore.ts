@@ -25,9 +25,11 @@ import {
   type PivotStreamEvent,
   type ProjectId,
   type RunId,
+  type TeammateEvidence,
   type TeammateKind,
   TeammateReport,
   type TeammateReportedStatus,
+  TeammateVerdict,
   type TeammateRecord,
   type TeammateResumeState,
   type TeammateStatus,
@@ -88,6 +90,7 @@ export type PivotCommand =
       /** Without it, a project with an active Pivot refuses. */
       readonly takeover: boolean;
     }
+  | { readonly type: "pivot.record-handoff"; readonly threadId: ThreadId; readonly text: string }
   | {
       readonly type: "pivot.record-wake";
       readonly threadId: ThreadId;
@@ -110,12 +113,16 @@ export type PivotCommand =
       readonly intent: string;
       readonly spec: string;
       readonly modelEntry: string | null;
+      readonly shipDirectly: boolean;
+      readonly attachedFrom?: ThreadId | null | undefined;
+      readonly checkoutSnapshot?: Readonly<Record<string, string>> | null | undefined;
+      readonly promotedFrom?: ThreadId | null | undefined;
     }
   | {
-      readonly type: "teammate.promote";
+      readonly type: "teammate.record-verdict";
       readonly pivotThreadId: ThreadId;
       readonly threadId: ThreadId;
-      readonly spec: string;
+      readonly text: string;
     }
   | {
       readonly type: "teammate.add-intent";
@@ -129,6 +136,7 @@ export type PivotCommand =
       readonly status: TeammateReportedStatus;
       readonly summary: string;
       readonly until: IsoDateTime | null;
+      readonly evidence: TeammateEvidence | null;
       readonly runId: RunId | null;
       /** Opens or names the decision a `needs-decision` or `blocked` report raises. */
       readonly decisionKey: string | null;
@@ -139,6 +147,7 @@ export type PivotCommand =
       readonly type: "teammate.record-scout-report";
       readonly threadId: ThreadId;
       readonly report: string;
+      readonly checkoutChanges?: ReadonlyArray<string> | undefined;
     }
   | {
       readonly type: "teammate.set-resume";
@@ -245,6 +254,7 @@ export type PivotCommand =
 
 /** A Pivot with what only the server needs. */
 export interface PivotRow extends PivotRecord {
+  readonly handoff: string | null;
   readonly homePath: string;
   /** The Pivot-log sequence its last wake covered. */
   readonly wakeCursor: number;
@@ -263,6 +273,7 @@ export interface TeammateRow extends TeammateRecord {
   /** The environment that hosts the teammate; null is the Pivot's own. */
   readonly environmentId: EnvironmentId | null;
   readonly scoutReport: string | null;
+  readonly checkoutSnapshot: Readonly<Record<string, string>> | null;
   readonly observedStatus: TeammateStatus | null;
   readonly observedRunId: RunId | null;
   readonly stuckRunId: RunId | null;
@@ -283,6 +294,9 @@ export class PivotStore extends Context.Service<
       projectId: ProjectId,
     ) => Effect.Effect<PivotRow | null, PivotStoreError>;
     readonly listActivePivots: Effect.Effect<ReadonlyArray<PivotRow>, PivotStoreError>;
+    readonly getPredecessor: (
+      threadId: ThreadId,
+    ) => Effect.Effect<PivotRow | null, PivotStoreError>;
     readonly getTeammate: (
       threadId: ThreadId,
     ) => Effect.Effect<TeammateRow | null, PivotStoreError>;
@@ -328,6 +342,7 @@ interface PivotSqlRow {
   readonly successor_thread_id: string | null;
   readonly wake_cursor: number;
   readonly wake_from: number;
+  readonly handoff: string | null;
   readonly open_decisions: number;
   readonly escalated_decisions: number;
 }
@@ -350,6 +365,9 @@ interface TeammateSqlRow {
   readonly resume: string | null;
   readonly scout_report: string | null;
   readonly dispatched_at: string;
+  readonly ship_ordered_at: string | null;
+  readonly verdict_json: string | null;
+  readonly checkout_snapshot_json: string | null;
   readonly torn_down_at: string | null;
   readonly observed_status: string | null;
   readonly observed_run_id: string | null;
@@ -386,6 +404,12 @@ interface EventSqlRow {
 }
 
 const decodeReport = Schema.decodeUnknownSync(Schema.fromJsonString(TeammateReport));
+const VerdictJson = Schema.fromJsonString(TeammateVerdict);
+const SnapshotJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema.String));
+const decodeSnapshot = Schema.decodeUnknownSync(SnapshotJson);
+const encodeSnapshot = Schema.encodeSync(SnapshotJson);
+const decodeVerdict = Schema.decodeUnknownSync(VerdictJson);
+const encodeVerdict = Schema.encodeSync(VerdictJson);
 const decodeEscalation = Schema.decodeUnknownSync(
   Schema.fromJsonString(PivotDecisionEscalationSchema),
 );
@@ -412,6 +436,7 @@ const toPivot = (row: PivotSqlRow): PivotRow => ({
   createdAt: row.created_at,
   retiredAt: row.retired_at,
   successorThreadId: row.successor_thread_id as ThreadId | null,
+  handoff: row.handoff,
   openDecisionCount: row.open_decisions,
   escalatedDecisionCount: row.escalated_decisions,
   homePath: row.home_path,
@@ -431,6 +456,8 @@ const toTeammate = (row: TeammateSqlRow): TeammateRow => ({
   hasEscalatedDecision: row.escalated_decisions > 0,
   hasScoutReport: row.scout_report !== null,
   dispatchedAt: row.dispatched_at,
+  shipOrderedAt: row.ship_ordered_at,
+  verdict: row.verdict_json === null ? null : decodeVerdict(row.verdict_json),
   tornDownAt: row.torn_down_at,
   memoryWait: row.memory_wait,
   baseBranch: row.base_branch,
@@ -441,6 +468,8 @@ const toTeammate = (row: TeammateSqlRow): TeammateRow => ({
   modelEntry: row.model_entry,
   environmentId: row.environment_id as EnvironmentId | null,
   scoutReport: row.scout_report,
+  checkoutSnapshot:
+    row.checkout_snapshot_json === null ? null : decodeSnapshot(row.checkout_snapshot_json),
   observedStatus: row.observed_status as TeammateStatus | null,
   observedRunId: row.observed_run_id as RunId | null,
   stuckRunId: row.stuck_run_id as RunId | null,
@@ -480,6 +509,7 @@ export const pivotRecord = (row: PivotRow): PivotRecord => ({
   createdAt: row.createdAt,
   retiredAt: row.retiredAt,
   successorThreadId: row.successorThreadId,
+  hasHandoff: row.handoff !== null,
   openDecisionCount: row.openDecisionCount,
   escalatedDecisionCount: row.escalatedDecisionCount,
 });
@@ -496,6 +526,8 @@ export const teammateRecord = (row: TeammateRow): TeammateRecord => ({
   hasEscalatedDecision: row.hasEscalatedDecision,
   hasScoutReport: row.hasScoutReport,
   dispatchedAt: row.dispatchedAt,
+  shipOrderedAt: row.shipOrderedAt ?? null,
+  verdict: row.verdict ?? null,
   tornDownAt: row.tornDownAt,
   memoryWait: row.memoryWait,
 });
@@ -654,6 +686,19 @@ export const make = Effect.gen(function* () {
         });
         break;
       }
+      case "pivot.record-handoff": {
+        const pivot = yield* readPivot(command.threadId);
+        if (pivot === null) return yield* refuse(`Thread ${command.threadId} is not a Pivot.`);
+        if (pivot.retiredAt === null) return yield* refuse("Only a retired Pivot hands over.");
+        if (pivot.handoff != null)
+          return yield* refuse("This Pivot's handoff is already recorded.");
+        emit({
+          type: "pivot.handoff-recorded",
+          threadId: command.threadId,
+          text: yield* nonEmpty(command.text, "The handoff"),
+        });
+        break;
+      }
       case "pivot.record-wake": {
         const pivot = yield* readPivot(command.threadId);
         if (pivot === null) return yield* refuse(`Thread ${command.threadId} is not a Pivot.`);
@@ -699,14 +744,55 @@ export const make = Effect.gen(function* () {
           intent: command.intent,
           spec: command.spec,
           modelEntry: command.modelEntry,
+          ...(command.checkoutSnapshot == null
+            ? {}
+            : { checkoutSnapshot: { ...command.checkoutSnapshot } }),
         });
+        if (command.shipDirectly) {
+          if (command.kind !== "ship") return yield* refuse("Only a ship ships directly.");
+          emit({ type: "teammate.ship-ordered", threadId: command.threadId, decisionId: null });
+        }
+        if (command.attachedFrom != null) {
+          const previous = yield* ownLiveTeammate(command.pivotThreadId, command.attachedFrom);
+          if (
+            previous.worktreePath !== command.worktreePath ||
+            previous.branch !== command.branch
+          ) {
+            return yield* refuse(
+              "An attached teammate takes over its predecessor's worktree and branch.",
+            );
+          }
+          emit({
+            type: "teammate.handed-over",
+            threadId: previous.threadId,
+            successorThreadId: command.threadId,
+          });
+        }
+        if (command.promotedFrom != null) {
+          const scout = yield* ownLiveTeammate(command.pivotThreadId, command.promotedFrom);
+          if (scout.kind !== "scout" || command.kind !== "ship") {
+            return yield* refuse("A ship is promoted from a scout.");
+          }
+          emit({
+            type: "teammate.handed-over",
+            threadId: scout.threadId,
+            successorThreadId: command.threadId,
+          });
+        }
         break;
       }
-      case "teammate.promote": {
+      case "teammate.record-verdict": {
         const teammate = yield* ownLiveTeammate(command.pivotThreadId, command.threadId);
-        if (teammate.kind !== "scout") return yield* refuse("Only a scout can be promoted.");
-        yield* nonEmpty(command.spec, "The spec");
-        emit({ type: "teammate.promoted", threadId: command.threadId, spec: command.spec });
+        if (teammate.report?.status !== "done") {
+          return yield* refuse(
+            "A verdict reviews a teammate's `done`; this one has not reported done.",
+          );
+        }
+        emit({
+          type: "teammate.verdict-recorded",
+          threadId: command.threadId,
+          text: yield* nonEmpty(command.text, "The verdict"),
+        });
         break;
       }
       case "teammate.add-intent": {
@@ -721,6 +807,9 @@ export const make = Effect.gen(function* () {
         if (command.until !== null && command.status !== "paused") {
           return yield* refuse("Only a `paused` report takes `until`.");
         }
+        if (command.evidence !== null && command.status !== "done") {
+          return yield* refuse("Only a `done` report takes evidence.");
+        }
         emit({
           type: "teammate.reported",
           threadId: command.threadId,
@@ -729,6 +818,7 @@ export const make = Effect.gen(function* () {
             runId: command.runId,
             summary: command.summary,
             until: command.until,
+            ...(command.evidence === null ? {} : { evidence: command.evidence }),
             reportedAt: now,
           },
         });
@@ -768,11 +858,16 @@ export const make = Effect.gen(function* () {
         const teammate = yield* liveTeammate(command.threadId);
         if (teammate.kind !== "scout") return yield* refuse("Only a scout records a report.");
         yield* nonEmpty(command.report, "The report");
-        emit({
-          type: "teammate.scout-report-recorded",
-          threadId: command.threadId,
-          report: command.report,
-        });
+        const changes = command.checkoutChanges ?? [];
+        emit(
+          {
+            type: "teammate.scout-report-recorded",
+            threadId: command.threadId,
+            report: command.report,
+            ...(changes.length === 0 ? {} : { checkoutChanges: [...changes] }),
+          },
+          changes.length > 0,
+        );
         break;
       }
       case "teammate.set-resume": {
@@ -995,6 +1090,17 @@ export const make = Effect.gen(function* () {
           },
           true,
         );
+        if (asksApproval && command.approved === true) {
+          for (const group of decision.escalation?.shipGroups ?? []) {
+            const lead = yield* readTeammate(group.lead);
+            if (lead === null || lead.tornDownAt !== null) continue;
+            emit({
+              type: "teammate.ship-ordered",
+              threadId: lead.threadId,
+              decisionId: decision.decisionId,
+            });
+          }
+        }
         break;
       }
       case "decision.answer": {
@@ -1067,6 +1173,11 @@ export const make = Effect.gen(function* () {
         `;
         return;
       }
+      case "pivot.handoff-recorded":
+        yield* sql`
+          UPDATE pivot_pivots SET handoff = ${event.text} WHERE thread_id = ${event.threadId}
+        `;
+        return;
       case "pivot.woke":
         yield* sql`
           UPDATE pivot_pivots
@@ -1078,13 +1189,20 @@ export const make = Effect.gen(function* () {
         yield* sql`
           INSERT INTO pivot_teammates (
             thread_id, pivot_thread_id, project_id, kind, title, branch, base_branch,
-            worktree_path, delivery_mode, intent_json, spec, model_entry, dispatched_at
+            worktree_path, delivery_mode, intent_json, spec, model_entry, dispatched_at,
+            checkout_snapshot_json
           ) VALUES (
             ${event.threadId}, ${event.pivotThreadId}, ${event.projectId}, ${event.kind},
             ${event.title}, ${event.branch}, ${event.baseBranch}, ${event.worktreePath},
             ${event.deliveryMode}, ${encodeIntent([event.intent])}, ${event.spec},
-            ${event.modelEntry ?? null}, ${at}
+            ${event.modelEntry ?? null}, ${at},
+            ${event.checkoutSnapshot === undefined ? null : encodeSnapshot(event.checkoutSnapshot)}
           )
+        `;
+        return;
+      case "teammate.ship-ordered":
+        yield* sql`
+          UPDATE pivot_teammates SET ship_ordered_at = ${at} WHERE thread_id = ${event.threadId}
         `;
         return;
       case "teammate.promoted":
@@ -1103,7 +1221,14 @@ export const make = Effect.gen(function* () {
       }
       case "teammate.reported":
         yield* sql`
-          UPDATE pivot_teammates SET report_json = ${encodeReport(event.report)}
+          UPDATE pivot_teammates SET report_json = ${encodeReport(event.report)}, verdict_json = NULL
+          WHERE thread_id = ${event.threadId}
+        `;
+        return;
+      case "teammate.verdict-recorded":
+        yield* sql`
+          UPDATE pivot_teammates
+          SET verdict_json = ${encodeVerdict({ text: event.text, recordedAt: at })}
           WHERE thread_id = ${event.threadId}
         `;
         return;
@@ -1173,6 +1298,7 @@ export const make = Effect.gen(function* () {
         return;
       case "teammate.landed":
         return;
+      case "teammate.handed-over":
       case "teammate.torn-down":
         yield* sql`
           UPDATE pivot_teammates SET torn_down_at = ${at}, recheck_at = NULL
@@ -1222,6 +1348,7 @@ export const make = Effect.gen(function* () {
     switch (event.type) {
       case "pivot.created":
       case "pivot.retired":
+      case "pivot.handoff-recorded":
       case "pivot.woke":
         return { pivot: event.threadId, teammate: null, decision: null };
       case "teammate.dispatched":
@@ -1381,6 +1508,14 @@ export const make = Effect.gen(function* () {
       "listActivePivots",
       sql<PivotSqlRow>`${pivotSelect} WHERE p.retired_at IS NULL`.pipe(
         Effect.map((rows) => rows.map(toPivot)),
+      ),
+    ),
+    getPredecessor: Effect.fn("PivotStore.getPredecessor")((threadId) =>
+      read(
+        "getPredecessor",
+        sql<PivotSqlRow>`${pivotSelect} WHERE p.successor_thread_id = ${threadId}`.pipe(
+          Effect.map((rows) => (rows[0] ? toPivot(rows[0]) : null)),
+        ),
       ),
     ),
     getTeammate: Effect.fn("PivotStore.getTeammate")((threadId) =>

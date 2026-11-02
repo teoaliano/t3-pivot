@@ -18,6 +18,10 @@ import {
   PivotMcpPromoteScoutInput,
   PivotMcpRecordScoutReportInput,
   PivotMcpRecordScoutReportResult,
+  PivotMcpReadHandoffInput,
+  PivotMcpReadHandoffResult,
+  PivotMcpRecordVerdictInput,
+  PivotMcpRecordVerdictResult,
   PivotMcpReportStatusInput,
   PivotMcpReportStatusResult,
   PivotMcpTeammateHistoryInput,
@@ -48,16 +52,16 @@ const TEAMMATE_ONLY = "Teammates of a Pivot only.";
 
 const DispatchTeammateTool = Tool.make("dispatch_teammate", {
   ...pivotTool,
-  description: `${PIVOT_ONLY} Start a teammate on one task in its own worktree and branch, from the origin's default branch or baseBranch. kind inline makes a small change in your workspace instead: no worktree, setup or dev server, one at a time, from the default branch. intent is the user's words verbatim, spec your instructions. modelEntry names a teammate model from your contract; omitted, the kind's model from Settings runs when one is set, else the default. Returns once its first run started or failed.`,
+  description: `${PIVOT_ONLY} Start a teammate on one task. A ship gets a fresh worktree and branch, from the origin's default branch or baseBranch; attachTo instead hands it the worktree and branch of a ship of yours between turns, which ends that one, to build the next piece of the same PR. A ship commits, reports done with evidence and waits for review; shipDirectly, only when the user said so, has it push and open its PR at done. intent is the user's words verbatim, spec your instructions, including the evidence its done must bring. modelEntry names a teammate model from your contract; omitted, the kind's model from Settings runs when one is set, else the default. Returns once its first run started or failed.`,
   parameters: PivotMcpDispatchTeammateInput,
   success: PivotMcpDispatchTeammateResult,
 }).annotate(Tool.Title, "Dispatch a teammate");
 
 const PromoteScoutTool = Tool.make("promote_scout", {
   ...pivotTool,
-  description: `${PIVOT_ONLY} Turn a scout into a ship in place, keeping its worktree and context, with a new spec. The original intent carries over.`,
+  description: `${PIVOT_ONLY} Turn a scout's findings into work: dispatch a ship in a fresh worktree with your spec and the scout's recorded report as its brief, and end the scout. The scout's intent carries over; title, baseBranch and modelEntry work as in dispatch_teammate. Refused until the report is recorded.`,
   parameters: PivotMcpPromoteScoutInput,
-  success: PivotMcpTeammateResult,
+  success: PivotMcpDispatchTeammateResult,
 }).annotate(Tool.Title, "Promote a scout");
 
 const AddIntentTool = Tool.make("add_intent", {
@@ -76,7 +80,7 @@ const OpenDecisionTool = Tool.make("open_decision", {
 
 const EscalateDecisionTool = Tool.make("escalate_decision", {
   ...pivotTool,
-  description: `${PIVOT_ONLY} Hold an open decision for the user, with its questions, evidence, consequence, options and recommendation. Set asksApproval when it needs the user's yes or no, as merging, landing and discarding do. For a merge or landing, mergeOrder lists the branches in the order they merge, every unmerged PR of yours included, so the user approves the order. It notifies the user.`,
+  description: `${PIVOT_ONLY} Hold an open decision for the user, with its questions, evidence, consequence, options and recommendation. Set asksApproval when it needs the user's yes or no, as merging, landing and discarding do. For a merge or landing, mergeOrder lists the branches in the order they merge, every unmerged PR of yours included, so the user approves the order. To ship finished work, propose one ship batch on a decision of your own: shipGroups lists the PRs in merge order, each a lead teammate and the members whose branches merge into the lead's; every teammate named must have reported done. It asks for approval, and the merge order is the leads' branches. When the user approves, each lead is told to ship. It notifies the user.`,
   parameters: PivotMcpEscalateDecisionInput,
   success: PivotMcpDecisionResult,
 }).annotate(Tool.Title, "Escalate a decision");
@@ -95,13 +99,29 @@ const MarkDecisionMootTool = Tool.make("mark_decision_moot", {
   success: PivotMcpDecisionResult,
 }).annotate(Tool.Title, "Close a moot decision");
 
+const RecordVerdictTool = Tool.make("record_verdict", {
+  ...pivotTool,
+  description: `${PIVOT_ONLY} Record your review of a done teammate's work, in a line or two, after reading its diff and evidence. The user sees it beside the evidence in the Pivot view. Refused unless the teammate reported done; its next report clears it. It asks nothing of the user.`,
+  parameters: PivotMcpRecordVerdictInput,
+  success: PivotMcpRecordVerdictResult,
+}).annotate(Tool.Title, "Record a verdict");
+
 const ListTeammatesTool = Tool.make("list_teammates", {
   ...pivotTool,
-  description: `${PIVOT_ONLY} One line per teammate: title, kind, status, latest summary, branch, PR, last change, worktree and teammate model.`,
+  description: `${PIVOT_ONLY} One line per teammate: title, kind, status, latest summary, branch, PR, last change, worktree, teammate model, the evidence of its latest done, your verdict on it, and whether it was told to ship.`,
   parameters: PivotMcpListTeammatesInput,
   success: PivotMcpListTeammatesResult,
 })
   .annotate(Tool.Title, "List teammates")
+  .annotate(Tool.Readonly, true);
+
+const ReadHandoffTool = Tool.make("read_handoff", {
+  ...pivotTool,
+  description: `${PIVOT_ONLY} The handoff the retired Pivot you took over from wrote as it retired, and its thread, for when your first wake fell out of your context. Null handoff when it wrote none.`,
+  parameters: PivotMcpReadHandoffInput,
+  success: PivotMcpReadHandoffResult,
+})
+  .annotate(Tool.Title, "Read the handoff")
   .annotate(Tool.Readonly, true);
 
 const TeammateHistoryTool = Tool.make("teammate_history", {
@@ -133,7 +153,7 @@ const RelaunchTeammateTool = Tool.make("relaunch_teammate", {
 
 const MergeTeammateTool = Tool.make("merge_teammate", {
   ...pivotTool,
-  description: `${PIVOT_ONLY} Squash-merge a ship's PR on GitHub or GitLab once the user approved its asksApproval decision. Reads live state and refuses a closed, draft or unmergeable PR and any check not green, naming every failing condition; waivedChecks only for checks the user's answer names. Also refuses out of order: a PR stacked on unlanded work, one whose predecessors in the decision's mergeOrder have not merged, or while an unmerged PR of yours is missing from that order. Pinned to the head it checked.`,
+  description: `${PIVOT_ONLY} Squash-merge a ship's PR on GitHub or GitLab once the user approved its asksApproval decision, or the ship batch it leads. Reads live state and refuses a closed, draft or unmergeable PR and any check not green, naming every failing condition; waivedChecks only for checks the user's answer names. Also refuses out of order: a PR stacked on unlanded work, one whose predecessors in the decision's mergeOrder have not merged, or while an unmerged PR of yours is missing from that order. Pinned to the head it checked.`,
   parameters: PivotMcpMergeTeammateInput,
   success: PivotMcpMergeTeammateResult,
 })
@@ -142,7 +162,7 @@ const MergeTeammateTool = Tool.make("merge_teammate", {
 
 const LandTeammateTool = Tool.make("land_teammate", {
   ...pivotTool,
-  description: `${PIVOT_ONLY} In a project with no remote, fast-forward the default branch to a ship's ready branch once the user approved its asksApproval decision. A diverged branch refuses; the teammate rebases. Refuses out of order like merge_teammate.`,
+  description: `${PIVOT_ONLY} In a project with no remote, fast-forward the default branch to a ship's ready branch once the user approved its asksApproval decision, or the ship batch it leads. A diverged branch refuses; the teammate rebases. Refuses out of order like merge_teammate.`,
   parameters: PivotMcpLandTeammateInput,
   success: PivotMcpLandTeammateResult,
 })
@@ -166,7 +186,9 @@ export const PivotToolkit = Toolkit.make(
   EscalateDecisionTool,
   AnswerDecisionTool,
   MarkDecisionMootTool,
+  RecordVerdictTool,
   ListTeammatesTool,
+  ReadHandoffTool,
   TeammateHistoryTool,
   StopTeammateTool,
   RelaunchTeammateTool,

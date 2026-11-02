@@ -65,6 +65,7 @@ export interface TeammateCard {
   readonly detail: string | null;
   /** Before its first report, the card follows the worktree setup. */
   readonly followsSetup: boolean;
+  readonly readyForReview: boolean;
 }
 
 export interface TeammateCards {
@@ -116,19 +117,23 @@ export function teammateCard(
       ? teammate.report.reportedAt
       : null;
   const attention = needsYou || ATTENTION.has(derived.status);
+  const readyForReview =
+    teammate.kind === "ship" &&
+    teammate.tornDownAt === null &&
+    derived.status === "done" &&
+    teammate.shipOrderedAt == null;
   return {
     threadId: teammate.threadId,
     title: shell?.title || teammate.title,
     status: derived.status,
     needsYou,
-    // An inline task is marked as one: it runs in the Pivot's workspace, not its own worktree.
-    label: `${teammate.kind === "inline" ? "Inline · " : ""}${
-      needsYou
-        ? "Needs you"
-        : memoryWait !== null
-          ? "Waiting for memory"
-          : STATUS_LABEL[derived.status]
-    }`,
+    label: needsYou
+      ? "Needs you"
+      : memoryWait !== null
+        ? "Waiting for memory"
+        : readyForReview
+          ? "Ready for review"
+          : STATUS_LABEL[derived.status],
     attention,
     tone:
       derived.status === "failed"
@@ -153,6 +158,7 @@ export function teammateCard(
     providerInstanceId: shell?.providerInstanceId ?? null,
     detail: memoryWait ?? derived.detail,
     followsSetup: teammate.report === null && teammate.tornDownAt === null,
+    readyForReview,
   };
 }
 
@@ -165,7 +171,9 @@ export function teammateCards(
   const finished: Array<TeammateCard> = [];
   for (const teammate of teammates) {
     const card = teammateCard(teammate, shellOf(teammate.threadId));
-    const isFinished = teammate.tornDownAt !== null || (card.status === "done" && !card.needsYou);
+    const isFinished =
+      teammate.tornDownAt !== null ||
+      (card.status === "done" && !card.needsYou && !card.readyForReview);
     (isFinished ? finished : live).push(card);
   }
   return { live, finished };

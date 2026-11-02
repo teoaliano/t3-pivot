@@ -85,7 +85,7 @@ export const harness = (fake: FakeThreads.FakeV2, settings: DeepPartial<ServerSe
     Layer.provideMerge(ServerSettingsService.layerTest(settings)),
     Layer.provideMerge(
       Layer.mergeAll(PivotStore.layer, PivotHostStore.layer).pipe(
-        Layer.provide(PivotDatabase.layerMemory),
+        Layer.provideMerge(PivotDatabase.layerMemory),
       ),
     ),
     Layer.provideMerge(FakeThreads.layer(fake)),

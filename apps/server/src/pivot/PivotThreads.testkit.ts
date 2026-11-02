@@ -74,13 +74,13 @@ export interface FakeV2 {
   /** Merges asked of the forge, with the head they were pinned to. */
   readonly merges: Array<{ readonly url: string; readonly expectedHeadSha: string }>;
   readonly stoppedCheckouts: Array<string>;
+  readonly stoppedServers: Array<string>;
   /** Setup script outcomes by thread; none when unset. */
   readonly setupOutcomes: Map<string, SetupScriptOutcome>;
   /** Threads whose held queue was released. */
   readonly releasedQueues: Array<string>;
   readonly removedWorktrees: Array<{ readonly worktreePath: string; readonly force: boolean }>;
-  /** Inline tasks launched, and whether each ran the setup script. */
-  readonly inlineSetups: Array<{ readonly threadId: string; readonly ran: boolean }>;
+  readonly replies: Map<string, string | null>;
 }
 
 export interface FakeWake {
@@ -106,10 +106,11 @@ export const makeFakeV2 = (): FakeV2 => ({
   pullRequests: new Map(),
   merges: [],
   stoppedCheckouts: [],
+  stoppedServers: [],
   releasedQueues: [],
   setupOutcomes: new Map(),
   removedWorktrees: [],
-  inlineSetups: [],
+  replies: new Map(),
 });
 
 let counter = 0;
@@ -206,11 +207,9 @@ export const layer = (fake: FakeV2) =>
           fake.starts.set(threadId, outcome.start);
           return { threadId, runId: outcome.start.runId };
         }),
-      // The workspace is real (PivotGit made it); the fake only records the thread.
-      launchInline: (input) =>
+      createTeammateThread: (input) =>
         Effect.sync(() => {
-          const threadId = allocate(fake, "inline");
-          const start: RunStart = { type: "started", runId: RunId.make(`run-${threadId}`) };
+          const threadId = allocate(fake, "teammate");
           fake.threads.set(threadId, {
             threadId,
             projectId: input.projectId,
@@ -224,16 +223,10 @@ export const layer = (fake: FakeV2) =>
             settled: false,
             stops: 0,
             relaunches: 0,
-            messages: [{ senderThreadId: input.pivotThreadId, text: input.text, mode: "launch" }],
-            shell: { latestRunId: start.runId },
+            messages: [],
+            shell: {},
           });
-          fake.starts.set(threadId, start);
-          fake.inlineSetups.push({ threadId, ran: input.runSetup });
-          return {
-            threadId,
-            runId: start.runId,
-            setup: input.runSetup ? { status: "succeeded" as const, detail: null } : null,
-          };
+          return threadId;
         }),
       awaitStart: (threadId) =>
         Effect.sync(
@@ -276,6 +269,22 @@ export const layer = (fake: FakeV2) =>
                   ...(attachments === undefined ? {} : { attachments }),
                 });
               }),
+        ),
+      request: ({ threadId, senderThreadId, text }) =>
+        Effect.map(thread(fake, threadId, "request"), (found) => {
+          found.messages.push({ senderThreadId, text, mode: "queue" });
+          const runId = RunId.make(`run-request-${threadId}-${found.messages.length}`);
+          if (!fake.starts.has(threadId)) {
+            fake.starts.set(threadId, { type: "started", runId });
+            found.shell = { ...found.shell, latestRunId: runId };
+          }
+          return runId;
+        }),
+      runReply: (threadId) =>
+        Effect.sync(() =>
+          fake.replies.has(threadId)
+            ? { type: "ended" as const, text: fake.replies.get(threadId) ?? null }
+            : { type: "pending" as const },
         ),
       stop: (threadId) =>
         Effect.map(thread(fake, threadId, "stop"), (found) => {
@@ -337,6 +346,17 @@ export const layer = (fake: FakeV2) =>
       stopProcesses: (worktreePath) =>
         Effect.sync(() => {
           fake.stoppedCheckouts.push(worktreePath);
+        }),
+      stopServers: (worktreePath) =>
+        Effect.sync(() => {
+          fake.stoppedServers.push(worktreePath);
+        }),
+      recreateWorktree: ({ projectRoot, worktreePath, branch }) =>
+        Effect.sync(() => {
+          NodeChildProcess.execSync(
+            `git worktree prune && git worktree add -q ${worktreePath} ${branch}`,
+            { cwd: projectRoot },
+          );
         }),
       removeWorktree: ({ projectRoot, worktreePath, force }) =>
         Effect.sync(() => {

@@ -45,6 +45,7 @@ export const PivotEvent = Schema.Union([
     predecessorThreadId: Schema.NullOr(ThreadId),
   }),
   event("pivot.retired", { threadId: ThreadId, successorThreadId: ThreadId }),
+  event("pivot.handoff-recorded", { threadId: ThreadId, text: Schema.String }),
   /** A wake went out, covering the Pivot's pending events through `throughSequence`. */
   event("pivot.woke", {
     threadId: ThreadId,
@@ -67,11 +68,21 @@ export const PivotEvent = Schema.Union([
     spec: Schema.String,
     /** The teammate model it was dispatched on; absent on events from before entries. */
     modelEntry: Schema.optional(Schema.NullOr(Schema.String)),
+    checkoutSnapshot: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   }),
   event("teammate.promoted", { threadId: ThreadId, spec: Schema.String }),
+  event("teammate.verdict-recorded", { threadId: ThreadId, text: Schema.String }),
+  event("teammate.ship-ordered", {
+    threadId: ThreadId,
+    decisionId: Schema.NullOr(PivotDecisionId),
+  }),
   event("teammate.intent-added", { threadId: ThreadId, text: Schema.String }),
   event("teammate.reported", { threadId: ThreadId, report: TeammateReport }),
-  event("teammate.scout-report-recorded", { threadId: ThreadId, report: Schema.String }),
+  event("teammate.scout-report-recorded", {
+    threadId: ThreadId,
+    report: Schema.String,
+    checkoutChanges: Schema.optional(Schema.Array(Schema.String)),
+  }),
   event("teammate.resume-changed", {
     threadId: ThreadId,
     resume: Schema.NullOr(TeammateResumeState),
@@ -113,6 +124,7 @@ export const PivotEvent = Schema.Union([
   event("teammate.merge-requested", { threadId: ThreadId, url: Schema.NullOr(Schema.String) }),
   event("teammate.landed", { threadId: ThreadId, head: Schema.String }),
   event("teammate.torn-down", { threadId: ThreadId }),
+  event("teammate.handed-over", { threadId: ThreadId, successorThreadId: ThreadId }),
   event("decision.opened", {
     decisionId: PivotDecisionId,
     pivotThreadId: ThreadId,

@@ -63,10 +63,6 @@ describe("teammate cards", () => {
     });
   });
 
-  it("marks an inline task as one", () => {
-    expect(teammateCard(teammate({ kind: "inline" }), shell()).label).toBe("Inline · Working");
-  });
-
   it("says a teammate is waiting for memory while its agent has not started", () => {
     const status = "Waiting for memory: agents use 9.7 of 9.4 GB";
     const card = teammateCard(
@@ -79,7 +75,7 @@ describe("teammate cards", () => {
       teammate({ memoryWait: status, report: report("done", "2026-10-06T10:05:00.000Z") }),
       shell({ status: "idle" }),
     );
-    expect(finished.label).toBe("Done");
+    expect(finished.label).toBe("Ready for review");
   });
 
   it("gives attention statuses and escalated decisions an accent, and reads the latter as needs you", () => {
@@ -134,6 +130,7 @@ describe("teammate cards", () => {
     const done = teammate({
       threadId: ThreadId.make("done"),
       report: report("done", "2026-10-06T11:00:00.000Z"),
+      shipOrderedAt: "2026-10-06T11:30:00.000Z",
     });
     const tornDown = teammate({
       threadId: ThreadId.make("gone"),
@@ -150,6 +147,24 @@ describe("teammate cards", () => {
     );
     expect(cards.live.map((card) => card.threadId)).toEqual(["running", "asking"]);
     expect(cards.finished.map((card) => card.threadId)).toEqual(["done", "gone"]);
+  });
+
+  it("keeps a ship ready for review in view", () => {
+    const ready = teammate({ report: report("done", "2026-10-06T11:00:00.000Z") });
+    const card = teammateCard(ready, shell({ status: "idle" }));
+    expect(card.label).toBe("Ready for review");
+    expect(card.readyForReview).toBe(true);
+    expect(teammateCards([ready], () => shell({ status: "idle" })).live).toHaveLength(1);
+
+    const shipping = teammateCard(
+      teammate({ ...ready, shipOrderedAt: "2026-10-06T12:00:00.000Z" }),
+      shell({ status: "idle" }),
+    );
+    expect(shipping.readyForReview).toBe(false);
+    expect(shipping.label).toBe("Done");
+    expect(
+      teammateCard(teammate({ ...ready, kind: "scout" }), shell({ status: "idle" })).readyForReview,
+    ).toBe(false);
   });
 
   it("wears the thread status colors and settles like a thread", () => {

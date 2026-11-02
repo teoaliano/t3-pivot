@@ -15,6 +15,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -26,6 +27,8 @@ import {
   setup,
   sh,
 } from "../../../pivot/PivotService.testkit.ts";
+import * as PivotDatabase from "../../../pivot/PivotDatabase.ts";
+import RemoveInlineTasks from "../../../pivot/migrations/010_RemoveInlineTasks.ts";
 import * as PivotStore from "../../../pivot/PivotStore.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
 import type { FakeV2 } from "../../../pivot/PivotThreads.testkit.ts";
@@ -129,6 +132,8 @@ const dispatch = (
     baseBranch: string;
     modelEntry: string;
     modelSelection: typeof modelSelection;
+    shipDirectly: boolean;
+    attachTo: ThreadId;
   }> = {},
 ) =>
   call(pivot, "dispatch_teammate", {
@@ -191,6 +196,32 @@ describe("Pivot and teammate tools", () => {
     }).pipe(Effect.provide(layer));
   });
 
+  it.effect("reads back the predecessor's handoff and thread", () => {
+    const { layer } = setup();
+    return Effect.gen(function* () {
+      const first = yield* createPivot;
+      expectOk(yield* call(first, "read_handoff", {}));
+      assert.deepStrictEqual(expectOk(yield* call(first, "read_handoff", {})), {
+        predecessorThreadId: null,
+        handoff: null,
+      });
+      const pivots = yield* PivotService.PivotService;
+      const successor = (yield* pivots.create({ projectId, modelSelection, takeover: true }))
+        .threadId;
+      const store = yield* PivotStore.PivotStore;
+      yield* store.dispatch({
+        type: "pivot.record-handoff",
+        threadId: first,
+        text: "Goals: login fixed before Friday.",
+      });
+      assert.deepStrictEqual(expectOk(yield* call(successor, "read_handoff", {})), {
+        predecessorThreadId: first,
+        handoff: "Goals: login fixed before Friday.",
+      });
+      expectRefused(yield* call(first, "read_handoff", {}), "capability_denied", "retired");
+    }).pipe(Effect.provide(layer));
+  });
+
   describe("dispatch_teammate", () => {
     it.effect("launches a ship with the brief as the Pivot's first message on pivot/<slug>", () => {
       const { fake, layer } = setup({ remote: true });
@@ -215,15 +246,19 @@ describe("Pivot and teammate tools", () => {
         assert.isTrue(brief.text.startsWith("# Your role"));
         assert.include(brief.text, "The login button does nothing on Safari. Make it work.");
         assert.include(brief.text, "Reproduce in Safari, fix the handler, add a regression test.");
-        assert.include(brief.text, "This task delivers a pull request.");
+        assert.include(brief.text, "This task delivers committed work for review.");
         assert.include(brief.text, `Your worktree is \`${result.worktreePath}\``);
         assert.notInclude(brief.text, "{{");
         assert.notInclude(brief.text, "<!--");
         assert.include(brief.text, "the agent that dispatched you and supervises your work");
         assertNoHardWraps(brief.text);
 
-        const second = yield* dispatch(pivot);
+        const second = yield* dispatch(pivot, { shipDirectly: true });
         assert.strictEqual(second.branch, "pivot/fix-the-login-bug-2");
+        assert.include(
+          firstMessage(fake, second.threadId)!.text,
+          "This task delivers a pull request.",
+        );
       }).pipe(Effect.provide(layer));
     });
 
@@ -254,6 +289,11 @@ describe("Pivot and teammate tools", () => {
         assert.strictEqual(result.deliveryMode, "local-only");
         assert.include(
           firstMessage(fake, result.threadId)!.text,
+          "This task delivers committed work for review.",
+        );
+        const direct = yield* dispatch(pivot, { title: "Second", shipDirectly: true });
+        assert.include(
+          firstMessage(fake, direct.threadId)!.text,
           "This task delivers a ready branch.",
         );
       }).pipe(Effect.provide(layer));
@@ -331,44 +371,201 @@ describe("Pivot and teammate tools", () => {
     });
   });
 
-  it.effect("a scout reports, then is promoted in place with a superseding contract", () => {
+  describe("inline tasks are gone", () => {
+    it.effect("no longer dispatches an inline task", () => {
+      const { fake, layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const outcome = yield* call(pivot, "dispatch_teammate", {
+          title: "Fix the README typo",
+          kind: "inline",
+          intent: "Fix the typo in the README.",
+          spec: "One-line change.",
+        });
+        assert.isFalse(outcome.ok);
+        assert.strictEqual(
+          [...fake.threads.values()].filter((thread) => thread.kind === "teammate").length,
+          0,
+        );
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("reads an inline task an older release stored as an ended teammate", () => {
+      const { layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const sql = yield* PivotDatabase.PivotSql;
+        yield* sql`
+          INSERT INTO pivot_teammates (
+            thread_id, pivot_thread_id, project_id, kind, title, branch, base_branch,
+            worktree_path, delivery_mode, intent_json, spec, dispatched_at
+          ) VALUES (
+            'thread-inline-1', ${pivot}, ${projectId}, 'inline', 'Fix the README typo',
+            'pivot-inline/fix-the-readme-typo', 'main', '/worktrees/work/pivot-inline',
+            'local-only', '["Fix the typo."]', 'One-line change.', '2026-10-01T00:00:00.000Z'
+          )
+        `;
+        yield* sql`
+          INSERT INTO pivot_events (
+            type, pivot_thread_id, teammate_thread_id, wakes, payload_json, occurred_at
+          ) VALUES (
+            'teammate.dispatched', ${pivot}, 'thread-inline-1', 0,
+            ${JSON.stringify({
+              type: "teammate.dispatched",
+              threadId: "thread-inline-1",
+              pivotThreadId: pivot,
+              projectId,
+              kind: "inline",
+              title: "Fix the README typo",
+              branch: "pivot-inline/fix-the-readme-typo",
+              baseBranch: "main",
+              worktreePath: "/worktrees/work/pivot-inline",
+              deliveryMode: "local-only",
+              intent: "Fix the typo.",
+              spec: "One-line change.",
+            })},
+            '2026-10-01T00:00:00.000Z'
+          )
+        `;
+        yield* RemoveInlineTasks.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+
+        const lines = expectOk(yield* call(pivot, "list_teammates", { includeTornDown: true }))
+          .teammates as Array<{ threadId: string; kind: string; tornDown: boolean }>;
+        assert.deepStrictEqual(
+          lines.map(({ threadId, kind, tornDown }) => ({ threadId, kind, tornDown })),
+          [{ threadId: "thread-inline-1", kind: "ship", tornDown: true }],
+        );
+        const history = expectOk(
+          yield* call(pivot, "teammate_history", { threadId: "thread-inline-1" }),
+        );
+        assert.include(history.entries.at(-1).line, "Dispatched as a ship");
+      }).pipe(Effect.provide(layer));
+    });
+  });
+
+  it.effect("launches a scout in the project's own checkout, with no worktree", () => {
+    const { fake, workspaceRoot, layer } = setup({ remote: true });
+    return Effect.gen(function* () {
+      const pivot = yield* createPivot;
+      const scout = yield* dispatch(pivot, { title: "Why is login slow", kind: "scout" });
+
+      assert.strictEqual(scout.worktreePath, workspaceRoot);
+      assert.strictEqual(scout.branch, "main");
+      assert.strictEqual(scout.setupScript, "none");
+      assert.strictEqual(scout.firstRun, "started");
+      const thread = fake.threads.get(scout.threadId)!;
+      assert.isNull(thread.worktreePath);
+      assert.isNull(thread.branch);
+      assert.strictEqual(
+        sh(workspaceRoot, "git worktree list --porcelain").split("worktree ").length,
+        2,
+      );
+      const brief = firstMessage(fake, scout.threadId)!.text;
+      assert.include(brief, "This task delivers a report");
+      assert.include(brief, "the user's own checkout");
+      assertNoHardWraps(brief);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("names every file a scout changed in the user's checkout when it reports", () => {
+    const { workspaceRoot, layer } = setup();
+    return Effect.gen(function* () {
+      const pivot = yield* createPivot;
+      NodeFS.writeFileSync(NodePath.join(workspaceRoot, "draft.md"), "mine\n");
+      const scout = yield* dispatch(pivot, { title: "Why is login slow", kind: "scout" });
+      NodeFS.writeFileSync(NodePath.join(workspaceRoot, "README.md"), "changed\n");
+      NodeFS.writeFileSync(NodePath.join(workspaceRoot, "probe.txt"), "probe\n");
+
+      const recorded = expectOk(
+        yield* call(scout.threadId, "record_scout_report", { report: "The lookup scans." }),
+      );
+      assert.deepStrictEqual(recorded.checkoutChanges, ["README.md", "probe.txt"]);
+      const pivots = yield* PivotService.PivotService;
+      const report = (yield* pivots.teammateDetail(scout.threadId)).scoutReport!;
+      assert.include(report, "The lookup scans.");
+      assert.include(report, "README.md");
+      assert.include(report, "probe.txt");
+      assert.notInclude(report, "draft.md");
+      const history = expectOk(
+        yield* call(pivot, "teammate_history", { threadId: scout.threadId }),
+      );
+      assert.include(history.entries[0].line, "probe.txt");
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("records a scout's report with no note when the checkout is as it found it", () => {
+    const { workspaceRoot, layer } = setup();
+    return Effect.gen(function* () {
+      const pivot = yield* createPivot;
+      NodeFS.writeFileSync(NodePath.join(workspaceRoot, "draft.md"), "mine\n");
+      const scout = yield* dispatch(pivot, { title: "Why is login slow", kind: "scout" });
+      const recorded = expectOk(
+        yield* call(scout.threadId, "record_scout_report", { report: "The lookup scans." }),
+      );
+      assert.deepStrictEqual(recorded.checkoutChanges, []);
+      const pivots = yield* PivotService.PivotService;
+      assert.strictEqual(
+        (yield* pivots.teammateDetail(scout.threadId)).scoutReport,
+        "The lookup scans.",
+      );
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("promotes a scout into a new ship in a fresh worktree, its report in the brief", () => {
     const { fake, layer } = setup({ remote: true });
     return Effect.gen(function* () {
       const pivot = yield* createPivot;
       const scout = yield* dispatch(pivot, { title: "Why is login slow", kind: "scout" });
       assert.include(firstMessage(fake, scout.threadId)!.text, "This task delivers a report");
       assertNoHardWraps(firstMessage(fake, scout.threadId)!.text);
+      expectRefused(
+        yield* call(pivot, "promote_scout", { threadId: scout.threadId, spec: "Add the index." }),
+        "invalid_request",
+        "report",
+      );
 
       expectOk(
         yield* call(scout.threadId, "record_scout_report", {
           report: "The session lookup does a full table scan; see db.ts:42.",
         }),
       );
-      const pivots = yield* PivotService.PivotService;
-      const detail = yield* pivots.teammateDetail(scout.threadId);
-      assert.strictEqual(
-        detail.scoutReport,
-        "The session lookup does a full table scan; see db.ts:42.",
-      );
-
       const promoted = expectOk(
         yield* call(pivot, "promote_scout", { threadId: scout.threadId, spec: "Add the index." }),
-      );
+      ) as PivotMcpDispatchTeammateResult;
+      assert.notStrictEqual(promoted.threadId, scout.threadId);
       assert.strictEqual(promoted.kind, "ship");
-      const message = lastMessage(fake, scout.threadId)!;
-      assert.strictEqual(message.senderThreadId, pivot);
-      assert.isTrue(message.text.startsWith("# You are now a ship"));
-      assert.include(message.text, "The login button does nothing on Safari. Make it work.");
-      assert.include(message.text, "Add the index.");
-      assert.include(message.text, "This task delivers a pull request.");
-      assertNoHardWraps(message.text);
+      assert.strictEqual(promoted.branch, "pivot/why-is-login-slow");
+      assert.strictEqual(promoted.baseBranch, "main");
+      assert.isTrue(
+        promoted.worktreePath.endsWith(NodePath.join("work", "pivot-why-is-login-slow")),
+      );
+      const ship = fake.threads.get(promoted.threadId)!;
+      assert.strictEqual(ship.branch, "pivot/why-is-login-slow");
+      assert.strictEqual(ship.baseBranch, "main");
+      const brief = firstMessage(fake, promoted.threadId)!;
+      assert.strictEqual(brief.senderThreadId, pivot);
+      assert.isTrue(brief.text.startsWith("# Your role"));
+      assert.include(brief.text, "The login button does nothing on Safari. Make it work.");
+      assert.include(brief.text, "Add the index.");
+      assert.include(brief.text, "The session lookup does a full table scan; see db.ts:42.");
+      assert.include(brief.text, "This task delivers committed work for review.");
+      assertNoHardWraps(brief.text);
+
+      assert.isTrue(fake.threads.get(scout.threadId)!.archived);
+      const lines = expectOk(yield* call(pivot, "list_teammates", { includeTornDown: true }))
+        .teammates as Array<{ threadId: ThreadId; tornDown: boolean }>;
+      assert.isTrue(lines.find((line) => line.threadId === scout.threadId)?.tornDown);
+      const pivots = yield* PivotService.PivotService;
+      assert.include(
+        (yield* pivots.teammateDetail(scout.threadId)).scoutReport ?? "",
+        "full table scan",
+      );
       expectRefused(
         yield* call(pivot, "promote_scout", { threadId: scout.threadId, spec: "again" }),
         "invalid_request",
-        "Only a scout",
       );
       expectRefused(
-        yield* call(scout.threadId, "record_scout_report", { report: "more" }),
+        yield* call(promoted.threadId, "record_scout_report", { report: "more" }),
         "invalid_request",
         "Only a scout",
       );
@@ -548,7 +745,7 @@ describe("Pivot and teammate tools", () => {
       }).pipe(Effect.provide(layer));
     });
 
-    it.effect("refuses a ship's done in PR mode until a linked PR has its pushed head", () => {
+    it.effect("accepts a ship's committed work with evidence, nothing pushed and no PR", () => {
       const { fake, workspaceRoot, layer } = setup({ remote: true });
       return Effect.gen(function* () {
         const pivot = yield* createPivot;
@@ -556,47 +753,133 @@ describe("Pivot and teammate tools", () => {
         addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
         NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "fix.txt"), "fixed\n");
         sh(ship.worktreePath, "git add -A && git commit -q -m fix");
-        const done = { status: "done", summary: "Fixed: https://github.com/o/r/pull/1" };
 
-        expectRefused(
-          yield* call(ship.threadId, "report_status", done),
-          "invalid_request",
-          "linked PR",
-        );
-
-        const thread = fake.threads.get(ship.threadId)!;
-        thread.shell = {
-          ...thread.shell,
-          pullRequests: [
-            {
-              host: "github.com",
-              repository: "o/r",
-              number: 1,
-              url: "https://github.com/o/r/pull/1",
-              source: "agent",
-              linkedAt: "2026-10-06T00:00:00.000Z",
-              snapshot: null,
-              stack: null,
+        expectOk(
+          yield* call(ship.threadId, "report_status", {
+            status: "done",
+            summary: "Fixed the Safari login",
+            evidence: {
+              text: "Clicked Log in on Safari 18: it signs in. vp test run login.test.ts passes.",
+              files: ["/tmp/login-safari.png"],
             },
-          ],
-        } as typeof thread.shell;
-        expectRefused(
-          yield* call(ship.threadId, "report_status", done),
-          "invalid_request",
-          "not pushed",
+          }),
         );
-
-        sh(ship.worktreePath, `git push -q origin ${ship.branch}`);
-        NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "more.txt"), "more\n");
-        sh(ship.worktreePath, "git add -A && git commit -q -m more");
-        expectRefused(
-          yield* call(ship.threadId, "report_status", done),
-          "invalid_request",
-          "origin has",
+        const store = yield* PivotStore.PivotStore;
+        const record = yield* store.getTeammate(ship.threadId);
+        assert.deepStrictEqual(record?.report?.evidence, {
+          text: "Clicked Log in on Safari 18: it signs in. vp test run login.test.ts passes.",
+          files: ["/tmp/login-safari.png"],
+        });
+        assert.isNull(
+          sh(ship.worktreePath, `git ls-remote origin ${ship.branch}`) || null,
+          "nothing was pushed",
         );
+        assert.isUndefined(fake.threads.get(ship.threadId)!.shell.pullRequests);
+      }).pipe(Effect.provide(layer));
+    });
 
-        sh(ship.worktreePath, `git push -q origin ${ship.branch}`);
-        expectOk(yield* call(ship.threadId, "report_status", done));
+    it.effect("refuses a ship's done without evidence", () => {
+      const { workspaceRoot, layer } = setup({ remote: true });
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const ship = yield* dispatch(pivot);
+        addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
+        NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "fix.txt"), "fixed\n");
+        sh(ship.worktreePath, "git add -A && git commit -q -m fix");
+
+        expectRefused(
+          yield* call(ship.threadId, "report_status", { status: "done", summary: "Fixed" }),
+          "invalid_request",
+          "evidence",
+        );
+        const store = yield* PivotStore.PivotStore;
+        assert.isNull((yield* store.getTeammate(ship.threadId))?.report ?? null);
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect(
+      "still needs a linked PR with its pushed head from a ship told to ship directly",
+      () => {
+        const { fake, workspaceRoot, layer } = setup({ remote: true });
+        return Effect.gen(function* () {
+          const pivot = yield* createPivot;
+          const ship = yield* dispatch(pivot, { shipDirectly: true });
+          addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
+          NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "fix.txt"), "fixed\n");
+          sh(ship.worktreePath, "git add -A && git commit -q -m fix");
+          const done = {
+            status: "done",
+            summary: "Fixed: https://github.com/o/r/pull/1",
+            evidence: { text: "Tests pass." },
+          };
+
+          expectRefused(
+            yield* call(ship.threadId, "report_status", done),
+            "invalid_request",
+            "linked PR",
+          );
+
+          const thread = fake.threads.get(ship.threadId)!;
+          thread.shell = {
+            ...thread.shell,
+            pullRequests: [
+              {
+                host: "github.com",
+                repository: "o/r",
+                number: 1,
+                url: "https://github.com/o/r/pull/1",
+                source: "agent",
+                linkedAt: "2026-10-06T00:00:00.000Z",
+                snapshot: null,
+                stack: null,
+              },
+            ],
+          } as typeof thread.shell;
+          expectRefused(
+            yield* call(ship.threadId, "report_status", done),
+            "invalid_request",
+            "not pushed",
+          );
+
+          sh(ship.worktreePath, `git push -q origin ${ship.branch}`);
+          NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "more.txt"), "more\n");
+          sh(ship.worktreePath, "git add -A && git commit -q -m more");
+          expectRefused(
+            yield* call(ship.threadId, "report_status", done),
+            "invalid_request",
+            "origin has",
+          );
+
+          sh(ship.worktreePath, `git push -q origin ${ship.branch}`);
+          expectOk(yield* call(ship.threadId, "report_status", done));
+        }).pipe(Effect.provide(layer));
+      },
+    );
+
+    it.effect("stops the ship's dev servers once its done is accepted, keeping its port", () => {
+      const { fake, workspaceRoot, layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const ship = yield* dispatch(pivot);
+        addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
+        NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "wip.txt"), "wip\n");
+        expectRefused(
+          yield* call(ship.threadId, "report_status", { status: "done", summary: "Ready" }),
+          "invalid_request",
+          "committed",
+        );
+        assert.deepStrictEqual(fake.stoppedServers, []);
+
+        sh(ship.worktreePath, "git add -A && git commit -q -m wip");
+        expectOk(
+          yield* call(ship.threadId, "report_status", {
+            status: "done",
+            summary: "Ready",
+            evidence: { text: "Tests pass." },
+          }),
+        );
+        assert.deepStrictEqual(fake.stoppedServers, [ship.worktreePath]);
+        assert.deepStrictEqual(fake.stoppedCheckouts, []);
       }).pipe(Effect.provide(layer));
     });
 
@@ -610,17 +893,274 @@ describe("Pivot and teammate tools", () => {
           yield* call(ship.threadId, "report_status", {
             status: "done",
             summary: `Ready on ${ship.branch}`,
+            evidence: { text: "Tests pass." },
           }),
         );
       }).pipe(Effect.provide(layer));
     });
   });
 
-  it.effect("lists teammates and reads bounded history, scoped to the calling Pivot", () => {
-    const { fake, layer } = setup();
+  describe("review", () => {
+    const doneShip = (fake: FakeV2, workspaceRoot: string, pivot: ThreadId) =>
+      Effect.gen(function* () {
+        const ship = yield* dispatch(pivot);
+        addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
+        NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "fix.txt"), "fixed\n");
+        sh(ship.worktreePath, "git add -A && git commit -q -m fix");
+        expectOk(
+          yield* call(ship.threadId, "report_status", {
+            status: "done",
+            summary: "Fixed",
+            evidence: {
+              text: "Signed in on Safari.",
+              files: ["/tmp/safari.png"],
+              devServer: true,
+            },
+          }),
+        );
+        return ship;
+      });
+    const lineOf = (pivot: ThreadId, threadId: ThreadId) =>
+      call(pivot, "list_teammates", {}).pipe(
+        Effect.map((outcome) =>
+          (expectOk(outcome).teammates as Array<{ threadId: ThreadId }>).find(
+            (line) => line.threadId === threadId,
+          ),
+        ),
+      );
+
+    it.effect(
+      "records the Pivot's verdict on a done teammate and lists it with the evidence",
+      () => {
+        const { fake, workspaceRoot, layer } = setup();
+        return Effect.gen(function* () {
+          const pivot = yield* createPivot;
+          const ship = yield* doneShip(fake, workspaceRoot, pivot);
+
+          expectOk(
+            yield* call(pivot, "record_verdict", {
+              threadId: ship.threadId,
+              verdict: "Diff is small and matches the spec; the screenshot shows the fix.",
+            }),
+          );
+          const line = (yield* lineOf(pivot, ship.threadId)) as Record<string, unknown>;
+          assert.deepStrictEqual(line.evidence, {
+            text: "Signed in on Safari.",
+            files: ["/tmp/safari.png"],
+            devServer: true,
+          });
+          assert.strictEqual(
+            line.verdict,
+            "Diff is small and matches the spec; the screenshot shows the fix.",
+          );
+          const store = yield* PivotStore.PivotStore;
+          const [snapshot] = Array.from(
+            yield* store.stream.pipe(Stream.take(1), Stream.runCollect),
+          );
+          const record =
+            snapshot?._tag === "snapshot"
+              ? snapshot.teammates.find((teammate) => teammate.threadId === ship.threadId)
+              : undefined;
+          assert.strictEqual(
+            record?.verdict?.text,
+            "Diff is small and matches the spec; the screenshot shows the fix.",
+          );
+        }).pipe(Effect.provide(layer));
+      },
+    );
+
+    it.effect("refuses a verdict for a teammate that has not reported done", () => {
+      const { layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const ship = yield* dispatch(pivot);
+        expectOk(
+          yield* call(ship.threadId, "report_status", { status: "working", summary: "Fixing" }),
+        );
+        expectRefused(
+          yield* call(pivot, "record_verdict", { threadId: ship.threadId, verdict: "Looks good." }),
+          "invalid_request",
+          "not reported done",
+        );
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("clears the verdict once the teammate goes back to work", () => {
+      const { fake, workspaceRoot, layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const ship = yield* doneShip(fake, workspaceRoot, pivot);
+        expectOk(
+          yield* call(pivot, "record_verdict", { threadId: ship.threadId, verdict: "Looks good." }),
+        );
+
+        expectOk(
+          yield* call(ship.threadId, "report_status", {
+            status: "working",
+            summary: "Acting on the user's feedback",
+          }),
+        );
+        const line = (yield* lineOf(pivot, ship.threadId)) as Record<string, unknown>;
+        assert.isNull(line.verdict);
+        assert.isNull(line.evidence);
+      }).pipe(Effect.provide(layer));
+    });
+  });
+
+  describe("attaching to a teammate's worktree", () => {
+    const committedShip = (fake: FakeV2, workspaceRoot: string, pivot: ThreadId) =>
+      Effect.gen(function* () {
+        const ship = yield* dispatch(pivot, { title: "Add the API" });
+        addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
+        fake.threads.get(ship.threadId)!.worktreePath = ship.worktreePath;
+        NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "api.txt"), "api\n");
+        sh(ship.worktreePath, "git add -A && git commit -q -m api");
+        return ship;
+      });
+
+    it.effect("starts the new teammate in that worktree and branch, without setup", () => {
+      const { fake, workspaceRoot, layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const first = yield* committedShip(fake, workspaceRoot, pivot);
+
+        const next = yield* dispatch(pivot, { title: "Add the UI", attachTo: first.threadId });
+        assert.strictEqual(next.worktreePath, first.worktreePath);
+        assert.strictEqual(next.branch, first.branch);
+        assert.strictEqual(next.baseBranch, first.baseBranch);
+        assert.strictEqual(next.setupScript, "none");
+        assert.strictEqual(next.firstRun, "started");
+        const thread = fake.threads.get(next.threadId)!;
+        assert.strictEqual(thread.worktreePath, first.worktreePath);
+        assert.strictEqual(thread.branch, first.branch);
+        const brief = firstMessage(fake, next.threadId)!;
+        assert.strictEqual(brief.senderThreadId, pivot);
+        assert.include(brief.text, `Your worktree is \`${first.worktreePath}\``);
+        assertNoHardWraps(brief.text);
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("refuses to attach while that teammate's turn is running", () => {
+      const { fake, workspaceRoot, layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const first = yield* committedShip(fake, workspaceRoot, pivot);
+        const thread = fake.threads.get(first.threadId)!;
+        thread.shell = { ...thread.shell, status: "running", activeRunId: RunId.make("run-9") };
+        const before = fake.threads.size;
+
+        expectRefused(
+          yield* call(pivot, "dispatch_teammate", {
+            title: "Add the UI",
+            kind: "ship",
+            intent: "Add the UI.",
+            spec: "Build it on the API.",
+            attachTo: first.threadId,
+          }),
+          "invalid_request",
+          "still working",
+        );
+        assert.strictEqual(fake.threads.size, before);
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("ends the teammate it takes over from, keeping the worktree and branch", () => {
+      const { fake, workspaceRoot, layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const first = yield* committedShip(fake, workspaceRoot, pivot);
+        const head = sh(first.worktreePath, "git rev-parse HEAD");
+
+        const next = yield* dispatch(pivot, { title: "Add the UI", attachTo: first.threadId });
+        const live = expectOk(yield* call(pivot, "list_teammates", {})).teammates as Array<{
+          threadId: ThreadId;
+        }>;
+        assert.deepStrictEqual(
+          live.map((line) => line.threadId),
+          [next.threadId],
+        );
+        const ended = (
+          expectOk(yield* call(pivot, "list_teammates", { includeTornDown: true }))
+            .teammates as Array<{ threadId: ThreadId; tornDown: boolean }>
+        ).find((line) => line.threadId === first.threadId);
+        assert.isTrue(ended?.tornDown);
+        assert.isTrue(fake.threads.get(first.threadId)!.archived);
+        assert.deepStrictEqual(fake.removedWorktrees, []);
+        assert.isTrue(NodeFS.existsSync(first.worktreePath));
+        assert.strictEqual(sh(workspaceRoot, `git rev-parse ${first.branch}`), head);
+        expectRefused(
+          yield* call(pivot, "add_intent", { threadId: first.threadId, intent: "More." }),
+          "invalid_request",
+          "torn down",
+        );
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("refuses a base branch when attaching", () => {
+      const { fake, workspaceRoot, layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const first = yield* committedShip(fake, workspaceRoot, pivot);
+        expectRefused(
+          yield* call(pivot, "dispatch_teammate", {
+            title: "Add the UI",
+            kind: "ship",
+            intent: "Add the UI.",
+            spec: "Build it on the API.",
+            attachTo: first.threadId,
+            baseBranch: "main",
+          }),
+          "invalid_request",
+          "baseBranch",
+        );
+      }).pipe(Effect.provide(layer));
+    });
+  });
+
+  it.effect("lists a reclaimed worktree as gone and relaunches the ship onto it again", () => {
+    const { fake, workspaceRoot, layer } = setup();
     return Effect.gen(function* () {
       const pivot = yield* createPivot;
       const ship = yield* dispatch(pivot);
+      addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
+      NodeFS.writeFileSync(NodePath.join(ship.worktreePath, "fix.txt"), "fixed\n");
+      sh(ship.worktreePath, "git add -A && git commit -q -m fix");
+      const head = sh(ship.worktreePath, "git rev-parse HEAD");
+      sh(workspaceRoot, `git worktree remove --force ${ship.worktreePath}`);
+
+      const line = (
+        expectOk(yield* call(pivot, "list_teammates", {})).teammates as Array<{
+          threadId: ThreadId;
+          branch: string;
+          worktreePath: string | null;
+        }>
+      ).find((candidate) => candidate.threadId === ship.threadId)!;
+      assert.strictEqual(line.branch, ship.branch);
+      assert.isNull(line.worktreePath);
+
+      const relaunched = expectOk(
+        yield* call(pivot, "relaunch_teammate", { threadId: ship.threadId }),
+      );
+      assert.strictEqual(relaunched.outcome, "relaunched");
+      assert.strictEqual(sh(ship.worktreePath, "git branch --show-current"), ship.branch);
+      assert.strictEqual(sh(ship.worktreePath, "git rev-parse HEAD"), head);
+      assert.include(lastMessage(fake, ship.threadId)!.text, "recreated");
+      const again = (
+        expectOk(yield* call(pivot, "list_teammates", {})).teammates as Array<{
+          threadId: ThreadId;
+          worktreePath: string | null;
+        }>
+      ).find((candidate) => candidate.threadId === ship.threadId)!;
+      assert.strictEqual(again.worktreePath, ship.worktreePath);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("lists teammates and reads bounded history, scoped to the calling Pivot", () => {
+    const { fake, workspaceRoot, layer } = setup();
+    return Effect.gen(function* () {
+      const pivot = yield* createPivot;
+      const ship = yield* dispatch(pivot);
+      addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
       for (let index = 0; index < 5; index += 1) {
         expectOk(
           yield* call(ship.threadId, "report_status", {
@@ -713,10 +1253,11 @@ describe("Pivot and teammate tools", () => {
   });
 
   it.effect("stops and relaunches its own teammates and reports a failed relaunch", () => {
-    const { fake, layer } = setup();
+    const { fake, workspaceRoot, layer } = setup();
     return Effect.gen(function* () {
       const pivot = yield* createPivot;
       const ship = yield* dispatch(pivot);
+      addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
       expectOk(yield* call(pivot, "stop_teammate", { threadId: ship.threadId }));
       assert.strictEqual(fake.threads.get(ship.threadId)?.stops, 1);
 
@@ -892,6 +1433,323 @@ describe("delivery and teardown", () => {
       });
       yield* pivots.recordUserAnswer({ decisionId: decisionId as never, answer, approved });
     });
+
+  describe("ship batches", () => {
+    const doneShips = (workspaceRoot: string, pivot: ThreadId, titles: ReadonlyArray<string>) =>
+      Effect.forEach(titles, (title) =>
+        Effect.gen(function* () {
+          const ship = yield* dispatch(pivot, { title });
+          addWorktree(workspaceRoot, ship.worktreePath, ship.branch);
+          NodeFS.writeFileSync(
+            NodePath.join(ship.worktreePath, `${ship.branch.slice(6)}.txt`),
+            "x\n",
+          );
+          sh(ship.worktreePath, "git add -A && git commit -q -m work");
+          expectOk(
+            yield* call(ship.threadId, "report_status", {
+              status: "done",
+              summary: "Ready for review",
+              evidence: { text: "Tests pass." },
+            }),
+          );
+          return ship;
+        }),
+      );
+    const proposeBatch = (
+      pivot: ThreadId,
+      shipGroups: ReadonlyArray<{ lead: ThreadId; members: ReadonlyArray<ThreadId> }>,
+      key = "ship",
+    ) =>
+      Effect.gen(function* () {
+        const pivots = yield* PivotService.PivotService;
+        const { decision } = yield* pivots.openDecision(pivot, { key, question: "Ship it?" });
+        return {
+          decisionId: decision.decisionId,
+          outcome: yield* call(pivot, "escalate_decision", {
+            decisionId: decision.decisionId,
+            questions: ["Ship these PRs in this order?"],
+            evidence: "Reviewed; the user tried it.",
+            consequence: "The PRs open and merge in order.",
+            options: [],
+            recommendation: "Ship",
+            asksApproval: true,
+            shipGroups,
+          }),
+        };
+      });
+
+    it.effect("opens a batch of PR groups in order, and refuses one naming unfinished work", () => {
+      const { workspaceRoot, layer } = setup({ remote: true });
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const [api, ui, docs] = yield* doneShips(workspaceRoot, pivot, [
+          "Add the API",
+          "Add the UI",
+          "Write the docs",
+        ]);
+        const wip = yield* dispatch(pivot, { title: "Add the logout" });
+
+        const { outcome } = yield* proposeBatch(pivot, [
+          { lead: api!.threadId, members: [ui!.threadId] },
+          { lead: docs!.threadId, members: [] },
+        ]);
+        const decision = expectOk(outcome).decision;
+        assert.deepStrictEqual(decision.escalation.mergeOrder, [api!.branch, docs!.branch]);
+        assert.isTrue(decision.escalation.asksApproval);
+
+        const refused = yield* proposeBatch(pivot, [{ lead: wip.threadId, members: [] }], "ship-2");
+        expectRefused(refused.outcome, "invalid_request", '"Add the logout" has not reported done');
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("tells each lead to ship once the user approves, then needs its PR at done", () => {
+      const { fake, workspaceRoot, layer } = setup({ remote: true });
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const [api, ui] = yield* doneShips(workspaceRoot, pivot, ["Add the API", "Add the UI"]);
+        const declined = yield* proposeBatch(
+          pivot,
+          [{ lead: api!.threadId, members: [ui!.threadId] }],
+          "first",
+        );
+        const pivots = yield* PivotService.PivotService;
+        yield* pivots.recordUserAnswer({
+          decisionId: declined.decisionId,
+          answer: "Not yet.",
+          approved: false,
+        });
+        assert.strictEqual(lastMessage(fake, api!.threadId)!.mode, "launch");
+
+        const { decisionId } = yield* proposeBatch(pivot, [
+          { lead: api!.threadId, members: [ui!.threadId] },
+        ]);
+        yield* pivots.recordUserAnswer({ decisionId, answer: "Ship it.", approved: true });
+
+        const order = lastMessage(fake, api!.threadId)!;
+        assert.strictEqual(order.senderThreadId, pivot);
+        assert.include(order.text, ui!.branch);
+        assert.include(order.text, "This task delivers a pull request.");
+        assertNoHardWraps(order.text);
+        assert.strictEqual(lastMessage(fake, ui!.threadId)!.mode, "launch");
+        const lines = expectOk(yield* call(pivot, "list_teammates", {})).teammates as Array<{
+          threadId: ThreadId;
+          shipOrdered: boolean;
+        }>;
+        assert.deepStrictEqual(
+          lines.map((line) => [line.threadId, line.shipOrdered]),
+          [
+            [api!.threadId, true],
+            [ui!.threadId, false],
+          ],
+        );
+        expectRefused(
+          yield* call(api!.threadId, "report_status", {
+            status: "done",
+            summary: "Merged the UI in",
+            evidence: { text: "Tests pass." },
+          }),
+          "invalid_request",
+          "linked PR",
+        );
+      }).pipe(Effect.provide(layer));
+    });
+
+    const openPr = (
+      fake: FakeV2,
+      lead: PivotMcpDispatchTeammateResult,
+      number: number,
+      detail: Partial<typeof greenPr> = {},
+    ) => {
+      const url = `https://github.com/o/r/pull/${number}`;
+      const thread = fake.threads.get(lead.threadId)!;
+      thread.shell = {
+        ...thread.shell,
+        pullRequests: [
+          {
+            ...link(),
+            number,
+            url,
+            snapshot: { ...link().snapshot, headBranch: lead.branch, baseBranch: "main" },
+          },
+        ],
+      } as typeof thread.shell;
+      fake.pullRequests.set(url, { ...greenPr, ...detail });
+      return url;
+    };
+
+    it.effect("merges the groups in order, and holds a later one while an earlier is red", () => {
+      const { fake, workspaceRoot, layer } = setup({ remote: true });
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const [api, docs] = yield* doneShips(workspaceRoot, pivot, [
+          "Add the API",
+          "Write the docs",
+        ]);
+        const { decisionId } = yield* proposeBatch(pivot, [
+          { lead: api!.threadId, members: [] },
+          { lead: docs!.threadId, members: [] },
+        ]);
+        const pivots = yield* PivotService.PivotService;
+        yield* pivots.recordUserAnswer({ decisionId, answer: "Ship it.", approved: true });
+        const apiPr = openPr(fake, api!, 21, {
+          checks: [{ name: "ci", status: "failure" as never, description: null, url: null }],
+        });
+        const docsPr = openPr(fake, docs!, 22);
+
+        expectRefused(
+          yield* call(pivot, "merge_teammate", { threadId: api!.threadId, decisionId }),
+          "invalid_request",
+          'Check "ci" is failure',
+        );
+        expectRefused(
+          yield* call(pivot, "merge_teammate", { threadId: docs!.threadId, decisionId }),
+          "invalid_request",
+          `${api!.branch} comes before it`,
+        );
+        assert.deepStrictEqual(fake.merges, []);
+
+        fake.pullRequests.set(apiPr, greenPr);
+        expectOk(yield* call(pivot, "merge_teammate", { threadId: api!.threadId, decisionId }));
+        const thread = fake.threads.get(api!.threadId)!;
+        thread.shell = {
+          ...thread.shell,
+          pullRequests: thread.shell.pullRequests!.map((pr) => ({
+            ...pr,
+            snapshot: { ...pr.snapshot!, state: "merged" as const },
+          })),
+        } as typeof thread.shell;
+        expectOk(yield* call(pivot, "merge_teammate", { threadId: docs!.threadId, decisionId }));
+        assert.deepStrictEqual(
+          fake.merges.map((merge) => merge.url),
+          [apiPr, docsPr],
+        );
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("merges a lead whose head moved after the approval, at its new head", () => {
+      const { fake, workspaceRoot, layer } = setup({ remote: true });
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const [api] = yield* doneShips(workspaceRoot, pivot, ["Add the API"]);
+        const { decisionId } = yield* proposeBatch(pivot, [{ lead: api!.threadId, members: [] }]);
+        const pivots = yield* PivotService.PivotService;
+        yield* pivots.recordUserAnswer({ decisionId, answer: "Ship it.", approved: true });
+        const url = openPr(fake, api!, 31, { headSha: "def456" });
+
+        const merged = expectOk(
+          yield* call(pivot, "merge_teammate", { threadId: api!.threadId, decisionId }),
+        );
+        assert.strictEqual(merged.mergedHead, "def456");
+        assert.deepStrictEqual(fake.merges, [{ url, expectedHeadSha: "def456" }]);
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("counts every member landed once its group's PR squash-merges", () => {
+      const { fake, workspaceRoot, layer } = setup({ remote: true });
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const [api, ui] = yield* doneShips(workspaceRoot, pivot, ["Add the API", "Add the UI"]);
+        const { decisionId } = yield* proposeBatch(pivot, [
+          { lead: api!.threadId, members: [ui!.threadId] },
+        ]);
+        const pivots = yield* PivotService.PivotService;
+        expectRefused(
+          yield* call(pivot, "teardown_teammate", { threadId: ui!.threadId }),
+          "invalid_request",
+          "has not landed",
+        );
+        yield* pivots.recordUserAnswer({ decisionId, answer: "Ship it.", approved: true });
+        sh(api!.worktreePath, `git merge -q --no-edit ${ui!.branch}`);
+        NodeFS.writeFileSync(NodePath.join(api!.worktreePath, "add-the-ui.txt"), "reworked\n");
+        sh(api!.worktreePath, "git add -A && git commit -q -m rework");
+        sh(
+          workspaceRoot,
+          `git merge -q --squash ${api!.branch} && git commit -q -m "Add the API (#41)"`,
+        );
+        sh(workspaceRoot, "git push -q origin main");
+        const url = openPr(fake, api!, 41, { state: "merged" as never });
+        const thread = fake.threads.get(api!.threadId)!;
+        thread.shell = {
+          ...thread.shell,
+          pullRequests: thread.shell.pullRequests!.map((pr) => ({
+            ...pr,
+            snapshot: { ...pr.snapshot!, state: "merged" as const },
+          })),
+        } as typeof thread.shell;
+        assert.include(url, "/41");
+
+        const torn = expectOk(yield* call(pivot, "teardown_teammate", { threadId: ui!.threadId }));
+        assert.include(torn.reason, '"Add the API"');
+        assert.isFalse(NodeFS.existsSync(ui!.worktreePath));
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect(
+      "counts a member landed after its lead landed and was torn down, with no remote",
+      () => {
+        const { workspaceRoot, layer } = setup();
+        return Effect.gen(function* () {
+          const pivot = yield* createPivot;
+          const [api, ui] = yield* doneShips(workspaceRoot, pivot, ["Add the API", "Add the UI"]);
+          const { decisionId } = yield* proposeBatch(pivot, [
+            { lead: api!.threadId, members: [ui!.threadId] },
+          ]);
+          const pivots = yield* PivotService.PivotService;
+          yield* pivots.recordUserAnswer({ decisionId, answer: "Land it.", approved: true });
+          sh(api!.worktreePath, `git merge -q --no-edit ${ui!.branch}`);
+          NodeFS.writeFileSync(NodePath.join(api!.worktreePath, "add-the-ui.txt"), "reworked\n");
+          sh(api!.worktreePath, "git add -A && git commit -q -m rework");
+          NodeFS.writeFileSync(NodePath.join(workspaceRoot, "other.txt"), "other\n");
+          sh(workspaceRoot, "git add -A && git commit -q -m other");
+          sh(api!.worktreePath, "git rebase -q main");
+          expectOk(yield* call(pivot, "land_teammate", { threadId: api!.threadId, decisionId }));
+          expectOk(yield* call(pivot, "teardown_teammate", { threadId: api!.threadId }));
+          assert.strictEqual(sh(workspaceRoot, `git branch --list ${api!.branch}`), "");
+
+          const torn = expectOk(
+            yield* call(pivot, "teardown_teammate", { threadId: ui!.threadId }),
+          );
+          assert.include(torn.reason, '"Add the API"');
+        }).pipe(Effect.provide(layer));
+      },
+    );
+
+    it.effect("lands an approved batch in order where the project has no remote", () => {
+      const { fake, workspaceRoot, layer } = setup();
+      return Effect.gen(function* () {
+        const pivot = yield* createPivot;
+        const [api, docs] = yield* doneShips(workspaceRoot, pivot, [
+          "Add the API",
+          "Write the docs",
+        ]);
+        const { decisionId } = yield* proposeBatch(pivot, [
+          { lead: api!.threadId, members: [] },
+          { lead: docs!.threadId, members: [] },
+        ]);
+        const pivots = yield* PivotService.PivotService;
+        yield* pivots.recordUserAnswer({ decisionId, answer: "Land them.", approved: true });
+        assert.include(
+          lastMessage(fake, api!.threadId)!.text,
+          "This task delivers a ready branch.",
+        );
+
+        expectRefused(
+          yield* call(pivot, "land_teammate", { threadId: docs!.threadId, decisionId }),
+          "invalid_request",
+          `${api!.branch} comes before it`,
+        );
+        const first = expectOk(
+          yield* call(pivot, "land_teammate", { threadId: api!.threadId, decisionId }),
+        );
+        assert.strictEqual(sh(workspaceRoot, "git rev-parse main"), first.landedHead);
+        sh(docs!.worktreePath, "git rebase -q main");
+        const second = expectOk(
+          yield* call(pivot, "land_teammate", { threadId: docs!.threadId, decisionId }),
+        );
+        assert.strictEqual(sh(workspaceRoot, "git rev-parse main"), second.landedHead);
+      }).pipe(Effect.provide(layer));
+    });
+  });
 
   it.effect("merges only on the user's approval, not on any answer", () => {
     const { fake, layer } = setup({ remote: true });
@@ -1338,7 +2196,7 @@ describe("delivery and teardown", () => {
     }).pipe(Effect.provide(layer));
   });
 
-  it.effect("a scout's worktree goes once its report is recorded", () => {
+  it.effect("a scout ends once its report is recorded", () => {
     const { layer } = setup();
     return Effect.gen(function* () {
       const pivot = yield* createPivot;
@@ -1354,39 +2212,23 @@ describe("delivery and teardown", () => {
     }).pipe(Effect.provide(layer));
   });
 
-  it.effect("keeps a scout's uncommitted files until the user says to discard them", () => {
+  it.effect("tears a scout down without touching the user's checkout", () => {
     const { fake, workspaceRoot, layer } = setup();
     return Effect.gen(function* () {
       const pivot = yield* createPivot;
       const scout = yield* dispatch(pivot, { title: "Investigate", kind: "scout" });
-      addWorktree(workspaceRoot, scout.worktreePath, scout.branch);
-      NodeFS.writeFileSync(NodePath.join(scout.worktreePath, "notes.md"), "draft\n");
+      NodeFS.writeFileSync(NodePath.join(workspaceRoot, "notes.md"), "draft\n");
       expectOk(yield* call(scout.threadId, "record_scout_report", { report: "Found it." }));
 
-      expectRefused(
-        yield* call(pivot, "teardown_teammate", { threadId: scout.threadId }),
-        "invalid_request",
-        "uncommitted",
+      expectOk(yield* call(pivot, "teardown_teammate", { threadId: scout.threadId }));
+      assert.strictEqual(
+        NodeFS.readFileSync(NodePath.join(workspaceRoot, "notes.md"), "utf8"),
+        "draft\n",
       );
       assert.deepStrictEqual(fake.removedWorktrees, []);
-      assert.strictEqual(fake.threads.get(scout.threadId)?.archived, false);
-
-      const pivots = yield* PivotService.PivotService;
-      const { decision } = yield* pivots.openDecision(pivot, {
-        teammateThreadId: scout.threadId,
-        question: "Discard the scout's notes?",
-      });
-      yield* approve(pivot, decision.decisionId, "Yes, discard them.");
-      const torn = expectOk(
-        yield* call(pivot, "teardown_teammate", {
-          threadId: scout.threadId,
-          discardDecisionId: decision.decisionId,
-        }),
-      );
-      assert.include(torn.reason, "Discarded on the user's word");
-      assert.deepStrictEqual(fake.removedWorktrees, [
-        { worktreePath: scout.worktreePath, force: true },
-      ]);
+      assert.deepStrictEqual(fake.stoppedCheckouts, []);
+      assert.strictEqual(sh(workspaceRoot, "git branch --show-current"), "main");
+      assert.isTrue(fake.threads.get(scout.threadId)!.archived);
     }).pipe(Effect.provide(layer));
   });
 });

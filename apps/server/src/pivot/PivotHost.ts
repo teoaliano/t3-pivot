@@ -318,9 +318,8 @@ export const make = Effect.gen(function* () {
     if (input.baseBranch !== undefined && !isBranchName(input.baseBranch)) {
       return yield* refuse(command, "The base branch is not a valid branch name.");
     }
-    // An inline task works in its Pivot's own workspace, which lives with that Pivot.
-    if (input.kind === "inline") {
-      return yield* refuse(command, "Inline tasks run on the Pivot's own environment.");
+    if (input.kind === "scout") {
+      return yield* refuse(command, "Scouts run on the Pivot's own environment.");
     }
     return yield* dispatchLocks.withLock(
       `${first.grantId}\u0000${input.dispatchId}`,
@@ -521,6 +520,7 @@ export const make = Effect.gen(function* () {
       // The host cannot tell whether the home merged the work, so git decides: an unmerged
       // branch stays, and discarded work keeps its branch.
       branchDisposal: input.force ? "keep" : "safe",
+      inMainCheckout: false,
     });
     yield* store.markTornDown(teammate.threadId);
   });

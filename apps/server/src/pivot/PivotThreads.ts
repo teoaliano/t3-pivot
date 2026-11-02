@@ -35,7 +35,6 @@ import * as Stream from "effect/Stream";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as ManagedProcesses from "../managedProcess/ManagedProcesses.ts";
 import * as ProjectService from "../project/ProjectService.ts";
-import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
@@ -149,24 +148,13 @@ export class PivotThreads extends Context.Service<
       readonly modelSelection: ModelSelection;
       readonly text: string;
     }) => Effect.Effect<TeammateLaunch, PivotThreadsError>;
-    /**
-     * Starts an inline task on the Pivot's workspace, which already exists: there is no
-     * worktree to prepare. The project's setup script runs first only when `runSetup`
-     * (the workspace was just created), and its outcome is returned.
-     */
-    readonly launchInline: (input: {
+    readonly createTeammateThread: (input: {
       readonly projectId: ProjectId;
-      readonly pivotThreadId: ThreadId;
       readonly title: string;
-      readonly branch: string;
-      readonly worktreePath: string;
+      readonly branch: string | null;
+      readonly worktreePath: string | null;
       readonly modelSelection: ModelSelection;
-      readonly text: string;
-      readonly runSetup: boolean;
-    }) => Effect.Effect<
-      TeammateLaunch & { readonly setup: SetupScriptOutcome | null },
-      PivotThreadsError
-    >;
+    }) => Effect.Effect<ThreadId, PivotThreadsError>;
     /** Waits until a run leaves preparation: started, or failed with V2's last error. */
     readonly awaitStart: (
       threadId: ThreadId,
@@ -187,6 +175,18 @@ export class PivotThreads extends Context.Service<
       readonly attachments?: ReadonlyArray<ChatImageAttachment> | undefined;
       readonly mode: "auto" | "queue";
     }) => Effect.Effect<void, PivotThreadsError>;
+    readonly request: (input: {
+      readonly threadId: ThreadId;
+      readonly senderThreadId: ThreadId;
+      readonly text: string;
+    }) => Effect.Effect<RunId | null, PivotThreadsError>;
+    readonly runReply: (
+      threadId: ThreadId,
+      runId: RunId,
+    ) => Effect.Effect<
+      { readonly type: "pending" } | { readonly type: "ended"; readonly text: string | null },
+      PivotThreadsError
+    >;
     /** Interrupts the running turn, holds the queue, and ends the provider session. */
     readonly stop: (threadId: ThreadId) => Effect.Effect<void, PivotThreadsError>;
     /**
@@ -231,6 +231,12 @@ export class PivotThreads extends Context.Service<
     ) => Effect.Effect<void, PivotThreadsError>;
     /** Stops every managed process the worktree runs and frees its port block. */
     readonly stopProcesses: (worktreePath: string) => Effect.Effect<void>;
+    readonly stopServers: (worktreePath: string) => Effect.Effect<void>;
+    readonly recreateWorktree: (input: {
+      readonly projectRoot: string;
+      readonly worktreePath: string;
+      readonly branch: string;
+    }) => Effect.Effect<void, PivotThreadsError>;
     /** Removes the worktree; without `force`, T3's clean-tree check refuses a dirty one. */
     readonly removeWorktree: (input: {
       readonly projectRoot: string;
@@ -248,7 +254,6 @@ export const make = Effect.gen(function* () {
   const processes = yield* ManagedProcesses.ManagedProcesses;
   const git = yield* GitWorkflow.GitWorkflowService;
   const setupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
-  const setupScripts = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   const agentScope = yield* AgentScope;
   const scopeOwner = yield* AgentScopeOwner;
 
@@ -368,14 +373,12 @@ export const make = Effect.gen(function* () {
       Effect.mapError(fail("create the Pivot thread")),
     ),
 
-    launchInline: Effect.fn("PivotThreads.launchInline")(
+    createTeammateThread: Effect.fn("PivotThreads.createTeammateThread")(
       function* (input) {
-        const threadId = ThreadId.make(`thread-inline-${yield* randomUuidV4}`);
-        // Created directly rather than launched: a launch prepares a workspace and runs the
-        // setup script every time, and the Pivot's workspace is already there.
+        const threadId = ThreadId.make(`thread-teammate-${yield* randomUuidV4}`);
         yield* threads.dispatch({
           type: "thread.create",
-          commandId: yield* commandId("create-inline"),
+          commandId: yield* commandId("create-teammate"),
           threadId,
           projectId: input.projectId,
           title: input.title,
@@ -387,61 +390,9 @@ export const make = Effect.gen(function* () {
           createdBy: "agent",
           creationSource: "mcp",
         });
-        let setup: SetupScriptOutcome | null = null;
-        if (input.runSetup) {
-          const project = Option.getOrUndefined(yield* projects.getById(input.projectId));
-          const started = yield* setupScripts
-            .runForThread({
-              threadId,
-              projectId: input.projectId,
-              ...(project === undefined
-                ? {}
-                : {
-                    projectCwd: project.workspaceRoot,
-                    project: {
-                      id: project.id,
-                      workspaceRoot: project.workspaceRoot,
-                      scripts: project.scripts,
-                    },
-                  }),
-              worktreePath: input.worktreePath,
-              observeCompletion: {},
-            })
-            .pipe(Effect.option);
-          setup =
-            Option.isNone(started) ||
-            started.value.status === "no-script" ||
-            started.value.status === "skipped-for-link"
-              ? { status: Option.isNone(started) ? "failed" : "none", detail: null }
-              : started.value.async || started.value.completion === undefined
-                ? { status: "running", detail: null }
-                : yield* started.value.completion.pipe(
-                    Effect.map((completion): SetupScriptOutcome =>
-                      completion.exitCode === 0
-                        ? { status: "succeeded", detail: null }
-                        : {
-                            status: "failed",
-                            detail: `exited with ${completion.exitCode ?? "no exit code"}`,
-                          },
-                    ),
-                  );
-        }
-        yield* threads.sendToThread({
-          projectId: input.projectId,
-          commandId: yield* commandId("inline-brief"),
-          threadId,
-          messageId: yield* messageId,
-          senderThreadId: input.pivotThreadId,
-          text: input.text,
-          attachments: [],
-          mode: "queue",
-          createdBy: "agent",
-          creationSource: "mcp",
-        });
-        const shell = yield* threads.getThreadShell(threadId);
-        return { threadId, runId: shell?.latestRunId ?? null, setup };
+        return threadId;
       },
-      Effect.mapError(fail("launch the inline task")),
+      Effect.mapError(fail("create the teammate thread")),
     ),
 
     launchTeammate: Effect.fn("PivotThreads.launchTeammate")(
@@ -533,6 +484,53 @@ export const make = Effect.gen(function* () {
           creationSource: "mcp",
         });
       }).pipe(Effect.mapError(fail("send", threadId))),
+
+    request: Effect.fn("PivotThreads.request")(
+      function* ({ threadId, senderThreadId, text }) {
+        const shell = yield* threads.getThreadShell(threadId);
+        if (shell === null) {
+          return yield* new PivotThreadsError({
+            operation: "request: the thread is gone",
+            threadId,
+          });
+        }
+        const sent = yield* threads.sendToThread({
+          projectId: shell.projectId,
+          commandId: yield* commandId("request"),
+          threadId,
+          messageId: yield* messageId,
+          senderThreadId,
+          text,
+          attachments: [],
+          mode: "queue",
+          createdBy: "agent",
+          creationSource: "mcp",
+        });
+        return sent.run?.id ?? null;
+      },
+      (effect, { threadId }) => effect.pipe(Effect.mapError(fail("send the request", threadId))),
+    ),
+
+    runReply: Effect.fn("PivotThreads.runReply")((threadId, runId) =>
+      threads.getThreadRecords(threadId, ["runs", "messages"], { runIds: [runId] }).pipe(
+        Effect.map((records) => {
+          const run = records.runs.find((candidate) => candidate.id === runId);
+          if (run !== undefined && !ThreadManagement.isTerminalRunStatus(run.status)) {
+            return { type: "pending" as const };
+          }
+          const reply = records.messages
+            .filter(
+              (message) =>
+                message.runId === runId &&
+                message.role === "assistant" &&
+                message.text.trim().length > 0,
+            )
+            .at(-1);
+          return { type: "ended" as const, text: reply?.text.trim() ?? null };
+        }),
+        Effect.mapError(fail("read the reply", threadId)),
+      ),
+    ),
 
     stop: (threadId) =>
       Effect.gen(function* () {
@@ -654,6 +652,23 @@ export const make = Effect.gen(function* () {
             stopWorktreeProcesses(procHost, { worktreePath, owner: scopeOwner, self: process.pid }),
           ),
         ),
+    ),
+
+    stopServers: Effect.fn("PivotThreads.stopServers")((worktreePath) =>
+      processes.stopAllForCheckout(worktreePath),
+    ),
+
+    recreateWorktree: Effect.fn("PivotThreads.recreateWorktree")(
+      ({ projectRoot, worktreePath, branch }) =>
+        git
+          .pruneWorktrees({ cwd: projectRoot })
+          .pipe(
+            Effect.andThen(
+              git.createWorktree({ cwd: projectRoot, refName: branch, path: worktreePath }),
+            ),
+            Effect.asVoid,
+            Effect.mapError(fail("recreate the worktree")),
+          ),
     ),
 
     removeWorktree: Effect.fn("PivotThreads.removeWorktree")(
