@@ -41,6 +41,7 @@ export function useManagedProcessAutoOpen(input: {
   const seenStarting = useRef({ checkoutPath: input.checkoutPath, scripts: NO_SEEN });
   const { checkoutPath, scripts, threadRef } = input;
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- opens a preview in the host when a managed process starts serving
   useEffect(() => {
     const seen = seenStarting.current;
     const step = autoOpenStep({

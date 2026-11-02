@@ -12,12 +12,8 @@ import { useComposerDraftStore } from "../../composerDraftStore";
 import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
-} from "../../logicalProject";
-import {
-  applyProviderInstanceSettings,
-  deriveProviderInstanceEntries,
-  sortProviderInstanceEntries,
-} from "../../providerInstances";
+} from "@t3tools/client-runtime/state/project-grouping";
+import { providerInstanceEntriesFor } from "../../providerInstances";
 import { useProject, useProjects, waitForThreadShell } from "../../state/entities";
 import { usePivotState } from "../../state/pivot";
 import { useEnvironmentQuery } from "../../state/query";
@@ -111,15 +107,14 @@ function NewPivotCreation(props: { target: NewPivotTarget; onDone: () => void })
   const modelSelection = pivotDefaultModel(
     settings,
     project,
-    sortProviderInstanceEntries(
-      applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings, projectId),
-    ),
+    providerInstanceEntriesFor(providers, settings, projectId),
   );
   const createPivot = useAtomCommand(serverEnvironment.createPivot, { reportFailure: false });
   // Runs once per request, including under StrictMode's double effects, and
   // only once the project's Pivots have loaded so a replacement is never missed.
   const started = useRef(false);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- drives the one-shot create-Pivot flow (dialogs, navigation) once the project's Pivots have loaded
   useEffect(() => {
     if (started.current || pivotState === null) return;
     started.current = true;

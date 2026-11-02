@@ -2,7 +2,7 @@
 import * as NodeCrypto from "node:crypto";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { authScopeResponse, AuthStandardClientScopes } from "@t3tools/contracts";
+import { authScopeResponse, AuthStandardClientScopes, mcpClientScopes } from "@t3tools/contracts";
 import {
   computeDpopAccessTokenHash,
   computeDpopJwkThumbprint,
@@ -377,6 +377,35 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
     }).pipe(Effect.provide(layerEnvironmentAuth())),
   );
 
+  it.effect(
+    "preserves a rejected MCP pairing code for exactly one concurrent lower-access retry",
+    () =>
+      Effect.gen(function* () {
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const pairing = yield* serverAuth.issuePairingCredential({
+          scopes: ["orchestration:read"],
+        });
+
+        const rejected = yield* Effect.flip(
+          serverAuth.consumeMcpApprovalCode(pairing.credential, "full-access"),
+        );
+        expect(rejected).toMatchObject({
+          _tag: "ServerAuthMcpApprovalCodeError",
+          reason: "insufficient_scope",
+        });
+
+        const retry = Effect.result(
+          serverAuth.consumeMcpApprovalCode(pairing.credential, "read-only"),
+        );
+        const results = yield* Effect.all([retry, retry], { concurrency: "unbounded" });
+
+        expect(results.filter((result) => result._tag === "Success")).toHaveLength(1);
+        expect(results.filter((result) => result._tag === "Failure")).toMatchObject([
+          { failure: { _tag: "ServerAuthMcpApprovalCodeError", reason: "unknown_or_used" } },
+        ]);
+      }).pipe(Effect.provide(layerEnvironmentAuth())),
+  );
+
   it.effect("narrows seeded desktop grants to the requested scopes", () =>
     Effect.gen(function* () {
       const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
@@ -417,7 +446,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
 
       // An MCP client's session carries no host scope at any access level.
       for (const access of ["read-only", "approval-required", "full-access"] as const) {
-        expect(EnvironmentAuth.mcpClientScopes(access)).not.toContain("pivot:host");
+        expect(mcpClientScopes(access)).not.toContain("pivot:host");
       }
     }).pipe(Effect.provide(layerEnvironmentAuth())),
   );

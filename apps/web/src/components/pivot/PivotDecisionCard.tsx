@@ -102,7 +102,7 @@ function MinimizedDecision({
   onExpand,
 }: PivotDecisionCardProps & { approval: boolean; onExpand: () => void }) {
   return (
-    <ComposerBanner.Root placement="floating" className="mb-2" data-pivot-decision="minimized">
+    <ComposerBanner.Root detached className="mb-2" data-pivot-decision="minimized">
       <ComposerBanner.Row render={<button type="button" />} title="Expand" onClick={onExpand}>
         <ComposerBanner.Icon className={approval ? "text-warning" : undefined}>
           {approval ? <ShieldIcon /> : <SplitIcon />}
@@ -160,7 +160,7 @@ function AnsweredDecision({ decision, asker }: PivotDecisionCardProps) {
     setDismissedState(true);
   };
   return (
-    <ComposerBanner.Root placement="floating" className="mb-2" data-pivot-decision="answered">
+    <ComposerBanner.Root detached className="mb-2" data-pivot-decision="answered">
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger
           render={<ComposerBanner.Row render={<button type="button" />} />}
@@ -271,6 +271,7 @@ function QuestionDecision({
         : attachments.blockReason;
 
   // Number keys pick an option while focus is outside editable fields, like provider questions.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- window keydown listener that picks an option by number key while the card is active
   useEffect(() => {
     if (!active || sending || options.length === 0) return;
     const handler = (event: KeyboardEvent) => {

@@ -70,6 +70,7 @@ export function PreviewEmptyState({
   // The script this tab started. The tab navigates to it once its port shows
   // up in discovery, which is when it serves a page.
   const pendingScriptId = useRef<string | null>(null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- opens the preview tab through the host callback once the started script's port is discovered
   useEffect(() => {
     if (pendingScriptId.current === null) return;
     const target = pendingStartTarget(pendingScriptId.current, rows);

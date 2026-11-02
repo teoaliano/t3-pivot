@@ -20,6 +20,7 @@ import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
@@ -37,6 +38,7 @@ import {
 } from "../cloud/config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import type * as Context from "effect/Context";
@@ -192,6 +194,8 @@ const makeTestRelay = Effect.fnUntraced(function* (
         return { schemaVersion: 2, snapshotSequence: 1, threads: [], archivedThreads: [] };
       }),
     listActiveSubagentThreadIds: unused,
+    countThreads: unused,
+    listActiveShellIndex: () => Effect.succeed([]),
     listOlderSettledThreads: unused,
     readShellSnapshot: unused,
     ensureLegacyTranscript: unused,
@@ -209,7 +213,6 @@ const makeTestRelay = Effect.fnUntraced(function* (
     getThreadTranscript: unused,
     getThreadSnapshotWindow: unused,
     getProjectThreadRecords: () => Effect.die("unused project record read"),
-    getProjectThread: unused,
     listProjectThreads: unused,
     sendToThread: unused,
     assertProviderInstanceEnabled: unused,
@@ -220,6 +223,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
     settleThread: unused,
     interruptThread: unused,
     stopWorkflow: () => Effect.die("unused stopWorkflow"),
+    forceStopThread: () => Effect.die("unused forceStopThread"),
     awaitBackgroundTasks: unused,
     stopDelegatedTasks: unused,
     getThreadEventSequence: unused,
@@ -275,6 +279,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
       delete: unused,
       getByWorkspaceRoot: unused,
       snapshot: Effect.succeed({ projects: [] } as never),
+      listPage: unused,
       getShell: unused,
       listShells: unused,
       getById: () =>
@@ -764,6 +769,9 @@ describe("AgentAwarenessRelay", () => {
         publications.map((publication) => publication.state?.phase),
         ["running", "completed"],
       );
-    }).pipe(Effect.scoped, Effect.provide(ProjectionStore.layerMemory)),
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(ProjectionStore.layer.pipe(Layer.provide(SqlitePersistence.layerMemory))),
+    ),
   );
 });

@@ -3,11 +3,10 @@ import { memo, use, useEffect, useEffectEvent, useRef, useState } from "react";
 import { BackgroundThreadContext } from "./backgroundThread";
 import { useStableCallback } from "~/hooks/useStableCallback";
 import { type PendingUserInput } from "../../session-logic";
-import {
-  derivePendingUserInputProgress,
-  type PendingUserInputDraftAnswer,
-} from "../../pendingUserInput";
+import type { PendingUserInputDraftAnswer } from "@t3tools/client-runtime/state/pending-user-input";
+import { derivePendingUserInputProgress } from "../../pendingUserInput";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
+import { cn } from "~/lib/utils";
 import { ComposerBanner } from "./ComposerBanner";
 import { ComposerOptionRow } from "./ComposerOptionRow";
 import ChatMarkdown from "../ChatMarkdown";
@@ -113,6 +112,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     setOptimisticSingleSelect(null);
   }
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- clears the auto-advance timer when the question changes, input is disabled, or the panel unmounts
   useEffect(() => {
     const clearAutoAdvance = () => {
       if (autoAdvanceTimerRef.current !== null) {
@@ -144,6 +144,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   const selectOptionFromShortcut = useEffectEvent(handleOptionSelection);
   const backgroundThread = use(BackgroundThreadContext);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes a document keydown listener for digit shortcuts while a question is answerable
   useEffect(() => {
     if (!activeQuestion || responseDisabled || isCollapsed || backgroundThread) return;
     const handler = (event: globalThis.KeyboardEvent) => {
@@ -191,7 +192,11 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         className="px-4 pt-1.5"
       >
         <ComposerBanner.Content>
-          <span className="shrink-0 text-muted-foreground">{activeQuestion.header}</span>
+          <span
+            className={cn("min-w-0 truncate text-muted-foreground", isCollapsed && "max-w-1/2")}
+          >
+            {activeQuestion.header}
+          </span>
           {isCollapsed ? (
             <>
               <ComposerBanner.Separator />
