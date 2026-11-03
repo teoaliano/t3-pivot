@@ -119,7 +119,6 @@ export function startThreadNotifications(
   };
 
   // Plays the sound, then shows a toast while focused elsewhere, or a desktop notification.
-  // Completions fire from a timer, so read settings, focus and route when presenting.
   const emit = (
     environmentId: EnvironmentId,
     notice: {
@@ -378,7 +377,6 @@ export function startThreadNotifications(
           observeThreads(environmentId, entry, threads);
           return;
         }
-        entry.gate.cancelPending();
         entry.reconnecting = true;
       },
       { immediate: true },
