@@ -18,7 +18,6 @@ import {
   PivotMcpPromoteScoutInput,
   PivotMcpRecordScoutReportInput,
   PivotMcpRecordScoutReportResult,
-  PivotMcpReadHandoffInput,
   PivotMcpReadHandoffResult,
   PivotMcpRecordVerdictInput,
   PivotMcpRecordVerdictResult,
@@ -118,7 +117,7 @@ const ListTeammatesTool = Tool.make("list_teammates", {
 const ReadHandoffTool = Tool.make("read_handoff", {
   ...pivotTool,
   description: `${PIVOT_ONLY} The handoff the retired Pivot you took over from wrote as it retired, and its thread, for when your first wake fell out of your context. Null handoff when it wrote none.`,
-  parameters: PivotMcpReadHandoffInput,
+  // No `parameters`: an explicit empty Schema.Struct advertises no object root, so MCP refuses it.
   success: PivotMcpReadHandoffResult,
 })
   .annotate(Tool.Title, "Read the handoff")

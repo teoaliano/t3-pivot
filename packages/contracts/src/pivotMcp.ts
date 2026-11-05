@@ -151,9 +151,6 @@ export const PivotMcpListTeammatesResult = Schema.Struct({
 });
 export type PivotMcpListTeammatesResult = typeof PivotMcpListTeammatesResult.Type;
 
-export const PivotMcpReadHandoffInput = Schema.Struct({});
-export type PivotMcpReadHandoffInput = typeof PivotMcpReadHandoffInput.Type;
-
 export const PivotMcpReadHandoffResult = Schema.Struct({
   predecessorThreadId: Schema.NullOr(ThreadId),
   handoff: Schema.NullOr(Schema.String),

@@ -36,7 +36,6 @@ import {
   type PivotMcpPromoteScoutInput,
   type PivotMcpRecordScoutReportInput,
   type PivotMcpRecordScoutReportResult,
-  type PivotMcpReadHandoffInput,
   type PivotMcpReadHandoffResult,
   type PivotMcpRecordVerdictInput,
   type PivotMcpRecordVerdictResult,
@@ -195,10 +194,7 @@ export class PivotService extends Context.Service<
       caller: ThreadId,
       input: PivotMcpListTeammatesInput,
     ) => Result<PivotMcpListTeammatesResult>;
-    readonly readHandoff: (
-      caller: ThreadId,
-      input: PivotMcpReadHandoffInput,
-    ) => Result<PivotMcpReadHandoffResult>;
+    readonly readHandoff: (caller: ThreadId) => Result<PivotMcpReadHandoffResult>;
     readonly teammateHistory: (
       caller: ThreadId,
       input: PivotMcpTeammateHistoryInput,
