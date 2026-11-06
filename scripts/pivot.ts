@@ -14,6 +14,7 @@
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Config from "effect/Config";
 import * as Console from "effect/Console";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -319,7 +320,8 @@ const resetDedicatedClone = Effect.fn("pivot.resetDedicatedClone")(function* (
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const clone = path.join(process.env.HOME ?? "", DEDICATED_CLONE);
+  const home = yield* Config.String("HOME").pipe(Config.withDefault(""));
+  const clone = path.join(home, DEDICATED_CLONE);
   const here = yield* fileSystem.realPath(process.cwd());
   const expected = yield* Effect.option(fileSystem.realPath(clone));
   if (!Option.contains(expected, here)) {
@@ -490,14 +492,21 @@ interface AppStoreConnectKey {
   readonly keyPath: string;
 }
 
+const trimmedEnv = (name: string) =>
+  Config.String(name).pipe(
+    Config.withDefault(""),
+    Config.map((value) => value.trim()),
+  );
+
 // TestFlight uploads and notarization use an App Store Connect API key. Its .p8 sits
 // where Apple's tools look for it; its ids come from the environment. None when not
 // set up.
 const appStoreConnectKey = Effect.fn("pivot.appStoreConnectKey")(function* (action: string) {
-  const keyId = process.env.T3PIVOT_ASC_KEY_ID?.trim();
-  const issuerId = process.env.T3PIVOT_ASC_ISSUER_ID?.trim();
+  const keyId = yield* trimmedEnv("T3PIVOT_ASC_KEY_ID");
+  const issuerId = yield* trimmedEnv("T3PIVOT_ASC_ISSUER_ID");
   if (!keyId || !issuerId) return Option.none<AppStoreConnectKey>();
-  const keyPath = `${process.env.HOME}/.appstoreconnect/private_keys/AuthKey_${keyId}.p8`;
+  const home = yield* Config.String("HOME").pipe(Config.withDefault(""));
+  const keyPath = `${home}/.appstoreconnect/private_keys/AuthKey_${keyId}.p8`;
   if (!(yield* (yield* FileSystem.FileSystem).exists(keyPath))) {
     return yield* new PivotRefusedError({
       action,
@@ -734,16 +743,19 @@ export const launchdPath = (shellPath: string, nodeDirectory: string) => {
 const nightlyInstall = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const home = process.env.HOME ?? "";
+  const home = yield* Config.String("HOME").pipe(Config.withDefault(""));
+  const launchdSearchPath = yield* Config.String("PATH").pipe(Config.withDefault(""));
+  const keyId = yield* Config.option(Config.String("T3PIVOT_ASC_KEY_ID"));
+  const issuerId = yield* Config.option(Config.String("T3PIVOT_ASC_ISSUER_ID"));
   const plistPath = `${home}/Library/LaunchAgents/${NIGHTLY_LABEL}.plist`;
   const logPath = `${home}/Library/Logs/t3-pivot-nightly.log`;
   const environment: Record<string, string | undefined> = {
-    PATH: launchdPath(process.env.PATH ?? "", path.dirname(process.execPath)),
+    PATH: launchdPath(launchdSearchPath, path.dirname(process.execPath)),
     // launchd sets no locale, and CocoaPods fails without a UTF-8 one.
     LANG: "en_US.UTF-8",
     LC_ALL: "en_US.UTF-8",
-    T3PIVOT_ASC_KEY_ID: process.env.T3PIVOT_ASC_KEY_ID,
-    T3PIVOT_ASC_ISSUER_ID: process.env.T3PIVOT_ASC_ISSUER_ID,
+    T3PIVOT_ASC_KEY_ID: Option.getOrUndefined(keyId),
+    T3PIVOT_ASC_ISSUER_ID: Option.getOrUndefined(issuerId),
   };
   const command = [
     "node scripts/pivot.ts nightly",

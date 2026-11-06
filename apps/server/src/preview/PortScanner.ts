@@ -737,7 +737,8 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
   // Only configured URLs are requested. Owned listeners are listed as plain HTTP without a
   // request: owning a process says nothing about its protocol, and HTTP or TLS bytes break
   // binary ones such as Unity's test runner or Steam's IPC.
-  const probeWebServers = Effect.fn("PortDiscovery.probeWebServers")(function* (
+  // Idle polls omit this span; requested scans and uncached probes retain their own spans.
+  const probeWebServers = Effect.fnUntraced(function* (
     servers: ReadonlyArray<DiscoveredLocalServer>,
     configuredUrls: ReadonlyArray<string>,
   ) {
@@ -843,9 +844,8 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
    * Every loopback listener with its owner, or null when the platform probe failed. Agent
    * attribution reads each listener's environment, so callers that only need pids skip it.
    */
-  const listProcessListeners = Effect.fn("PortDiscovery.listProcessListeners")(function* (
-    agentsPossible: boolean,
-  ) {
+  // Routine polling helpers share operation/probe spans instead of tracing every tick.
+  const listProcessListeners = Effect.fnUntraced(function* (agentsPossible: boolean) {
     const state = yield* Ref.get(stateRef);
     const terminalOwners = new Map<number, ServerOwner>();
     for (const registration of state.terminalProcesses.values()) {
@@ -904,9 +904,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
     return yield* scanProcListeners(resolveOwners);
   });
 
-  const scanUnlocked = Effect.fn("PortDiscovery.scanUnlocked")(function* (
-    configuredUrls: ReadonlyArray<string>,
-  ) {
+  const scanUnlocked = Effect.fnUntraced(function* (configuredUrls: ReadonlyArray<string>) {
     if (!listenerDiscovery) return yield* probeWebServers([], configuredUrls);
     // Nothing to attribute or probe, so skip the listener query.
     const { terminalProcesses, managedPorts } = yield* Ref.get(stateRef);
@@ -957,19 +955,18 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
     },
   );
 
-  const scanSnapshot = Effect.fn("PortDiscovery.scanSnapshot")(
-    (configuredUrls: ReadonlyArray<string>) =>
-      scanSemaphore.withPermits(1)(scanUnlocked(configuredUrls)),
-  );
+  const scanSnapshot = (configuredUrls: ReadonlyArray<string>) =>
+    scanSemaphore.withPermits(1)(scanUnlocked(configuredUrls));
 
   const scanOnce: PortDiscovery["Service"]["scan"] = (configuredUrls = []) => {
     const normalized = normalizeConfiguredUrls(configuredUrls);
     return scanSnapshot(normalized).pipe(
       Effect.map((snapshot) => projectWebProbeSnapshot(snapshot, normalized)),
+      Effect.withSpan("PortDiscovery.scan"),
     );
   };
 
-  const pollTick = Effect.fn("PortDiscovery.pollTick")(
+  const pollTick = Effect.fnUntraced(
     function* () {
       const configuredUrls = [
         ...new Set(

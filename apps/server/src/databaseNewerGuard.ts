@@ -25,28 +25,36 @@ export class ServerDatabaseNewerError extends Schema.TaggedError<ServerDatabaseN
   }
 }
 
+class DatabaseLedgerReadError extends Schema.TaggedError<DatabaseLedgerReadError>()(
+  "DatabaseLedgerReadError",
+  { cause: Schema.Defect() },
+) {}
+
 const KNOWN_THROUGH = Math.max(...migrationManifest.map(([id]) => id));
 
 /** The first recorded migration past the newest one this build ships, if any. */
 export const readNewerMigration = (dbPath: string, knownThrough = KNOWN_THROUGH) =>
-  Effect.try(() => {
-    const database = new NodeSqlite.DatabaseSync(dbPath);
-    try {
-      const ledger = database
-        .prepare(
-          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'",
-        )
-        .get();
-      if (ledger === undefined) return undefined;
-      const row = database
-        .prepare(
-          "SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id > ? ORDER BY migration_id LIMIT 1",
-        )
-        .get(knownThrough) as { migration_id: number; name: string } | undefined;
-      return row === undefined ? undefined : `${row.migration_id}_${row.name}`;
-    } finally {
-      database.close();
-    }
+  Effect.try({
+    try: () => {
+      const database = new NodeSqlite.DatabaseSync(dbPath);
+      try {
+        const ledger = database
+          .prepare(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'",
+          )
+          .get();
+        if (ledger === undefined) return undefined;
+        const row = database
+          .prepare(
+            "SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id > ? ORDER BY migration_id LIMIT 1",
+          )
+          .get(knownThrough) as { migration_id: number; name: string } | undefined;
+        return row === undefined ? undefined : `${row.migration_id}_${row.name}`;
+      } finally {
+        database.close();
+      }
+    },
+    catch: (cause) => new DatabaseLedgerReadError({ cause }),
   });
 
 /**

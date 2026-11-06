@@ -5,6 +5,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import {
+  type AtomCommandResult,
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
@@ -12,14 +13,14 @@ import { resolveProjectScripts } from "@t3tools/shared/projectScripts";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import * as Schema from "effect/Schema";
 import { useCallback, useMemo } from "react";
-import { Alert, Platform, ScrollView, View } from "react-native";
+import { Alert, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AndroidSheetHeader } from "../../components/ui/AndroidScreenHeader";
 import { AppText as Text } from "../../components/ui/AppText";
 import { IconButton } from "../../components/ui/IconButton";
 import { NavigationRow } from "../../components/ui/NavigationRow";
 import { ScreenContent } from "../../components/ui/ScreenContent";
+import { SheetHeader } from "../../components/ui/SheetHeader";
 import { useEnvironmentServerConfig, useProject, useThreadShell } from "../../state/entities";
 import { managedProcessEnvironment } from "../../state/managedProcesses";
 import { useEnvironmentQuery } from "../../state/query";
@@ -32,6 +33,50 @@ type DevServersSheetProps = StaticScreenProps<{
 }>;
 
 const isPortOccupied = Schema.is(ManagedProcessPortOccupiedError);
+
+type StartCommand = (value: {
+  readonly environmentId: EnvironmentId;
+  readonly input: {
+    readonly threadId: ThreadId;
+    readonly scriptId: string;
+    readonly reallocate?: boolean;
+  };
+}) => Promise<AtomCommandResult<unknown, unknown>>;
+
+async function startDevServer(input: {
+  readonly start: StartCommand;
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly scriptId: string;
+  readonly reallocate?: boolean;
+}): Promise<void> {
+  const { start, environmentId, threadId, scriptId, reallocate } = input;
+  const result = await start({
+    environmentId,
+    input: { threadId, scriptId, ...(reallocate ? { reallocate } : {}) },
+  });
+  if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
+  const error = squashAtomCommandFailure(result);
+  if (isPortOccupied(error)) {
+    const occupant = error.occupantProcessName ?? error.occupantCommand ?? "Another process";
+    Alert.alert(
+      `Port ${error.port} is taken`,
+      `${occupant} holds this checkout's port. It was left running.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Use a new port",
+          onPress: () => void startDevServer({ ...input, reallocate: true }),
+        },
+      ],
+    );
+    return;
+  }
+  Alert.alert(
+    "Could not start the dev server",
+    error instanceof Error ? error.message : String(error),
+  );
+}
 
 /** Start, stop and pin the dev servers of a thread's checkout. Viewing holds no claim. */
 export function DevServersSheet(props: DevServersSheetProps) {
@@ -65,30 +110,7 @@ export function DevServersSheet(props: DevServersSheetProps) {
   );
 
   const startScript = useCallback(
-    async function startDevServer(scriptId: string, reallocate = false): Promise<void> {
-      const result = await start({
-        environmentId,
-        input: { threadId, scriptId, ...(reallocate ? { reallocate } : {}) },
-      });
-      if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
-      const error = squashAtomCommandFailure(result);
-      if (isPortOccupied(error)) {
-        const occupant = error.occupantProcessName ?? error.occupantCommand ?? "Another process";
-        Alert.alert(
-          `Port ${error.port} is taken`,
-          `${occupant} holds this checkout's port. It was left running.`,
-          [
-            { text: "Cancel", style: "cancel" },
-            { text: "Use a new port", onPress: () => void startDevServer(scriptId, true) },
-          ],
-        );
-        return;
-      }
-      Alert.alert(
-        "Could not start the dev server",
-        error instanceof Error ? error.message : String(error),
-      );
-    },
+    (scriptId: string) => startDevServer({ start, environmentId, threadId, scriptId }),
     [environmentId, start, threadId],
   );
 
@@ -141,13 +163,7 @@ export function DevServersSheet(props: DevServersSheetProps) {
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
-      {Platform.OS === "android" ? (
-        <AndroidSheetHeader title="Dev servers" onBack={() => navigation.goBack()} />
-      ) : (
-        <View className="items-center px-5 pb-2 pt-6">
-          <Text className="text-lg font-t3-bold">Dev servers</Text>
-        </View>
-      )}
+      <SheetHeader title="Dev servers" onClose={() => navigation.goBack()} />
       <ScreenContent>
         <ScrollView
           contentContainerClassName="gap-3 p-4"

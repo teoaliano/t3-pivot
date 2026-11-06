@@ -12,12 +12,15 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
 export class RestartCarryOn extends Context.Reference<{
+  /** Every thread that carries on, so shutdown reads only these besides the settings' threads. */
+  readonly threadIds: Effect.Effect<ReadonlyArray<ThreadId>>;
   /** Whether the thread resumes an interrupted run after a restart regardless of settings. */
   readonly carriesOn: (threadId: ThreadId) => Effect.Effect<boolean>;
   /** Startup recovery scheduled the thread's interrupted run to resume. */
   readonly resuming: (threadId: ThreadId) => Effect.Effect<void>;
 }>("t3/orchestration-v2/RestartCarryOn", {
   defaultValue: () => ({
+    threadIds: Effect.succeed([]),
     carriesOn: () => Effect.succeed(false),
     resuming: () => Effect.void,
   }),

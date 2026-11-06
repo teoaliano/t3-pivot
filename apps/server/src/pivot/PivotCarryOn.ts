@@ -19,6 +19,15 @@ export const layer = Layer.effect(
     const store = yield* PivotStore.PivotStore;
     const hostStore = yield* PivotHostStore.PivotHostStore;
     return {
+      threadIds: Effect.gen(function* () {
+        const pivots = yield* store.listActivePivots;
+        const teammates = yield* store.listTeammates({ includeTornDown: false });
+        return [
+          ...pivots.map((pivot) => pivot.threadId),
+          ...teammates.map((teammate) => teammate.threadId),
+          ...(yield* hostStore.liveThreadIds),
+        ];
+      }).pipe(Effect.orElseSucceed(() => [])),
       carriesOn: Effect.fn("PivotCarryOn.carriesOn")(
         function* (threadId) {
           const pivot = yield* store.getPivot(threadId);

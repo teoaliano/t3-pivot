@@ -31,6 +31,7 @@ import {
 } from "@t3tools/contracts";
 import { projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import * as Clock from "effect/Clock";
+import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -921,8 +922,10 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
     const path = yield* Path.Path;
-    const baseEnv = process.env.T3CODE_MANAGED_PORT_BASE;
-    const rangeStart = baseEnv === undefined ? Number.NaN : Number.parseInt(baseEnv, 10);
+    const rangeStart = yield* Config.option(Config.Int("T3CODE_MANAGED_PORT_BASE")).pipe(
+      Effect.map(Option.getOrElse(() => Number.NaN)),
+      Effect.orElseSucceed(() => Number.NaN),
+    );
     const { service, reconcileRegistry } = yield* make({
       registryPath: path.join(config.baseDir, REGISTRY_FILE_NAME),
       ...(Number.isInteger(rangeStart) && rangeStart > 0
