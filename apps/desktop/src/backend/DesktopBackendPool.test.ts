@@ -56,6 +56,7 @@ function makeElectronAppLayer(quit: Effect.Effect<void>) {
     metadata: Effect.die("unexpected metadata read"),
     name: Effect.succeed("T3 Pivot"),
     systemLocale: Effect.succeed("en-US"),
+    preferredSystemLanguages: Effect.succeed(["en-US"]),
     whenReady: Effect.void,
     quit,
     exit: () => Effect.void,

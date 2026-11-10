@@ -1831,7 +1831,10 @@ effectIt.effect("fails the run instead of replacing a native thread another clie
       {
         type: "error",
         title: "Provider turn failed to start",
-        failure: { class: "provider_error", message: detail },
+        failure: {
+          class: "provider_error",
+          message: `${detail}\nCouldn't start: the agent slice is over its memory limit (9.8 GB of 9.4 GB). Stop idle dev servers or teammates and retry.`,
+        },
       },
     ]);
   }),

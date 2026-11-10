@@ -279,6 +279,7 @@ query PullRequestActivity(
           createdAt
           lastEditedAt
           url
+          isMinimized
           author {
             login
             avatarUrl
@@ -300,6 +301,7 @@ query PullRequestActivity(
           submittedAt
           lastEditedAt
           url
+          isMinimized
           author {
             login
             avatarUrl
