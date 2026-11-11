@@ -136,6 +136,16 @@ describe("deriveTeammateStatus", () => {
         pendingBackgroundTasks: background("monitor"),
         report: report("done", "run-2", "shipped"),
       }),
+      "done",
+      "shipped",
+    ],
+    [
+      "monitor still running after a wake run",
+      input({
+        pendingBackgroundTasks: background("monitor"),
+        latestRunBackgroundWake: true,
+        report: report("done", "run-2", "shipped"),
+      }),
       "working",
       null,
     ],

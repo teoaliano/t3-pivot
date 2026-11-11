@@ -8,7 +8,10 @@ import type {
   TeammateRecord,
 } from "@t3tools/contracts";
 
-import { backgroundWorkHoldsCompletion } from "./orchestrationV2PendingBackgroundWork.ts";
+import {
+  backgroundWorkHoldsCompletion,
+  monitorHoldsWakeCompletion,
+} from "./orchestrationV2PendingBackgroundWork.ts";
 
 const TERMINAL: ReadonlySet<TeammateReportedStatus> = new Set(TEAMMATE_TERMINAL_REPORTED_STATUSES);
 
@@ -24,6 +27,7 @@ export interface TeammateStatusInput extends Pick<
   OrchestrationV2ThreadShell,
   | "status"
   | "latestRunId"
+  | "latestRunBackgroundWake"
   | "pendingRuntimeRequest"
   | "pendingBackgroundTasks"
   | "lastError"
@@ -60,8 +64,9 @@ export function deriveTeammateStatus(input: TeammateStatusInput): TeammateStatus
   const active =
     resume === "pending" ||
     ACTIVE_RUN.has(input.status) ||
-    // Dev servers and other commands left running do not count; subagents and monitors do.
+    // Dev servers, commands and monitors left running do not count unless the agent awaits them.
     backgroundWorkHoldsCompletion(input.pendingBackgroundTasks ?? []) ||
+    monitorHoldsWakeCompletion(input) ||
     // A teammate that has not run yet is about to: dispatch starts the first run.
     (input.latestRunId === null && resume !== "failed");
   if (active) {

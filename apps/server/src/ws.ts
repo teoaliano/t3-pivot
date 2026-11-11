@@ -2616,6 +2616,7 @@ const layerWsCoreRpc = (
               ? providerRegistry.refreshWorkspaceSnapshot({
                   instanceId: input.instanceId,
                   cwd: input.cwd,
+                  scanCwd: yield* projectService.workspaceScanDirectory(input.cwd),
                   fresh: input.fresh === true,
                 })
               : input.reloadSecrets === true
@@ -2748,7 +2749,7 @@ const layerWsCoreRpc = (
                 detail: "This provider does not bank reset credits.",
               });
             }
-            const outcome = yield* instance.consumeResetCredit().pipe(
+            const outcome = yield* instance.consumeResetCredit(input.creditId).pipe(
               Effect.mapError(
                 (error) =>
                   new ProviderSetupError({
