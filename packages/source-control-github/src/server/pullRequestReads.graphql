@@ -149,6 +149,7 @@ query PullRequestCore(
         nodes {
           name
           color
+          description
         }
       }
       commits(last: 1) {

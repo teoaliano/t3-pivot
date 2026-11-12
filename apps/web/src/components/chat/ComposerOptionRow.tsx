@@ -47,7 +47,11 @@ export function ComposerOptionRow(props: {
     >
       {/* The h-5 slots match the label's line box, so the indicator and shortcut stay on its first line. */}
       <span className="pointer-events-none flex h-5 shrink-0 items-center">
-        {multiSelect ? <CheckboxMark checked={selected} /> : <OptionRadio checked={selected} />}
+        {multiSelect ? (
+          <CheckboxMark checked={selected} variant="contrast" />
+        ) : (
+          <OptionRadio checked={selected} />
+        )}
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span
@@ -79,7 +83,7 @@ function OptionRadio({ checked }: { checked: boolean }) {
     <span
       aria-hidden
       className={cn(
-        "relative inline-flex size-4.5 shrink-0 items-center justify-center rounded-full border border-input bg-background not-dark:bg-clip-padding sm:size-4 dark:bg-input/32",
+        "relative inline-flex size-4.5 shrink-0 items-center justify-center rounded-full border border-foreground/55 bg-background not-dark:bg-clip-padding sm:size-4 dark:bg-input/32",
         checked ? "shadow-none" : "shadow-xs/5",
       )}
     >
