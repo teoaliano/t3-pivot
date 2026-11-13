@@ -1,5 +1,5 @@
-import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
+import { DESKTOP_UPDATE_IN_PROGRESS_TTL_MS } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -110,41 +110,57 @@ const runningConfig = {
   preflightFailure: Option.none(),
 } satisfies DesktopBackendStartConfig;
 
-interface PoolLayerOverrides {
-  readonly spawner?: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>;
-  readonly httpClient?: Layer.Layer<HttpClient.HttpClient>;
-  readonly resolvePrimary?: DesktopBackendConfiguration.DesktopBackendConfiguration["Service"]["resolvePrimary"];
-  readonly dialog?: Layer.Layer<ElectronDialog.ElectronDialog>;
-  readonly electronApp?: Layer.Layer<ElectronApp.ElectronApp>;
-}
-
 function layerPool(
   labelRef: Ref.Ref<string>,
-  backend?: Effect.Success<ReturnType<typeof makeFakeBackendProcess>>,
-  overrides: PoolLayerOverrides = {},
+  options: {
+    readonly config?: DesktopBackendStartConfig;
+    readonly fileSystem?: Partial<FileSystem.FileSystem>;
+    readonly spawner?: ChildProcessSpawner.ChildProcessSpawner["Service"];
+    readonly httpClient?: HttpClient.HttpClient;
+    readonly onReady?: Effect.Effect<void>;
+    readonly backend?: Effect.Success<ReturnType<typeof makeFakeBackendProcess>>;
+    readonly dialog?: Layer.Layer<ElectronDialog.ElectronDialog>;
+    readonly electronApp?: Layer.Layer<ElectronApp.ElectronApp>;
+  } = {},
 ): Layer.Layer<DesktopBackendPool.DesktopBackendPool> {
   return DesktopBackendPool.layer.pipe(
     Layer.provideMerge(
       Layer.mergeAll(
-        FileSystem.layerNoop({ exists: () => Effect.succeed(true) }),
+        DesktopEnvironment.layer({
+          dirname: "/repo/apps/desktop/src",
+          homeDirectory: "/test-home",
+          platform: "linux",
+          processArch: "x64",
+          appVersion: "1.2.3",
+          appPath: "/repo",
+          isPackaged: true,
+          resourcesPath: "/missing/resources",
+          runningUnderArm64Translation: false,
+        }).pipe(
+          Layer.provide(
+            Layer.mergeAll(Path.layer, DesktopConfig.layerTest({ T3CODE_HOME: "/test-home" })),
+          ),
+          Layer.orDie,
+        ),
+        FileSystem.layerNoop(options.fileSystem ?? { exists: () => Effect.succeed(true) }),
         Path.layer,
-        overrides.spawner ??
-          backend?.layer ??
+        options.backend?.layer ??
           Layer.succeed(
             ChildProcessSpawner.ChildProcessSpawner,
-            ChildProcessSpawner.make(() => Effect.die("unexpected child process spawn")),
+            options.spawner ??
+              ChildProcessSpawner.make(() => Effect.die("unexpected child process spawn")),
           ),
-        overrides.httpClient ??
-          Layer.succeed(
-            HttpClient.HttpClient,
+        Layer.succeed(
+          HttpClient.HttpClient,
+          options.httpClient ??
             HttpClient.make((request) =>
-              backend === undefined
+              options.backend === undefined
                 ? Effect.die("unexpected HTTP request")
                 : Effect.succeed(
                     HttpClientResponse.fromWeb(request, new Response(null, { status: 200 })),
                   ),
             ),
-          ),
+        ),
         Layer.succeed(DesktopObservability.DesktopBackendOutputLogFactory, {
           forInstance: () =>
             Effect.succeed({
@@ -168,31 +184,18 @@ function layerPool(
         }),
         DesktopBrowserHost.layer,
         Layer.succeed(DesktopBackendConfiguration.DesktopBackendConfiguration, {
-          resolvePrimary:
-            overrides.resolvePrimary ?? Effect.die("unexpected primary config resolve"),
+          resolvePrimary: options.config
+            ? Effect.succeed(options.config)
+            : Effect.die("unexpected primary config resolve"),
           resolvePrimaryLabel: Ref.get(labelRef),
           resolveWsl: () => Effect.die("unexpected WSL config resolve"),
           currentBootstrapToken: Effect.die("unexpected bootstrap token read"),
         } satisfies DesktopBackendConfiguration.DesktopBackendConfiguration["Service"]),
         DesktopAppSettings.layerTest(),
-        DesktopEnvironment.layer({
-          dirname: "/repo/apps/desktop/src",
-          homeDirectory: "/home/test",
-          platform: "linux",
-          processArch: "x64",
-          appVersion: "0.0.0",
-          appPath: "/repo",
-          isPackaged: true,
-          resourcesPath: "/missing/resources",
-          runningUnderArm64Translation: false,
-        }).pipe(
-          Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),
-          Layer.orDie,
-        ),
         DesktopState.layer,
         DesktopWslEnvironment.layerTest(),
-        overrides.dialog ?? ElectronDialog.layer,
-        overrides.electronApp ?? ElectronApp.layer,
+        options.dialog ?? ElectronDialog.layer,
+        options.electronApp ?? ElectronApp.layer,
         Layer.succeed(DesktopWindow.DesktopWindow, {
           createMain: Effect.die("unexpected window create"),
           ensureMain: Effect.die("unexpected window ensure"),
@@ -200,7 +203,7 @@ function layerPool(
           activate: Effect.die("unexpected window activate"),
           createMainIfBackendReady: Effect.die("unexpected window create"),
           showConnectingSplash: Effect.void,
-          handleBackendReady: () => Effect.void,
+          handleBackendReady: () => options.onReady ?? Effect.void,
           handleBackendNotReady: Effect.void,
           flushMainWindowBounds: Effect.void,
           prepareCaptureReveal: Effect.void,
@@ -215,155 +218,329 @@ function layerPool(
   );
 }
 
+const markerPath = "/test-home/runtime/desktop-update-in-progress";
+const runtimePath = "/test-home/userdata/server-runtime.json";
+
+const makeUpdateMarkerFixture = () =>
+  Effect.gen(function* () {
+    const allowReady = yield* Deferred.make<void>();
+    const runtimeChecked = yield* Deferred.make<void>();
+    const markerRemoved = yield* Deferred.make<void>();
+    const readyRuns = yield* Queue.unbounded<void>();
+    let nextPid = 123;
+    const files = new Map([[markerPath, JSON.stringify({ startedAt: 0, expiresAt: 60_000 })]]);
+    const removed: string[] = [];
+    const config: DesktopBackendStartConfig = {
+      executablePath: "/electron",
+      args: [],
+      entryPath: "/server/bin.mjs",
+      cwd: "/server",
+      env: {},
+      bootstrap: {
+        mode: "desktop",
+        noBrowser: true,
+        port: 3774,
+        t3Home: "/test-home",
+        host: "127.0.0.1",
+        desktopBootstrapToken: "token",
+        tailscaleServeEnabled: false,
+        tailscaleServePort: 443,
+      },
+      bootstrapDelivery: "fd3",
+      extendEnv: true,
+      httpBaseUrl: new URL("http://127.0.0.1:3774"),
+      captureOutput: false,
+      preflightFailure: Option.none(),
+    };
+    const layer = layerPool(Ref.makeUnsafe("Local"), {
+      config,
+      fileSystem: {
+        exists: (path) => Effect.succeed(files.has(path) || path === config.entryPath),
+        readFileString: (path) =>
+          (path === runtimePath ? Deferred.succeed(runtimeChecked, undefined) : Effect.void).pipe(
+            Effect.andThen(Effect.sync(() => files.get(path) ?? "")),
+          ),
+        remove: (path) =>
+          Effect.sync(() => {
+            removed.push(path);
+            files.delete(path);
+          }).pipe(
+            Effect.andThen(
+              path === markerPath ? Deferred.succeed(markerRemoved, undefined) : Effect.void,
+            ),
+            Effect.asVoid,
+          ),
+      },
+      spawner: ChildProcessSpawner.make(() =>
+        Effect.gen(function* () {
+          const exited = yield* Deferred.make<ChildProcessSpawner.ExitCode>();
+          const exit = Deferred.succeed(exited, ChildProcessSpawner.ExitCode(0)).pipe(
+            Effect.asVoid,
+          );
+          // Like the real spawner, closing the run's scope ends the process.
+          yield* Effect.addFinalizer(() => exit);
+          return ChildProcessSpawner.makeHandle({
+            pid: ChildProcessSpawner.ProcessId(nextPid++),
+            stdout: Stream.empty,
+            stderr: Stream.empty,
+            all: Stream.empty,
+            exitCode: Deferred.await(exited),
+            isRunning: Effect.succeed(true),
+            kill: () => exit,
+            stdin: Sink.drain,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+            unref: Effect.succeed(Effect.void),
+          });
+        }),
+      ),
+      httpClient: HttpClient.make((request) =>
+        Deferred.await(allowReady).pipe(
+          Effect.as(HttpClientResponse.fromWeb(request, new Response(null, { status: 200 }))),
+        ),
+      ),
+      onReady: Queue.offer(readyRuns, undefined).pipe(Effect.asVoid),
+    });
+    const publishRuntime = (pid: number) =>
+      files.set(
+        runtimePath,
+        JSON.stringify({
+          version: 1,
+          pid,
+          port: 3774,
+          origin: "http://127.0.0.1:3774",
+          startedAt: "2026-10-27T00:00:00.000Z",
+        }),
+      );
+    return {
+      layer,
+      files,
+      removed,
+      allowReady,
+      readyRuns,
+      runtimeChecked,
+      markerRemoved,
+      publishRuntime,
+    };
+  });
+
 describe("DesktopBackendPool", () => {
   it.effect("tells the user to update and quits when a newer build migrated the database", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const labelRef = yield* Ref.make("Local");
-        const shown = yield* Deferred.make<{ readonly title: string; readonly content: string }>();
-        const quit = yield* Deferred.make<void>();
-        const electronApp = yield* ElectronApp.ElectronApp.pipe(Effect.provide(ElectronApp.layer));
+    Effect.gen(function* () {
+      const labelRef = yield* Ref.make("Local");
+      const shown = yield* Deferred.make<{ readonly title: string; readonly content: string }>();
+      const quit = yield* Deferred.make<void>();
+      const electronApp = yield* ElectronApp.ElectronApp.pipe(Effect.provide(ElectronApp.layer));
 
+      yield* Effect.gen(function* () {
+        const pool = yield* DesktopBackendPool.DesktopBackendPool;
+        const primary = yield* pool.primary;
+
+        yield* primary.start;
+
+        const { title, content } = yield* Deferred.await(shown);
+        assert.match(title, / can't start$/);
+        assert.match(
+          content,
+          /^A newer version already upgraded this data\. Update .+, then reopen it\.$/,
+        );
+        yield* Deferred.await(quit);
+      }).pipe(
+        Effect.provide(
+          layerPool(labelRef, {
+            config: runningConfig,
+            spawner: ChildProcessSpawner.make(() =>
+              Effect.succeed(
+                ChildProcessSpawner.makeHandle({
+                  pid: ChildProcessSpawner.ProcessId(123),
+                  stdout: Stream.empty,
+                  stderr: Stream.empty,
+                  all: Stream.empty,
+                  exitCode: Effect.succeed(
+                    ChildProcessSpawner.ExitCode(DESKTOP_BACKEND_DATABASE_NEWER_EXIT_CODE),
+                  ),
+                  isRunning: Effect.succeed(false),
+                  kill: () => Effect.void,
+                  stdin: Sink.drain,
+                  getInputFd: () => Sink.drain,
+                  getOutputFd: () => Stream.empty,
+                  unref: Effect.succeed(Effect.void),
+                }),
+              ),
+            ),
+            httpClient: HttpClient.make(() => Effect.never),
+            dialog: Layer.succeed(ElectronDialog.ElectronDialog, {
+              pickFolder: () => Effect.die("unexpected folder picker"),
+              pickFiles: () => Effect.die("unexpected file picker"),
+              showMessageBox: () => Effect.die("unexpected message box"),
+              showErrorBox: (title, content) =>
+                Deferred.succeed(shown, { title, content }).pipe(Effect.asVoid),
+            }),
+            electronApp: Layer.succeed(ElectronApp.ElectronApp, {
+              ...electronApp,
+              quit: Deferred.succeed(quit, undefined).pipe(Effect.asVoid),
+            }),
+          }),
+        ),
+      );
+    }),
+  );
+
+  it.effect(
+    "keeps the update marker after HTTP readiness until the backend publishes its runtime",
+    () =>
+      Effect.gen(function* () {
+        const fixture = yield* makeUpdateMarkerFixture();
         yield* Effect.gen(function* () {
           const pool = yield* DesktopBackendPool.DesktopBackendPool;
           const primary = yield* pool.primary;
-
           yield* primary.start;
-
-          const { title, content } = yield* Deferred.await(shown);
-          assert.match(title, / can't start$/);
-          assert.match(
-            content,
-            /^A newer version already upgraded this data\. Update .+, then reopen it\.$/,
+          yield* Deferred.succeed(fixture.allowReady, undefined);
+          yield* Queue.take(fixture.readyRuns);
+          assert.isTrue(
+            fixture.files.has(markerPath),
+            "a launcher could neither wait nor adopt between readiness and publication",
           );
-          yield* Deferred.await(quit);
-        }).pipe(
-          Effect.provide(
-            layerPool(labelRef, undefined, {
-              spawner: Layer.succeed(
-                ChildProcessSpawner.ChildProcessSpawner,
-                ChildProcessSpawner.make(() =>
-                  Effect.succeed(
-                    ChildProcessSpawner.makeHandle({
-                      pid: ChildProcessSpawner.ProcessId(123),
-                      stdout: Stream.empty,
-                      stderr: Stream.empty,
-                      all: Stream.empty,
-                      exitCode: Effect.succeed(
-                        ChildProcessSpawner.ExitCode(DESKTOP_BACKEND_DATABASE_NEWER_EXIT_CODE),
-                      ),
-                      isRunning: Effect.succeed(false),
-                      kill: () => Effect.void,
-                      stdin: Sink.drain,
-                      getInputFd: () => Sink.drain,
-                      getOutputFd: () => Stream.empty,
-                      unref: Effect.succeed(Effect.void),
-                    }),
-                  ),
-                ),
-              ),
-              httpClient: Layer.succeed(
-                HttpClient.HttpClient,
-                HttpClient.make(() => Effect.never),
-              ),
-              resolvePrimary: Effect.succeed(runningConfig),
-              dialog: Layer.succeed(ElectronDialog.ElectronDialog, {
-                pickFolder: () => Effect.die("unexpected folder picker"),
-                pickFiles: () => Effect.die("unexpected file picker"),
-                showMessageBox: () => Effect.die("unexpected message box"),
-                showErrorBox: (title, content) =>
-                  Deferred.succeed(shown, { title, content }).pipe(Effect.asVoid),
-              }),
-              electronApp: Layer.succeed(ElectronApp.ElectronApp, {
-                ...electronApp,
-                quit: Deferred.succeed(quit, undefined).pipe(Effect.asVoid),
-              }),
-            }),
-          ),
-        );
+          yield* Deferred.await(fixture.runtimeChecked);
+          yield* TestClock.adjust(Duration.seconds(5));
+          assert.isTrue(fixture.files.has(markerPath));
+          fixture.publishRuntime(456);
+          yield* TestClock.adjust(Duration.seconds(1));
+          assert.isTrue(
+            fixture.files.has(markerPath),
+            "another process's runtime is not the replacement",
+          );
+          fixture.publishRuntime(123);
+          yield* TestClock.adjust(Duration.seconds(1));
+          yield* Deferred.await(fixture.markerRemoved);
+          assert.deepEqual(fixture.removed, [markerPath]);
+        }).pipe(Effect.provide(fixture.layer));
       }),
-    ),
+  );
+
+  it.effect("leaves a replacement update marker written while an earlier wait is pending", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeUpdateMarkerFixture();
+      yield* Effect.gen(function* () {
+        const pool = yield* DesktopBackendPool.DesktopBackendPool;
+        const primary = yield* pool.primary;
+        yield* primary.start;
+        yield* Deferred.succeed(fixture.allowReady, undefined);
+        yield* Queue.take(fixture.readyRuns);
+        yield* Deferred.await(fixture.runtimeChecked);
+        yield* TestClock.adjust(Duration.millis(DESKTOP_UPDATE_IN_PROGRESS_TTL_MS - 1_000));
+        const replacement = JSON.stringify({ startedAt: 59_000, expiresAt: 119_000 });
+        fixture.files.set(markerPath, replacement);
+        yield* TestClock.adjust(Duration.millis(DESKTOP_UPDATE_IN_PROGRESS_TTL_MS));
+        assert.equal(fixture.files.get(markerPath), replacement);
+        assert.deepEqual(fixture.removed, []);
+      }).pipe(Effect.provide(fixture.layer));
+    }),
+  );
+
+  it.effect("a later backend run's readiness supersedes the earlier run's marker wait", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeUpdateMarkerFixture();
+      yield* Effect.gen(function* () {
+        const pool = yield* DesktopBackendPool.DesktopBackendPool;
+        const primary = yield* pool.primary;
+        yield* primary.start;
+        yield* Deferred.succeed(fixture.allowReady, undefined);
+        yield* Queue.take(fixture.readyRuns);
+        yield* Deferred.await(fixture.runtimeChecked);
+        yield* TestClock.adjust(Duration.seconds(30));
+        yield* primary.stop();
+        yield* primary.start;
+        yield* Queue.take(fixture.readyRuns);
+        yield* TestClock.adjust(Duration.seconds(31));
+        assert.isTrue(
+          fixture.files.has(markerPath),
+          "the earlier run's wait must not end the later run's handoff",
+        );
+        assert.deepEqual(fixture.removed, []);
+        fixture.publishRuntime(124);
+        yield* TestClock.adjust(Duration.millis(100));
+        yield* Deferred.await(fixture.markerRemoved);
+        assert.deepEqual(fixture.removed, [markerPath]);
+      }).pipe(Effect.provide(fixture.layer));
+    }),
   );
 
   it.effect("unregister during pool quit does not interrupt sibling stops", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const backend = yield* makeFakeBackendProcess();
-        yield* Effect.gen(function* () {
-          const pool = yield* DesktopBackendPool.DesktopBackendPool;
-          const id = DesktopBackendPool.BackendInstanceId("wsl:Ubuntu");
-          const ready = yield* Deferred.make<void>();
-          const siblingStarted = yield* Deferred.make<void>();
-          const finishSibling = yield* Deferred.make<void>();
-          let siblingCompleted = false;
-          const instance = yield* pool.register({
-            id,
-            label: Effect.succeed("WSL (Ubuntu)"),
-            configResolve: Effect.succeed(runningConfig),
-            onReady: () => Deferred.succeed(ready, undefined).pipe(Effect.asVoid),
-          });
-          yield* instance.start;
-          yield* backend.started;
-          yield* Deferred.await(ready);
-          const quitFiber = yield* Effect.all(
-            [
-              instance.stop({ timeout: Duration.seconds(5) }),
-              Deferred.succeed(siblingStarted, undefined).pipe(
-                Effect.andThen(Deferred.await(finishSibling)),
-                Effect.andThen(
-                  Effect.sync(() => {
-                    siblingCompleted = true;
-                  }),
-                ),
-              ),
-            ],
-            { concurrency: "unbounded" },
-          ).pipe(Effect.forkChild);
-          yield* Deferred.await(siblingStarted);
-          assert.equal(yield* Queue.take(backend.signals), "SIGTERM");
-          const unregisterFiber = yield* pool.unregister(id).pipe(Effect.forkChild);
-          yield* TestClock.adjust(Duration.seconds(5));
-          assert.equal(yield* Queue.take(backend.signals), "SIGKILL");
-          assert.isUndefined(quitFiber.pollUnsafe());
-          assert.isUndefined(unregisterFiber.pollUnsafe());
-          assert.isTrue(yield* backend.isRunning);
-          yield* TestClock.adjust(backend.killWait);
-          yield* Fiber.join(unregisterFiber);
-          yield* Deferred.succeed(finishSibling, undefined);
-          yield* Fiber.join(quitFiber);
-
-          assert.isTrue(siblingCompleted);
-          assert.isFalse(yield* backend.isRunning);
-          assert.isTrue(Option.isNone((yield* instance.snapshot).activePid));
-          assert.isTrue(Option.isNone(yield* pool.get(id)));
-        }).pipe(Effect.provide(layerPool(Ref.makeUnsafe("Windows"), backend)));
-      }),
-    ),
-  );
-
-  it.effect("unregister stops the registered instance", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const id = DesktopBackendPool.BackendInstanceId("wsl:Ubuntu");
+    Effect.gen(function* () {
+      const backend = yield* makeFakeBackendProcess();
+      yield* Effect.gen(function* () {
         const pool = yield* DesktopBackendPool.DesktopBackendPool;
+        const id = DesktopBackendPool.BackendInstanceId("wsl:Ubuntu");
+        const ready = yield* Deferred.make<void>();
+        const siblingStarted = yield* Deferred.make<void>();
+        const finishSibling = yield* Deferred.make<void>();
+        let siblingCompleted = false;
         const instance = yield* pool.register({
           id,
           label: Effect.succeed("WSL (Ubuntu)"),
-          configResolve: Effect.succeed({
-            ...runningConfig,
-            preflightFailure: Option.some({ reason: "WSL starting", fatal: false }),
-          }),
+          configResolve: Effect.succeed(runningConfig),
+          onReady: () => Deferred.succeed(ready, undefined).pipe(Effect.asVoid),
         });
         yield* instance.start;
-        assert.equal((yield* instance.snapshot).restartScheduled, true);
+        yield* backend.started;
+        yield* Deferred.await(ready);
+        const quitFiber = yield* Effect.all(
+          [
+            instance.stop({ timeout: Duration.seconds(5) }),
+            Deferred.succeed(siblingStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(finishSibling)),
+              Effect.andThen(
+                Effect.sync(() => {
+                  siblingCompleted = true;
+                }),
+              ),
+            ),
+          ],
+          { concurrency: "unbounded" },
+        ).pipe(Effect.forkChild);
+        yield* Deferred.await(siblingStarted);
+        assert.equal(yield* Queue.take(backend.signals), "SIGTERM");
+        const unregisterFiber = yield* pool.unregister(id).pipe(Effect.forkChild);
+        yield* TestClock.adjust(Duration.seconds(5));
+        assert.equal(yield* Queue.take(backend.signals), "SIGKILL");
+        assert.isUndefined(quitFiber.pollUnsafe());
+        assert.isUndefined(unregisterFiber.pollUnsafe());
+        assert.isTrue(yield* backend.isRunning);
+        yield* TestClock.adjust(backend.killWait);
+        yield* Fiber.join(unregisterFiber);
+        yield* Deferred.succeed(finishSibling, undefined);
+        yield* Fiber.join(quitFiber);
 
-        yield* pool.unregister(id);
+        assert.isTrue(siblingCompleted);
+        assert.isFalse(yield* backend.isRunning);
+        assert.isTrue(Option.isNone((yield* instance.snapshot).activePid));
+        assert.isTrue(Option.isNone(yield* pool.get(id)));
+      }).pipe(Effect.provide(layerPool(Ref.makeUnsafe("Windows"), { backend })));
+    }),
+  );
 
-        const stopped = yield* instance.snapshot;
-        assert.equal(stopped.desiredRunning, false);
-        assert.equal(stopped.restartScheduled, false);
-        assert.equal(Option.isNone(yield* pool.get(id)), true);
-      }).pipe(Effect.provide(layerPool(Ref.makeUnsafe("Windows")))),
-    ),
+  it.effect("unregister stops the registered instance", () =>
+    Effect.gen(function* () {
+      const id = DesktopBackendPool.BackendInstanceId("wsl:Ubuntu");
+      const pool = yield* DesktopBackendPool.DesktopBackendPool;
+      const instance = yield* pool.register({
+        id,
+        label: Effect.succeed("WSL (Ubuntu)"),
+        configResolve: Effect.succeed({
+          ...runningConfig,
+          preflightFailure: Option.some({ reason: "WSL starting", fatal: false }),
+        }),
+      });
+      yield* instance.start;
+      assert.equal((yield* instance.snapshot).restartScheduled, true);
+
+      yield* pool.unregister(id);
+
+      const stopped = yield* instance.snapshot;
+      assert.equal(stopped.desiredRunning, false);
+      assert.equal(stopped.restartScheduled, false);
+      assert.equal(Option.isNone(yield* pool.get(id)), true);
+    }).pipe(Effect.provide(layerPool(Ref.makeUnsafe("Windows")))),
   );
 });

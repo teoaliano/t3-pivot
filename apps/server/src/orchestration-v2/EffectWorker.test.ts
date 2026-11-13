@@ -694,7 +694,7 @@ it.effect("puts a start held back for memory back in line without spending an at
     );
 
     yield* EffectWorker.OrchestrationEffectWorkerV2.pipe(
-      Effect.flatMap((worker) => worker.runOnce),
+      Effect.flatMap((worker) => worker.runOnce()),
       Effect.provide(layerWorker),
     );
 

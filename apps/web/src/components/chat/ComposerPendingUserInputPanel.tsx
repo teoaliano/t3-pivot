@@ -261,6 +261,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
               text={activeQuestion.question}
               cwd={cwd}
               threadRef={threadRef}
+              lineBreaks
               className={cn("pt-0.5 text-foreground/85", questionTextAlign)}
             />
             {/* Rows span the header row's width so the radios align with the question text and the shortcut column sits under the dismiss button. */}
@@ -270,20 +271,31 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                 const isOptimisticallySelected =
                   optimisticSingleSelect?.questionId === activeQuestion.id &&
                   optimisticSingleSelect.optionValue === optionValue;
+                // The preview sits outside the row: it can hold links, and a click on a single-select option advances.
                 return (
-                  <ComposerOptionRow
-                    key={`${activeQuestion.id}:${optionValue}`}
-                    label={option.label}
-                    description={option.description}
-                    selected={isOptimisticallySelected || draftSelectedOptions?.[index] === true}
-                    shortcutKey={index < 9 ? index + 1 : null}
-                    multiSelect={activeQuestion.multiSelect}
-                    textAlign={questionTextAlign}
-                    disabled={disabled || isResponding}
-                    onSelect={() => {
-                      handleOptionSelection(activeQuestion.id, optionValue);
-                    }}
-                  />
+                  <div key={`${activeQuestion.id}:${optionValue}`}>
+                    <ComposerOptionRow
+                      label={option.label}
+                      description={option.description}
+                      selected={isOptimisticallySelected || draftSelectedOptions?.[index] === true}
+                      shortcutKey={index < 9 ? index + 1 : null}
+                      multiSelect={activeQuestion.multiSelect}
+                      textAlign={questionTextAlign}
+                      disabled={disabled || isResponding}
+                      onSelect={() => {
+                        handleOptionSelection(activeQuestion.id, optionValue);
+                      }}
+                    />
+                    {option.preview ? (
+                      <ChatMarkdown
+                        text={option.preview}
+                        cwd={cwd}
+                        threadRef={threadRef}
+                        lineBreaks
+                        className="ps-9 pe-2 pb-1.5 text-xs text-foreground/70 sm:ps-8"
+                      />
+                    ) : null}
+                  </div>
                 );
               })}
             </div>
