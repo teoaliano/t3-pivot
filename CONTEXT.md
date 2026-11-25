@@ -54,16 +54,30 @@ Pivot, the name of this fork.
 
 **Teammate**:
 A thread a Pivot dispatched and supervises, working in its own worktree. It belongs to one
-Pivot at a time and stays a teammate for good. A teammate is either a **ship** (delivers
-a change) or a **scout** (investigates and leaves a report), and a scout can be promoted
-to a ship in place.
+Pivot at a time and stays a teammate for good. What it does is set by its **position**,
+as the position stood when it was dispatched.
 _Avoid_: session (see below), crewmate (firstmate's word), worker, subagent (V2's word
 for a provider-native helper or a `delegate_task` child thread; a teammate is neither)
 
+**Position**:
+A user-defined kind of teammate, such as Code reviewer, QA or Researcher: its name, when
+the Pivot should use it, its instructions, model, outcome, skills and tools. A teammate
+keeps a snapshot of its position from dispatch, so editing or deleting the position
+changes only later dispatches.
+_Avoid_: role (the brief's "your role" means something else), kind, template, profile;
+ship and scout (the fixed kinds positions replace)
+
+**Outcome**:
+What a position leaves behind: it either **reports back** (a report, nothing delivered)
+or **delivers a change** (a PR or a local merge). A position that needs the user, such as
+a product manager, reports back and asks through the Pivot.
+_Avoid_: kind, lifecycle, delivery mode (the project's PR-or-local setting)
+
 **Inline task**:
-A teammate of kind `inline`: a small change made in the Pivot workspace rather than a
-worktree of its own. One runs at a time per project. It delivers through a PR like a ship.
-_Avoid_: calling it a subagent; the Pivot's subagents only read
+A change a teammate makes in the Pivot workspace rather than a worktree of its own. The
+Pivot chooses it per task for a position that delivers a change. One runs at a time per
+project, and it delivers through a PR.
+_Avoid_: calling it a subagent (the Pivot's subagents only read), or a position
 
 **Pivot workspace**:
 The one worktree per project a Pivot keeps for inline tasks. It is set up once and reused,
